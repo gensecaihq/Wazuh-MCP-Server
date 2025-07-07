@@ -71,11 +71,11 @@ testing = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/gensecaihq/Wazuh-MCP-Server"
-Documentation = "https://github.com/gensecaihq/Wazuh-MCP-Server/blob/main/README.md"
-Repository = "https://github.com/gensecaihq/Wazuh-MCP-Server"
-"Bug Tracker" = "https://github.com/gensecaihq/Wazuh-MCP-Server/issues"
-Changelog = "https://github.com/gensecaihq/Wazuh-MCP-Server/blob/main/CHANGELOG.md"
+Homepage = "https://github.com/socfortress/Wazuh-MCP-Server"
+Documentation = "https://github.com/socfortress/Wazuh-MCP-Server/blob/main/README.md"
+Repository = "https://github.com/socfortress/Wazuh-MCP-Server"
+"Bug Tracker" = "https://github.com/socfortress/Wazuh-MCP-Server/issues"
+Changelog = "https://github.com/socfortress/Wazuh-MCP-Server/blob/main/CHANGELOG.md"
 
 [project.scripts]
 wazuh-mcp-server = "wazuh_mcp_server.main:main"

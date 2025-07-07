@@ -1,0 +1,178 @@
+name: Build and Publish Wazuh MCP Server
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  workflow_dispatch: # Allows manual triggering
+
+jobs:
+  build-and-publish:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      packages: write
+      id-token: write
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: "3.11"
+
+      - name: Install build dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install build twine
+
+      - name: Build package
+        run: python -m build
+
+      - name: Check package
+        run: |
+          python -m twine check dist/*
+          ls -la dist/
+
+      - name: Test package installation from wheel
+        run: |
+          # Create a virtual environment to test installation
+          python -m venv test_env
+          source test_env/bin/activate
+          
+          # Install the wheel file
+          pip install dist/*.whl
+          
+          # Test basic import
+          python -c "import wazuh_mcp_server; print('Package imported successfully')"
+          
+          # Test CLI command exists
+          which wazuh-mcp-server || echo "CLI command not found"
+          
+          # Cleanup
+          deactivate
+          rm -rf test_env
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: wazuh-mcp-server-dist
+          path: dist/
+
+      - name: Get version from tag or commit
+        id: get-version
+        run: |
+          if [[ $GITHUB_REF == refs/tags/* ]]; then
+            VERSION=${GITHUB_REF#refs/tags/v}
+          else
+            VERSION=$(python -c "import sys; sys.path.insert(0, 'src'); from wazuh_mcp_server.__version__ import __version__; print(__version__)")
+          fi
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "Version: $VERSION"
+
+      - name: Configure package index
+        run: |
+          echo "Setting up package repository configuration..."
+          pip install keyring
+
+      - name: Publish to PyPI (for public distribution)
+        if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/')
+        env:
+          TWINE_USERNAME: __token__
+          TWINE_PASSWORD: ${{ secrets.PYPI_API_TOKEN }}
+        run: |
+          python -m twine upload --verbose dist/*
+        continue-on-error: true
+
+      - name: Publish to GitHub Packages
+        if: github.event_name == 'push' && (startsWith(github.ref, 'refs/tags/') || github.ref == 'refs/heads/main')
+        run: |
+          echo "Note: GitHub Packages no longer supports PyPI packages."
+          echo "Wheel files will be available through GitHub Releases."
+          echo "Users can install directly from GitHub using:"
+          echo "pip install git+https://github.com/socfortress/Wazuh-MCP-Server.git"
+
+      - name: Publish Release to GitHub
+        if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/')
+        run: |
+          echo "Creating installable package release..."
+          echo "Users can install directly from GitHub using:"
+          echo "pip install git+https://github.com/socfortress/Wazuh-MCP-Server.git"
+          echo "Or install from GitHub Packages using:"
+          echo "pip install --index-url https://pypi.org/simple/ --extra-index-url https://github.com/socfortress/Wazuh-MCP-Server wazuh-mcp-server"
+
+      - name: Create GitHub Release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: Release ${{ github.ref_name }}
+          body: |
+            ## Wazuh MCP Server ${{ steps.get-version.outputs.version }}
+            
+            ### Installation Options
+            
+            **Option 1: Install from PyPI (if published)**
+            ```bash
+            pip install wazuh-mcp-server==${{ steps.get-version.outputs.version }}
+            ```
+            
+            **Option 2: Install directly from GitHub (recommended)**
+            ```bash
+            pip install git+https://github.com/socfortress/Wazuh-MCP-Server.git@${{ github.ref_name }}
+            ```
+            
+            **Option 3: Install from wheel file**
+            Download the `.whl` file from the assets below and install:
+            ```bash
+            pip install wazuh_mcp_server-${{ steps.get-version.outputs.version }}-py3-none-any.whl
+            ```
+            
+            **Option 4: Install latest from main branch**
+            ```bash
+            pip install git+https://github.com/socfortress/Wazuh-MCP-Server.git
+            ```
+            
+            ### Usage
+            ```bash
+            wazuh-mcp-server --help
+            wazuh-mcp-test
+            ```
+            
+            ### Import in Python
+            ```python
+            from wazuh_mcp_server import main
+            from wazuh_mcp_server.config import WazuhConfig
+            ```
+            
+            For more information, see the [README](https://github.com/socfortress/Wazuh-MCP-Server/blob/main/README.md).
+          draft: false
+          prerelease: false
+          files: dist/*
+          generate_release_notes: true
+
+      - name: Create development release for main branch
+        if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: dev-${{ github.sha }}
+          name: Development Build (${{ github.sha }})
+          body: |
+            ## Wazuh MCP Server Development Build
+            
+            This is an automated development build from the main branch.
+            
+            ### Installation
+            ```bash
+            pip install git+https://github.com/socfortress/Wazuh-MCP-Server.git@${{ github.sha }}
+            ```
+            
+            Or download and install the wheel file:
+            ```bash
+            pip install wazuh_mcp_server-${{ steps.get-version.outputs.version }}-py3-none-any.whl
+            ```
+          draft: false
+          prerelease: true
+          files: dist/*

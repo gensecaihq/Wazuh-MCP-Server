@@ -37,9 +37,26 @@ A production-grade Model Context Protocol (MCP) server that integrates Wazuh SIE
 
 ### Installation
 
+#### Option 1: Install from PyPI (Recommended)
+```bash
+pip install wazuh-mcp-server
+```
+
+#### Option 2: Install directly from GitHub
+```bash
+pip install git+https://github.com/socfortress/Wazuh-MCP-Server.git
+```
+
+#### Option 3: Install from GitHub Release
+Download the `.whl` file from the [latest release](https://github.com/socfortress/Wazuh-MCP-Server/releases) and install:
+```bash
+pip install wazuh_mcp_server-<version>-py3-none-any.whl
+```
+
+#### Option 4: Development Installation
 1. **Clone the repository**
    ```bash
-   git clone https://github.com/gensecaihq/Wazuh-MCP-Server.git
+   git clone https://github.com/socfortress/Wazuh-MCP-Server.git
    cd Wazuh-MCP-Server
    ```
 
@@ -47,6 +64,48 @@ A production-grade Model Context Protocol (MCP) server that integrates Wazuh SIE
    ```bash
    python3 install.py
    ```
+
+## 📦 Python Package Installation
+
+### **Option 1: Install as a Package**
+
+For using Wazuh MCP Server in your own Python applications:
+
+```bash
+# Install from PyPI (when published)
+pip install wazuh-mcp-server
+
+# Or install from source
+pip install git+https://github.com/gensecaihq/Wazuh-MCP-Server.git
+```
+
+**Quick Start Example:**
+```python
+import asyncio
+from wazuh_mcp_server import create_client
+
+async def main():
+    # Configure via environment variables or .env file
+    client = await create_client()
+    
+    # Get recent alerts
+    alerts = await client.get_alerts(limit=10)
+    print(f"Found {len(alerts['alerts'])} alerts")
+    
+    # Analyze threats
+    threats = await client.analyze_threats(time_range=3600)
+    print(f"Risk level: {threats['risk_assessment']['risk_level']}")
+    
+    await client.close()
+
+asyncio.run(main())
+```
+
+📖 **See [PACKAGE_USAGE.md](PACKAGE_USAGE.md) for complete API documentation and examples.**
+
+### **Option 2: MCP Server Installation**
+
+For direct integration with Claude Desktop and MCP protocol:
 
 ## 🔧 **Post-Installation Configuration**
 

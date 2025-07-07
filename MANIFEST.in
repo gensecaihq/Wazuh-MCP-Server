@@ -1,0 +1,30 @@
+include README.md
+include LICENSE
+include requirements.txt
+include requirements-dev.txt
+include pyproject.toml
+include .env.example
+
+# Include documentation
+recursive-include docs *.md *.rst *.txt
+
+# Include test files for development installations
+recursive-include tests *.py
+
+# Include any configuration files
+include src/wazuh_mcp_server/*.json
+include src/wazuh_mcp_server/*.yml
+include src/wazuh_mcp_server/*.yaml
+
+# Exclude compiled Python files
+global-exclude *.pyc
+global-exclude *.pyo
+global-exclude *.pyd
+global-exclude __pycache__
+
+# Exclude development and CI files
+exclude .gitignore
+exclude .pre-commit-config.yaml
+exclude tox.ini
+exclude .github
+recursive-exclude .github *
