@@ -68,6 +68,54 @@ def print_step(step: str):
     print(f"\n{Colors.MAGENTA}{'▶' * 3} {step}{Colors.END}")
 
 
+def detect_fedora() -> bool:
+    """Detect if running on Fedora."""
+    try:
+        with open('/etc/os-release', 'r') as f:
+            content = f.read().lower()
+            return 'fedora' in content or 'red hat' in content
+    except:
+        return 'fedora' in platform.platform().lower()
+
+
+def check_and_fix_pydantic() -> bool:
+    """Check Pydantic version and handle Fedora-specific issues."""
+    is_fedora = detect_fedora()
+    
+    try:
+        import pydantic
+        version = getattr(pydantic, '__version__', getattr(pydantic, 'VERSION', 'unknown'))
+        
+        if is_fedora:
+            print_info(f"🐧 Fedora detected with Pydantic {version}")
+            if version.startswith('2'):
+                print_success("✅ Pydantic V2 on Fedora - using compatibility mode")
+                print_info("💡 For optimal performance, you can install V1: pip install 'pydantic>=1.10.0,<2.0.0'")
+            else:
+                print_success("✅ Pydantic V1 on Fedora - native mode")
+        else:
+            print_success(f"✅ Pydantic {version} detected on {platform.system()}")
+            
+    except ImportError:
+        print_warning("⚠️  Pydantic not found. Installing...")
+        
+        if is_fedora:
+            # Try system package first on Fedora
+            try:
+                print_info("🐧 Trying Fedora system package...")
+                subprocess.check_call(['sudo', 'dnf', 'install', '-y', 'python3-pydantic'])
+                print_success("✅ Installed via dnf")
+                return True
+            except (subprocess.CalledProcessError, FileNotFoundError):
+                print_info("📦 System package failed, using pip...")
+        
+        # Fallback to pip
+        subprocess.check_call([sys.executable, '-m', 'pip', 'install', 'pydantic>=1.10.0'])
+        print_success("✅ Installed via pip")
+    
+    return True
+
+
 def detect_system_info() -> Dict[str, str]:
     """Detect comprehensive system information."""
     system_info = {
@@ -78,6 +126,12 @@ def detect_system_info() -> Dict[str, str]:
         'platform': platform.platform(),
         'processor': platform.processor() or 'Unknown',
     }
+    
+    # Detect if we're on Fedora specifically
+    if system_info['os'] == 'Linux':
+        system_info['is_fedora'] = detect_fedora()
+    else:
+        system_info['is_fedora'] = False
     
     # Detect package manager
     if system_info['os'] == 'Linux':
@@ -601,6 +655,7 @@ def main() -> int:
     setup_steps = [
         ("Checking Python compatibility", lambda: check_python_version()),
         ("Checking system dependencies", lambda: check_system_dependencies(system_info)),
+        ("Checking Pydantic compatibility", lambda: check_and_fix_pydantic()),
         ("Setting up virtual environment", lambda: create_virtual_environment(system_info)),
     ]
     

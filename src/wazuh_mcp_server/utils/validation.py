@@ -4,7 +4,8 @@ import re
 import ipaddress
 import hashlib
 from typing import Any, Dict, List, Optional, Union
-from pydantic import BaseModel, Field, validator
+# Use Fedora-compatible layer instead of direct pydantic import
+from .pydantic_compat import BaseModel, Field, validator
 # Security manager functionality moved to error recovery system
 
 
