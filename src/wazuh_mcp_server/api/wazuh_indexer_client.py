@@ -128,7 +128,7 @@ class WazuhIndexerClient:
                             "recommendations": detection_results.get("recommendations")
                         }
                     })
-            except Exception as e:
+            except Exception:
                 logger.debug(f"SSL auto-detection failed: {e}")
         
         # Store SSL config for session creation

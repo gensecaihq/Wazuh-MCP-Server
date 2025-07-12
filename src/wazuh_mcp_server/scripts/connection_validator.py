@@ -170,7 +170,7 @@ class ConnectionValidator:
                     return result
         except ssl.SSLCertVerificationError:
             result['self_signed'] = True
-        except Exception as e:
+        except Exception:
             result['error'] = str(e)
         
         # Test with disabled SSL verification
@@ -184,7 +184,7 @@ class ConnectionValidator:
                     result['success'] = True
                     result['ssl_valid'] = False
                     return result
-        except Exception as e:
+        except Exception:
             result['error'] = str(e)
         
         return result
@@ -219,7 +219,7 @@ class ConnectionValidator:
                     else:
                         result['error'] = f"Authentication failed: HTTP {response.status}"
         
-        except Exception as e:
+        except Exception:
             result['error'] = str(e)
         
         return result
@@ -254,7 +254,7 @@ class ConnectionValidator:
                     else:
                         result['error'] = f"Cluster health check failed: HTTP {response.status}"
         
-        except Exception as e:
+        except Exception:
             result['error'] = str(e)
         
         return result

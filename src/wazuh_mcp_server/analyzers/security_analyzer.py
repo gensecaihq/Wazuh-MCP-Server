@@ -530,7 +530,8 @@ class SecurityAnalyzer:
                 try:
                     timestamp = datetime.fromisoformat(timestamp_str.replace('Z', '+00:00'))
                     agent_timeline.append((timestamp, agent_id))
-                except:
+                except (ValueError, TypeError, AttributeError):
+                    # Skip invalid timestamp formats
                     continue
         
         if len(agent_timeline) < 3:

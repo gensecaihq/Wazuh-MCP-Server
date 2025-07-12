@@ -81,7 +81,7 @@ async def test_connection():
                 else:
                     print("  ℹ Using Server API for alerts")
                     
-            except Exception as e:
+            except Exception:
                 print(f"⚠ Alert query failed: {str(e)}")
             
             print(f"\n🎉 Connection test successful!")

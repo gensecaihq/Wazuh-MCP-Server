@@ -237,7 +237,8 @@ class WazuhAPIClient:
                             response_data = None
                             try:
                                 response_data = await retry_response.json()
-                            except:
+                            except (ValueError, TypeError, aiohttp.ContentTypeError):
+                                # JSON parsing failed, continue with None response_data
                                 pass
                             handle_api_error(retry_response.status, response_data)
                         
