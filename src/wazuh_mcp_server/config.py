@@ -4,9 +4,9 @@ import os
 import logging
 from dataclasses import dataclass
 from enum import Enum
-from typing import Optional
+from typing import Any, Optional
 from pathlib import Path
-from pydantic import BaseModel, validator, Field
+from .utils.pydantic_compat import BaseModel, Field, validator
 from dotenv import load_dotenv
 
 # Import cross-platform utilities

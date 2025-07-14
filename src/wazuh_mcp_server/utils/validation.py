@@ -3,9 +3,11 @@
 import re
 import ipaddress
 import hashlib
+import json
 from typing import Any, Dict, List, Optional, Union
-from pydantic import BaseModel, Field, validator
-# Security manager functionality moved to error recovery system
+
+# Use Fedora-compatible layer instead of direct pydantic import
+from .pydantic_compat import BaseModel, Field, validator
 
 
 class ValidationError(Exception):
@@ -15,6 +17,7 @@ class ValidationError(Exception):
 
 class AlertQuery(BaseModel):
     """Validated alert query parameters."""
+    
     limit: int = Field(default=100, ge=1, le=10000, description="Maximum number of alerts")
     offset: int = Field(default=0, ge=0, description="Query offset")
     level: Optional[int] = Field(default=None, ge=1, le=15, description="Minimum alert level")
@@ -34,6 +37,7 @@ class AlertQuery(BaseModel):
 
 class AgentQuery(BaseModel):
     """Validated agent query parameters."""
+    
     agent_id: Optional[str] = Field(default=None, description="Specific agent ID")
     status: Optional[str] = Field(default=None, description="Agent status filter")
     
@@ -57,6 +61,7 @@ class AgentQuery(BaseModel):
 
 class ThreatAnalysisQuery(BaseModel):
     """Validated threat analysis parameters."""
+    
     category: str = Field(default="all", description="Threat category")
     time_range: int = Field(default=3600, ge=300, le=86400, description="Time range in seconds")
     confidence_threshold: float = Field(default=0.5, ge=0.0, le=1.0, description="Confidence threshold")
@@ -75,6 +80,7 @@ class ThreatAnalysisQuery(BaseModel):
 
 class IPAddress(BaseModel):
     """Validated IP address."""
+    
     ip: str = Field(..., description="IP address to validate")
     
     @validator('ip')
@@ -93,11 +99,12 @@ class IPAddress(BaseModel):
 
 class FileHash(BaseModel):
     """Validated file hash."""
+    
     hash_value: str = Field(..., description="File hash to validate")
     hash_type: Optional[str] = Field(default=None, description="Hash type (md5, sha1, sha256)")
     
     @validator('hash_value')
-    def validate_hash(cls, v, values):
+    def validate_hash(cls, v):
         """Validate hash format."""
         # Remove any whitespace
         v = v.strip().lower()
@@ -107,13 +114,8 @@ class FileHash(BaseModel):
             raise ValueError("Hash must contain only hexadecimal characters")
         
         # Validate length and determine hash type
-        if len(v) == 32:
-            values['hash_type'] = "md5"
-        elif len(v) == 40:
-            values['hash_type'] = "sha1"
-        elif len(v) == 64:
-            values['hash_type'] = "sha256"
-        else:
+        hash_length = len(v)
+        if hash_length not in [32, 40, 64]:
             raise ValueError("Hash length must be 32 (MD5), 40 (SHA1), or 64 (SHA256) characters")
         
         return v
@@ -135,47 +137,79 @@ class FileHash(BaseModel):
 def validate_alert_query(params: Dict[str, Any]) -> AlertQuery:
     """Validate and sanitize alert query parameters with security checks."""
     try:
-        # Apply security validation
-        # Security validation moved to error recovery system
-        # context = SecurityContext(security_level=SecurityLevel.MEDIUM)
-        # validated_params = security_manager.validate_wazuh_query_params(params)
-        validated_params = params  # Direct validation for now
+        # Sanitize input parameters
+        sanitized_params = {}
+        for key, value in params.items():
+            if isinstance(value, str):
+                sanitized_params[key] = sanitize_string(value, max_length=100)
+            else:
+                sanitized_params[key] = value
         
-        return AlertQuery(**validated_params)
+        return AlertQuery(**sanitized_params)
+    except ValueError as e:
+        raise ValidationError(f"Invalid alert query parameters: {str(e)}") from e
     except Exception as e:
-        raise ValidationError(f"Invalid alert query parameters: {str(e)}")
+        raise ValidationError(f"Unexpected error validating alert query: {str(e)}") from e
 
 
 def validate_agent_query(params: Dict[str, Any]) -> AgentQuery:
     """Validate and sanitize agent query parameters."""
     try:
-        return AgentQuery(**params)
+        # Sanitize input parameters
+        sanitized_params = {}
+        for key, value in params.items():
+            if isinstance(value, str):
+                sanitized_params[key] = sanitize_string(value, max_length=100)
+            else:
+                sanitized_params[key] = value
+                
+        return AgentQuery(**sanitized_params)
+    except ValueError as e:
+        raise ValidationError(f"Invalid agent query parameters: {str(e)}") from e
     except Exception as e:
-        raise ValidationError(f"Invalid agent query parameters: {str(e)}")
+        raise ValidationError(f"Unexpected error validating agent query: {str(e)}") from e
 
 
 def validate_threat_analysis(params: Dict[str, Any]) -> ThreatAnalysisQuery:
     """Validate and sanitize threat analysis parameters."""
     try:
-        return ThreatAnalysisQuery(**params)
+        # Sanitize input parameters
+        sanitized_params = {}
+        for key, value in params.items():
+            if isinstance(value, str):
+                sanitized_params[key] = sanitize_string(value, max_length=100)
+            else:
+                sanitized_params[key] = value
+                
+        return ThreatAnalysisQuery(**sanitized_params)
+    except ValueError as e:
+        raise ValidationError(f"Invalid threat analysis parameters: {str(e)}") from e
     except Exception as e:
-        raise ValidationError(f"Invalid threat analysis parameters: {str(e)}")
+        raise ValidationError(f"Unexpected error validating threat analysis: {str(e)}") from e
 
 
 def validate_ip_address(ip: str) -> IPAddress:
     """Validate IP address."""
     try:
-        return IPAddress(ip=ip)
+        # Sanitize input
+        sanitized_ip = sanitize_string(ip, max_length=45)  # Max IPv6 length
+        return IPAddress(ip=sanitized_ip)
+    except ValueError as e:
+        raise ValidationError(f"Invalid IP address: {str(e)}") from e
     except Exception as e:
-        raise ValidationError(f"Invalid IP address: {str(e)}")
+        raise ValidationError(f"Unexpected error validating IP address: {str(e)}") from e
 
 
 def validate_file_hash(hash_value: str) -> FileHash:
     """Validate file hash."""
     try:
-        return FileHash(hash_value=hash_value)
+        # Sanitize input
+        sanitized_hash = sanitize_string(hash_value, max_length=64)  # Max SHA256 length
+        return FileHash(hash_value=sanitized_hash)
+    except ValueError as e:
+        raise ValidationError(f"Invalid file hash: {str(e)}") from e
     except Exception as e:
-        raise ValidationError(f"Invalid file hash: {str(e)}")
+        raise ValidationError(f"Unexpected error validating file hash: {str(e)}") from e
 
 
 def sanitize_string(input_str: str, max_length: int = 1000) -> str:
@@ -183,8 +217,18 @@ def sanitize_string(input_str: str, max_length: int = 1000) -> str:
     if not input_str:
         return ""
     
+    # Convert to string if not already
+    if not isinstance(input_str, str):
+        input_str = str(input_str)
+    
     # Remove null bytes and control characters
     sanitized = re.sub(r'[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]', '', input_str)
+    
+    # Remove potentially dangerous characters for command injection
+    sanitized = re.sub(r'[;&|`$<>]', '', sanitized)
+    
+    # Escape single and double quotes
+    sanitized = sanitized.replace("'", "\\'").replace('"', '\\"')
     
     # Limit length
     if len(sanitized) > max_length:
@@ -195,13 +239,33 @@ def sanitize_string(input_str: str, max_length: int = 1000) -> str:
 
 def validate_json_payload(payload: Any, max_size: int = 10000) -> Dict[str, Any]:
     """Validate JSON payload size and structure."""
+    if payload is None:
+        raise ValidationError("Payload cannot be None")
+        
     if not isinstance(payload, dict):
         raise ValidationError("Payload must be a JSON object")
     
-    # Check payload size (approximate)
-    import json
-    payload_str = json.dumps(payload)
-    if len(payload_str) > max_size:
-        raise ValidationError(f"Payload too large (max {max_size} bytes)")
+    try:
+        # Check payload size (approximate)
+        payload_str = json.dumps(payload)
+        if len(payload_str) > max_size:
+            raise ValidationError(f"Payload too large (max {max_size} bytes)")
+    except (TypeError, ValueError) as e:
+        raise ValidationError(f"Invalid JSON payload: {str(e)}") from e
     
-    return payload
+    # Sanitize string values in payload
+    sanitized_payload = {}
+    for key, value in payload.items():
+        if isinstance(value, str):
+            sanitized_payload[key] = sanitize_string(value)
+        elif isinstance(value, dict):
+            sanitized_payload[key] = validate_json_payload(value, max_size=max_size//10)
+        elif isinstance(value, list):
+            sanitized_payload[key] = [
+                sanitize_string(item) if isinstance(item, str) else item 
+                for item in value
+            ]
+        else:
+            sanitized_payload[key] = value
+    
+    return sanitized_payload

@@ -58,7 +58,7 @@ class WazuhClientManager:
                 self.wazuh_version = version_str
                 logger.info(f"Detected Wazuh version: {version_str}")
                 return version_str
-        except Exception as e:
+        except Exception:
             logger.warning(f"Could not detect Wazuh version: {str(e)}")
         return None
     
@@ -75,7 +75,7 @@ class WazuhClientManager:
                 current_version = version.parse(version_match.group(1))
                 min_version = version.parse("4.8.0")
                 return current_version >= min_version
-        except Exception as e:
+        except Exception:
             logger.warning(f"Could not parse version {self.wazuh_version}: {str(e)}")
         
         return self.config.use_indexer_for_alerts
@@ -234,7 +234,7 @@ class WazuhClientManager:
         if self.indexer_client:
             try:
                 health_data["indexer_api"] = await self.indexer_client.health_check()
-            except Exception as e:
+            except Exception:
                 health_data["indexer_api"] = {"status": "unhealthy", "error": str(e)}
         
         # Determine overall status

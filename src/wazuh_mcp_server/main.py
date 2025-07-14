@@ -44,7 +44,7 @@ class WazuhMCPServer:
         # Initialize configuration first
         try:
             self.config = WazuhConfig.from_env()
-        except Exception as e:
+        except Exception:
             raise ConfigurationError(f"Failed to load configuration: {str(e)}") from e
         
         # Setup logging with configuration
@@ -95,7 +95,7 @@ class WazuhMCPServer:
                     self.logger.info(f"Connected to Wazuh {version}")
                 else:
                     self.logger.warning("Could not detect Wazuh version")
-        except Exception as e:
+        except Exception:
             self.logger.error(f"Failed to initialize connections: {str(e)}")
     
     def _setup_handlers(self):
@@ -743,7 +743,7 @@ class WazuhMCPServer:
                 try:
                     stats = await self.api_client.get_agent_stats(agent_id)
                     health["statistics"] = stats.get("data", {})
-                except Exception as e:
+                except Exception:
                     health["statistics_error"] = str(e)
             
             return [types.TextContent(
@@ -792,7 +792,7 @@ class WazuhMCPServer:
                 vuln_data = await self.api_client.get_agent_vulnerabilities(agent["id"])
                 agent_vulns = vuln_data.get("data", {}).get("affected_items", [])
                 vulnerabilities.extend(agent_vulns)
-            except Exception as e:
+            except Exception:
                 self.logger.warning(f"Could not get vulnerabilities for agent {agent['id']}: {str(e)}")
         
         # Perform compliance assessment
@@ -926,7 +926,7 @@ class WazuhMCPServer:
                             total_steps, 
                             f"Analyzing vulnerabilities... ({i+1}/{len(active_agents)} agents processed)"
                         )
-                except Exception as e:
+                except Exception:
                     self.logger.warning(f"Could not get vulnerabilities for agent {agent['id']}: {str(e)}")
         
         # Final step: Perform comprehensive risk assessment
@@ -1330,7 +1330,7 @@ class WazuhMCPServer:
                                 context_data += f"- {alert.get('timestamp')}: {alert.get('rule', {}).get('description')} (Level: {alert.get('rule', {}).get('level')})\n"
                 else:
                     context_data = f"\n### Alert ID {alert_id} not found in recent alerts."
-            except Exception as e:
+            except Exception:
                 context_data = f"\n### Error fetching alert context: {str(e)}"
         
         prompt_text = f"""You are a cybersecurity analyst investigating a security incident from Wazuh SIEM. Please analyze the following security alert and provide a comprehensive incident analysis.
@@ -1414,7 +1414,7 @@ Please provide actionable insights and prioritize recommendations based on risk 
 ### Recent Threat Landscape (Last 50 alerts):
 {chr(10).join([f"- {rule}: {count} occurrences" for rule, count in top_rules])}
 """
-        except Exception as e:
+        except Exception:
             context_data = f"\n### Error fetching threat context: {str(e)}"
         
         prompt_text = f"""You are a threat hunter developing proactive hunting queries for a Wazuh SIEM environment. Generate comprehensive threat hunting queries and strategies.
@@ -1499,7 +1499,7 @@ Please provide actionable hunting queries and methodologies tailored to the {thr
 - **Recent Alerts**: {len(alerts)}
 - **High Severity Alerts**: {len([a for a in alerts if a.get('rule', {}).get('level', 0) >= 10])}
 """
-        except Exception as e:
+        except Exception:
             context_data = f"\n### Error fetching environment context: {str(e)}"
         
         framework_details = {
@@ -1627,7 +1627,7 @@ Please provide a detailed compliance assessment with actionable recommendations 
 - **Active Agents**: {len([a for a in agents if a.get('status') == 'active'])}
 - **Agent Coverage**: {len([a for a in agents if a.get('status') == 'active']) / len(agents) * 100 if agents else 0:.1f}%
 """
-        except Exception as e:
+        except Exception:
             context_data = f"\n### Error fetching metrics: {str(e)}"
         
         audience_details = {
@@ -1747,7 +1747,7 @@ Please generate a comprehensive, professional security report that is appropriat
 - **High Vulnerabilities**: {high_vulns}
 - **Agents Analyzed**: {len(agents)}
 """
-        except Exception as e:
+        except Exception:
             context_data = f"\n### Error fetching vulnerability data: {str(e)}"
         
         prompt_text = f"""You are a vulnerability management specialist developing a risk-based prioritization strategy for security vulnerabilities. Create a comprehensive framework for prioritizing remediation efforts.
@@ -1849,7 +1849,7 @@ Please provide a comprehensive vulnerability prioritization strategy that balanc
 """
             else:
                 context_data = f"\n### Incident ID {incident_id} not found in recent alerts. Proceeding with general forensic analysis framework."
-        except Exception as e:
+        except Exception:
             context_data = f"\n### Error fetching incident context: {str(e)}"
         
         analysis_levels = {
@@ -1960,7 +1960,7 @@ Please conduct a thorough forensic analysis that follows industry best practices
                     }
                 )
                 self.logger.info(f"Sent critical alert notification for alert {alert.get('id')}")
-        except Exception as e:
+        except Exception:
             self.logger.error(f"Failed to send critical alert notification: {str(e)}")
     
     async def _send_agent_status_notification(self, agent_id: str, status: str, previous_status: str):
@@ -1978,7 +1978,7 @@ Please conduct a thorough forensic analysis that follows industry best practices
                     }
                 )
                 self.logger.info(f"Sent agent status notification for agent {agent_id}: {previous_status} -> {status}")
-        except Exception as e:
+        except Exception:
             self.logger.error(f"Failed to send agent status notification: {str(e)}")
     
     async def _send_system_health_notification(self, health_status: str, details: dict):
@@ -1994,7 +1994,7 @@ Please conduct a thorough forensic analysis that follows industry best practices
                 }
             )
             self.logger.info(f"Sent system health notification: {health_status}")
-        except Exception as e:
+        except Exception:
             self.logger.error(f"Failed to send system health notification: {str(e)}")
     
     async def _report_progress(self, current: int, total: int, message: str):
@@ -2012,7 +2012,7 @@ Please conduct a thorough forensic analysis that follows industry best practices
                 }
             )
             self.logger.debug(f"Progress reported: {progress:.1f}% - {message}")
-        except Exception as e:
+        except Exception:
             self.logger.error(f"Failed to report progress: {str(e)}")
     
     async def run(self):
@@ -2039,7 +2039,7 @@ Please conduct a thorough forensic analysis that follows industry best practices
                     self.logger.info("Wazuh API connection verified successfully")
             except asyncio.TimeoutError:
                 self.logger.warning("Wazuh API health check timed out, continuing anyway")
-            except Exception as e:
+            except Exception:
                 self.logger.warning(f"Wazuh API health check failed: {str(e)}, continuing anyway")
             
             init_options = InitializationOptions(
@@ -2068,7 +2068,7 @@ Please conduct a thorough forensic analysis that follows industry best practices
             try:
                 if api_client_entered:
                     await self.api_client.__aexit__(None, None, None)
-            except Exception as e:
+            except Exception:
                 self.logger.error(f"Error during cleanup: {str(e)}")
             self.logger.info("Server shutdown completed")
 
