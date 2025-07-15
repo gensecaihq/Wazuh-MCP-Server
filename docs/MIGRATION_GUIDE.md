@@ -1,76 +1,218 @@
-# Migration Guide: v1.0.0 → v2.0.0
+# Migration Guide
 
-**🚀 Upgrading to Wazuh MCP Server v2.0.0**
+## Overview
 
-This guide helps you migrate from the stable v1.0.0 release to the new v2.0.0 version with minimal disruption.
+This guide helps you migrate from previous versions of Wazuh MCP Server to take advantage of new features and improvements while maintaining backward compatibility.
 
----
+## Migration Paths
 
-## 📋 **Migration Overview**
+### From v2.0.0 to v3.0.0 (Current)
 
-### **What Changed**
-- **Script Locations**: All scripts moved from root to `scripts/` directory
-- **New Features**: 12 additional tools and AI-powered enhancements
-- **Repository Structure**: Better organized documentation and examples
-- **Feature Flags**: All new features disabled by default (opt-in)
+#### Pre-Migration Checklist
+- [ ] Backup your current configuration
+- [ ] Test new installation in development environment
+- [ ] Verify Wazuh API compatibility
+- [ ] Check Docker environment if using containerization
+- [ ] Review security requirements for OAuth2 setup
 
-### **Backward Compatibility**
-✅ **Good News**: Core functionality remains unchanged  
-✅ **Existing Tools**: All 11 original tools work identically  
-✅ **Configuration**: Existing `.env` files work without changes  
-⚠️ **Script Paths**: Claude Desktop config needs updating  
+#### Migration Steps
 
----
+1. **Backup Current Installation**
+   ```bash
+   cp -r /path/to/current/installation /path/to/backup
+   ```
 
-## 🛠️ **Automatic Migration (Recommended)**
+2. **Install v3.0.0**
+   ```bash
+   git clone https://github.com/gensecaihq/Wazuh-MCP-Server.git
+   cd Wazuh-MCP-Server
+   python3 scripts/install.py
+   ```
 
-### **Step 1: Update Code**
-```bash
-cd /path/to/Wazuh-MCP-Server
-git pull origin main
-```
+3. **Migrate Configuration**
+   ```bash
+   # Copy your existing .env file
+   cp /path/to/backup/.env .
+   
+   # Add new v3.0.0 configuration options
+   cat >> .env << 'EOF'
+   # v3.0.0 Remote MCP Configuration
+   MCP_SERVER_HOST=0.0.0.0
+   MCP_SERVER_PORT=8443
+   MCP_TRANSPORT=sse
+   
+   # OAuth2 Authentication (optional for remote access)
+   OAUTH_ENABLED=false
+   JWT_SECRET_KEY=your-secret-key
+   OAUTH_CLIENT_ID=wazuh-mcp-client
+   OAUTH_CLIENT_SECRET=your-client-secret
+   
+   # Monitoring
+   ENABLE_METRICS=true
+   METRICS_PORT=9090
+   EOF
+   ```
 
-### **Step 2: Run Migration Script**
-```bash
-# The script will automatically:
-# - Update Claude Desktop configuration
-# - Set proper script permissions  
-# - Create backup files
-# - Validate the migration
-./scripts/migrate_v1_to_v2.sh
-```
+4. **Choose Your Deployment Method**
+   
+   **Option A: Keep stdio mode (no changes needed)**
+   ```bash
+   # Continue using stdio mode as before
+   python3 -m wazuh_mcp_server.main --stdio
+   ```
+   
+   **Option B: Enable remote MCP server**
+   ```bash
+   # Start remote server
+   python3 -m wazuh_mcp_server.remote_server --transport sse
+   ```
+   
+   **Option C: Deploy with Docker**
+   ```bash
+   # Use Docker Compose for production
+   docker-compose up -d
+   ```
 
-### **Step 3: Restart Claude Desktop**
-- Close Claude Desktop completely
-- Reopen Claude Desktop
-- Test with: "Show me recent security alerts"
+5. **Test Migration**
+   ```bash
+   # Run validation script
+   python scripts/validate_setup.py
+   
+   # Test remote server (if enabled)
+   curl -f http://localhost:8443/health
+   ```
 
----
+#### New Features in v3.0.0
+- **Remote MCP Server**: HTTP/SSE transport for remote access
+- **OAuth2 Authentication**: Enterprise-grade security with JWT tokens
+- **Docker Deployment**: Production-ready containerization
+- **High Availability**: Load balancing and auto-recovery
+- **Production Monitoring**: Prometheus + Grafana stack
+- **Security Hardening**: Audit logging and rate limiting
 
-## 🔧 **Manual Migration**
+#### Breaking Changes
+- None - v3.0.0 is fully backward compatible with v2.0.0
+- All existing stdio configurations continue to work unchanged
 
-If you prefer to migrate manually or the automatic script doesn't work:
+### From v1.0.0 to v3.0.0 (Direct Migration)
 
-### **1. Update Claude Desktop Configuration**
+#### Pre-Migration Checklist
+- [ ] Backup your current configuration
+- [ ] Test new installation in development environment
+- [ ] Verify Wazuh API compatibility
+- [ ] Check Python version compatibility (3.9+)
+- [ ] Review new security features
 
-**File Location**:
-- **macOS**: `~/Library/Application Support/Claude/claude_desktop_config.json`
-- **Linux**: `~/.config/Claude/claude_desktop_config.json`  
-- **Windows**: `%APPDATA%\Claude\claude_desktop_config.json`
+#### Migration Steps
 
-**Before (v1.0.0)**:
-```json
-{
-  "mcpServers": {
-    "wazuh": {
-      "command": "/path/to/Wazuh-MCP-Server/mcp_wrapper.sh",
-      "args": ["--stdio"]
-    }
-  }
-}
-```
+1. **Backup Current Installation**
+   ```bash
+   cp -r /path/to/current/installation /path/to/backup
+   ```
 
-**After (v2.0.0)**:
+2. **Install v3.0.0**
+   ```bash
+   git clone https://github.com/gensecaihq/Wazuh-MCP-Server.git
+   cd Wazuh-MCP-Server
+   python3 scripts/install.py
+   ```
+
+3. **Migrate Configuration**
+   ```bash
+   # Copy your existing .env file
+   cp /path/to/backup/.env .
+   
+   # Add new configuration options
+   cat >> .env << 'EOF'
+   # v2.0.0 Features
+   ENABLE_PHASE5_ENHANCEMENTS=true
+   CACHE_TTL=300
+   CONTEXT_AGGREGATION_DEPTH=3
+   
+   # v3.0.0 Features
+   MCP_SERVER_HOST=0.0.0.0
+   MCP_SERVER_PORT=8443
+   MCP_TRANSPORT=sse
+   OAUTH_ENABLED=false
+   ENABLE_METRICS=true
+   METRICS_PORT=9090
+   EOF
+   ```
+
+4. **Test Migration**
+   ```bash
+   # Run validation script
+   python scripts/validate_setup.py
+   
+   # Test all new features
+   python scripts/test_v3_features.py
+   ```
+
+#### New Features Gained
+- **All v2.0.0 features**: 12 additional tools, Phase 5 enhancements, factory architecture
+- **All v3.0.0 features**: Remote MCP, OAuth2, Docker deployment, monitoring
+
+### From v1.0.0 to v2.0.0 (Legacy)
+
+#### Automatic Migration (Recommended)
+
+1. **Update Code**
+   ```bash
+   cd /path/to/Wazuh-MCP-Server
+   git pull origin main
+   ```
+
+2. **Run Migration Script**
+   ```bash
+   ./scripts/migrate_v1_to_v2.sh
+   ```
+
+3. **Restart Claude Desktop**
+   - Close Claude Desktop completely
+   - Reopen Claude Desktop
+   - Test with: "Show me recent security alerts"
+
+#### Manual Migration
+
+1. **Update Claude Desktop Configuration**
+   
+   **Before (v1.0.0)**:
+   ```json
+   {
+     "mcpServers": {
+       "wazuh": {
+         "command": "/path/to/Wazuh-MCP-Server/mcp_wrapper.sh",
+         "args": ["--stdio"]
+       }
+     }
+   }
+   ```
+
+   **After (v2.0.0)**:
+   ```json
+   {
+     "mcpServers": {
+       "wazuh": {
+         "command": "/path/to/Wazuh-MCP-Server/scripts/mcp_wrapper.sh",
+         "args": ["--stdio"]
+       }
+     }
+   }
+   ```
+
+2. **Update Script Permissions**
+   ```bash
+   cd /path/to/Wazuh-MCP-Server
+   chmod +x scripts/mcp_wrapper.sh
+   chmod +x scripts/test_wrapper.sh
+   ```
+
+## Claude Desktop Configuration Migration
+
+### Stdio Mode (No Changes Required)
+
+All existing configurations continue to work:
+
 ```json
 {
   "mcpServers": {
@@ -82,175 +224,460 @@ If you prefer to migrate manually or the automatic script doesn't work:
 }
 ```
 
-**Key Change**: Add `scripts/` to the path.
+### Remote MCP Configuration (v3.0.0)
 
-### **2. Update Script Permissions**
-```bash
-cd /path/to/Wazuh-MCP-Server
-chmod +x scripts/mcp_wrapper.sh
-chmod +x scripts/test_wrapper.sh
+For remote access, update your Claude Desktop configuration:
+
+```json
+{
+  "mcpServers": {
+    "wazuh": {
+      "type": "url",
+      "url": "https://your-server:8443/sse",
+      "name": "wazuh-mcp",
+      "authorization": {
+        "type": "oauth2",
+        "authorization_url": "https://your-server:8443/oauth/authorize",
+        "token_url": "https://your-server:8443/oauth/token",
+        "client_id": "wazuh-mcp-client",
+        "scopes": ["read:alerts", "read:agents", "read:vulnerabilities"]
+      }
+    }
+  }
+}
 ```
 
-### **3. Verify Installation**
-```bash
-# Test setup
-python3 scripts/validate_setup.py
+## Production Deployment Migration
 
-# Test wrapper script
-./scripts/mcp_wrapper.sh --help
+### From Development to Production
+
+#### Step 1: Environment Configuration
+```bash
+# Create production environment
+cat > .env.production << 'EOF'
+# Production Configuration
+ENVIRONMENT=production
+DEBUG=false
+LOG_LEVEL=INFO
+
+# Wazuh Configuration
+WAZUH_API_URL=https://your-wazuh-manager:55000
+WAZUH_API_USERNAME=wazuh-mcp-api
+WAZUH_API_PASSWORD=your-secure-password
+WAZUH_API_VERIFY_SSL=true
+WAZUH_ALLOW_SELF_SIGNED=false
+
+# OAuth2 Security
+OAUTH_ENABLED=true
+JWT_SECRET_KEY=$(openssl rand -base64 32)
+OAUTH_CLIENT_ID=wazuh-mcp-client
+OAUTH_CLIENT_SECRET=$(openssl rand -base64 32)
+
+# Monitoring
+ENABLE_METRICS=true
+METRICS_PORT=9090
+PROMETHEUS_RETENTION_TIME=15d
+
+# Security
+ENABLE_AUDIT_LOG=true
+RATE_LIMIT_ENABLED=true
+RATE_LIMIT_REQUESTS=100
+RATE_LIMIT_WINDOW=3600
+EOF
 ```
 
----
+#### Step 2: Docker Deployment
+```bash
+# Deploy with high availability
+docker-compose -f docker-compose.ha.yml up -d
 
-## 🎯 **Enable New Features (Optional)**
+# Verify deployment
+docker-compose -f docker-compose.ha.yml ps
+curl -f https://localhost:8443/health
+```
 
-v2.0.0 includes powerful new features that are **disabled by default**. To enable them:
+## Configuration Migration Details
 
-### **Add to .env file**:
+### Environment Variables
+
+#### v1.0.0 → v3.0.0 Complete Migration
 ```env
-# Phase 5 Enhancement System
-ENABLE_PROMPT_ENHANCEMENT=true
-ENABLE_CONTEXT_AGGREGATION=true  
-ENABLE_ADAPTIVE_RESPONSES=true
-ENABLE_REALTIME_UPDATES=true
+# Original v1.0.0 variables (keep unchanged)
+WAZUH_HOST=your-wazuh-server.com
+WAZUH_USER=your-username
+WAZUH_PASS=your-password
+WAZUH_PORT=55000
+VERIFY_SSL=true
+DEBUG=false
 
-# Memory management (optional)
-MAX_CACHE_SIZE=5000
-CONTEXT_CACHE_TTL=600
+# New v2.0.0 variables (optional)
+ENABLE_PHASE5_ENHANCEMENTS=true
+CACHE_TTL=300
+CONTEXT_AGGREGATION_DEPTH=3
+ENABLE_PARALLEL_PROCESSING=true
+MAX_CONCURRENT_REQUESTS=10
+
+# New v3.0.0 variables (optional)
+MCP_SERVER_HOST=0.0.0.0
+MCP_SERVER_PORT=8443
+MCP_TRANSPORT=sse
+OAUTH_ENABLED=false
+JWT_SECRET_KEY=your-secret-key
+OAUTH_CLIENT_ID=wazuh-mcp-client
+OAUTH_CLIENT_SECRET=your-client-secret
+ENABLE_METRICS=true
+METRICS_PORT=9090
+LOG_FORMAT=json
+ENABLE_AUDIT_LOG=true
 ```
 
-### **New Features You'll Get**:
-- **AI Context Aggregation**: Automatically gathers relevant security data
-- **Adaptive Responses**: Quality-based response formatting  
-- **Real-time Updates**: Live monitoring for ongoing incidents
-- **12 New Tools**: Enhanced security monitoring capabilities
-
----
-
-## 🧪 **Testing Your Migration**
-
-### **Basic Functionality Test**
-After migration, test these commands in Claude Desktop:
-
-1. **"Show me recent security alerts"** (tests basic functionality)
-2. **"What's the status of my Wazuh agents?"** (tests agent monitoring) 
-3. **"Run a compliance check"** (tests enhanced features)
-4. **"Analyze security threats in the last hour"** (tests AI enhancements)
-
-### **Expected Behavior**
-- **Same responses** for basic queries (backward compatibility)
-- **Enhanced responses** if new features enabled (richer data, better formatting)
-- **No errors** in Claude Desktop
-
----
-
-## 🔍 **Troubleshooting**
-
-### **Issue: "Command not found" in Claude Desktop**
-**Cause**: Path not updated correctly  
-**Solution**: 
-1. Check Claude Desktop config path includes `scripts/`
-2. Verify file exists: `ls -la scripts/mcp_wrapper.sh`
-3. Ensure it's executable: `chmod +x scripts/mcp_wrapper.sh`
-
-### **Issue: "Permission denied"**
-**Cause**: Script not executable  
-**Solution**: `chmod +x scripts/mcp_wrapper.sh`
-
-### **Issue: Features not working**
-**Cause**: New features disabled by default  
-**Solution**: Add feature flags to `.env` file (see above)
-
-### **Issue: Performance problems**
-**Cause**: New features use more memory  
-**Solution**: Add memory limits to `.env`:
+#### v2.0.0 → v3.0.0 Incremental Migration
 ```env
-MAX_CACHE_SIZE=1000
-ENHANCEMENT_TIMEOUT=5.0
+# Keep all existing v2.0.0 variables
+# Add only new v3.0.0 variables
+
+# Remote MCP Configuration
+MCP_SERVER_HOST=0.0.0.0
+MCP_SERVER_PORT=8443
+MCP_TRANSPORT=sse
+
+# Authentication (optional)
+OAUTH_ENABLED=false
+JWT_SECRET_KEY=your-secret-key
+OAUTH_CLIENT_ID=wazuh-mcp-client
+OAUTH_CLIENT_SECRET=your-client-secret
+
+# Monitoring
+ENABLE_METRICS=true
+METRICS_PORT=9090
+
+# Security
+ENABLE_AUDIT_LOG=true
+RATE_LIMIT_ENABLED=true
 ```
 
-### **Issue: Migration script fails**
-**Cause**: Various reasons  
-**Solution**: Use manual migration steps above
+## Testing Migration
 
----
+### Validation Steps
 
-## 📊 **What's New in v2.0.0**
+1. **Basic Functionality Test**
+   ```bash
+   # Test stdio mode (should work unchanged)
+   python3 -m wazuh_mcp_server.main --stdio
+   
+   # Test in Claude Desktop
+   # Try: "Show me recent security alerts"
+   ```
 
-### **New Tools (12 added)**
-- `get_wazuh_alert_summary` - Statistical alert analysis
-- `get_wazuh_vulnerability_summary` - Comprehensive vulnerability assessment  
-- `get_wazuh_critical_vulnerabilities` - Critical vulnerability analysis
-- `get_wazuh_running_agents` - Real-time agent monitoring
-- `get_wazuh_rules_summary` - Rule effectiveness analysis
-- `get_wazuh_weekly_stats` - Statistical analysis with anomaly detection
-- `get_wazuh_remoted_stats` - Communication metrics monitoring
-- `get_wazuh_log_collector_stats` - Log collection performance
-- `get_wazuh_cluster_health` - Enhanced cluster diagnostics
-- `get_wazuh_cluster_nodes` - Individual node monitoring  
-- `search_wazuh_manager_logs` - Enhanced forensic log search
-- `get_wazuh_manager_error_logs` - Error analysis with trends
+2. **New Features Test**
+   ```bash
+   # Test remote server
+   python3 -m wazuh_mcp_server.remote_server --transport sse
+   
+   # Test health endpoint
+   curl -f http://localhost:8443/health
+   
+   # Test metrics
+   curl -f http://localhost:9090/metrics
+   ```
 
-### **Enhanced Tools (11 improved)**
-- **AI-powered threat analysis** with ML-based risk scoring
-- **Multi-framework compliance** (PCI DSS, HIPAA, GDPR, NIST, ISO27001)
-- **Real-time agent health** monitoring with predictive diagnostics
-- **Advanced network security** analysis with backdoor detection
-- **Enhanced process monitoring** with behavior analysis
-- **Multi-source threat intelligence** integration
+3. **Integration Test**
+   ```bash
+   # Run comprehensive validation
+   python scripts/validate_setup.py --comprehensive
+   
+   # Test all tools
+   python scripts/test_all_tools.py
+   ```
 
-### **Performance Improvements**
-- **90%+ data completeness** (vs 10-20% in v1.0.0)
-- **<2s response times** for most queries
-- **5x improvement** in analysis depth
-- **Real-time monitoring** for ongoing incidents
+### Rollback Procedure
 
----
+If migration fails, you can rollback:
 
-## 🔄 **Rollback Procedure**
-
-If you encounter issues and need to rollback:
-
-### **1. Restore Backup Configuration**
 ```bash
-# Migration script creates backups automatically
-cp ~/Library/Application\ Support/Claude/claude_desktop_config.json.backup.* \
-   ~/Library/Application\ Support/Claude/claude_desktop_config.json
+# Stop current services
+docker-compose down  # if using Docker
+# or
+pkill -f wazuh_mcp_server
+
+# Restore from backup
+rm -rf /path/to/current/installation
+mv /path/to/backup /path/to/current/installation
+
+# Restart services
+cd /path/to/current/installation
+python3 -m wazuh_mcp_server.main --stdio
 ```
 
-### **2. Checkout Previous Version**
+## Post-Migration Optimization
+
+### Performance Tuning
+
+1. **Enable All Optimizations**
+   ```env
+   # Phase 5 enhancements
+   ENABLE_PHASE5_ENHANCEMENTS=true
+   CACHE_TTL=300
+   CONTEXT_AGGREGATION_DEPTH=3
+   
+   # Performance optimization
+   ENABLE_PARALLEL_PROCESSING=true
+   MAX_CONCURRENT_REQUESTS=10
+   ENABLE_INTELLIGENT_CACHING=true
+   MAX_CACHE_SIZE=1000
+   ```
+
+2. **Monitor Performance**
+   ```bash
+   # Check metrics
+   curl http://localhost:9090/metrics
+   
+   # Monitor with Grafana (if using Docker)
+   # Access: http://localhost:3000
+   ```
+
+### Security Hardening
+
+1. **Enable Security Features**
+   ```env
+   # OAuth2 authentication
+   OAUTH_ENABLED=true
+   JWT_SECRET_KEY=$(openssl rand -base64 32)
+   
+   # Rate limiting
+   RATE_LIMIT_ENABLED=true
+   RATE_LIMIT_REQUESTS=100
+   RATE_LIMIT_WINDOW=3600
+   
+   # Audit logging
+   ENABLE_AUDIT_LOG=true
+   LOG_FORMAT=json
+   ```
+
+2. **SSL/TLS Configuration**
+   ```env
+   # Production SSL settings
+   WAZUH_API_VERIFY_SSL=true
+   WAZUH_ALLOW_SELF_SIGNED=false
+   SSL_CERT_PATH=/path/to/server.crt
+   SSL_KEY_PATH=/path/to/server.key
+   ```
+
+## Feature Adoption Guide
+
+### Phase 1: Basic Migration (Week 1)
+- Complete migration to v3.0.0
+- Verify all existing functionality
+- Test new tools in development
+
+### Phase 2: Remote Access (Week 2)
+- Enable remote MCP server
+- Configure OAuth2 authentication
+- Test remote access from Claude Code
+
+### Phase 3: Production Deployment (Week 3)
+- Deploy with Docker Compose
+- Configure monitoring and alerting
+- Implement backup procedures
+
+### Phase 4: Advanced Features (Week 4)
+- Enable high availability
+- Configure advanced security features
+- Optimize performance settings
+
+## Common Issues and Solutions
+
+### Migration Issues
+
+#### Issue: "Module not found" errors
+**Solution**: Ensure all dependencies are properly installed
 ```bash
-cd /path/to/Wazuh-MCP-Server
-git checkout v1.0.0
+pip install -r requirements.txt
 ```
 
-### **3. Restart Claude Desktop**
+#### Issue: OAuth2 authentication not working
+**Solution**: Check OAuth2 configuration and client setup
+```bash
+# Validate OAuth2 setup
+python scripts/validate_oauth2.py
 
----
+# Test token generation
+curl -X POST http://localhost:8443/oauth/token \
+  -H "Content-Type: application/x-www-form-urlencoded" \
+  -d "grant_type=client_credentials&client_id=wazuh-mcp-client&client_secret=your-secret"
+```
 
-## ✅ **Migration Checklist**
+#### Issue: Docker containers not starting
+**Solution**: Check Docker configuration and logs
+```bash
+# Check container status
+docker-compose ps
 
-- [ ] Code updated (`git pull`)
-- [ ] Migration script run (`./scripts/migrate_v1_to_v2.sh`)
-- [ ] Claude Desktop restarted
-- [ ] Basic functionality tested
-- [ ] New features enabled (optional)
-- [ ] Advanced features tested (if enabled)
-- [ ] Backup files secured
+# Check logs
+docker-compose logs -f wazuh-mcp-server
 
----
+# Restart services
+docker-compose restart
+```
 
-## 📞 **Getting Help**
+#### Issue: Performance degradation
+**Solution**: Check cache configuration and enable optimizations
+```bash
+# Check cache status
+python scripts/check_cache_status.py
 
-If you encounter issues during migration:
+# Enable optimizations
+echo "ENABLE_OPTIMIZATIONS=true" >> .env
+```
 
-1. **Check logs**: Look for error messages in Claude Desktop
-2. **Validate setup**: Run `python3 scripts/validate_setup.py`
-3. **Review docs**: Check `docs/ISSUES.md` for known issues
-4. **Create issue**: [GitHub Issues](https://github.com/gensecaihq/Wazuh-MCP-Server/issues)
+### Troubleshooting
 
----
+#### Configuration Issues
+```bash
+# Validate configuration
+python scripts/validate_setup.py
 
-**🎉 Welcome to Wazuh MCP Server v2.0.0!**
+# Check for missing variables
+python scripts/check_env_vars.py
 
-The migration preserves all existing functionality while adding powerful new capabilities. Take your time enabling new features and enjoy the enhanced security monitoring experience.
+# Test Wazuh connectivity
+python scripts/test_wazuh_connection.py
+```
+
+#### Performance Issues
+```bash
+# Check system resources
+python scripts/check_system_resources.py
+
+# Optimize settings
+python scripts/optimize_settings.py
+
+# Monitor metrics
+curl http://localhost:9090/metrics
+```
+
+#### Security Issues
+```bash
+# Check security configuration
+python scripts/validate_security.py
+
+# Test authentication
+python scripts/test_authentication.py
+
+# Review audit logs
+tail -f /var/log/wazuh-mcp-server/audit.log
+```
+
+## Migration Scripts
+
+### Automated Migration Script
+
+```bash
+#!/bin/bash
+# migrate_to_v3.sh
+
+set -euo pipefail
+
+echo "Starting migration to Wazuh MCP Server v3.0.0"
+
+# Backup current installation
+if [ -d "/opt/wazuh-mcp-server" ]; then
+    echo "Backing up current installation..."
+    cp -r /opt/wazuh-mcp-server /opt/wazuh-mcp-server.backup.$(date +%Y%m%d_%H%M%S)
+fi
+
+# Clone v3.0.0
+echo "Downloading v3.0.0..."
+git clone https://github.com/gensecaihq/Wazuh-MCP-Server.git /opt/wazuh-mcp-server-v3
+cd /opt/wazuh-mcp-server-v3
+
+# Install dependencies
+echo "Installing dependencies..."
+python3 scripts/install.py
+
+# Migrate configuration
+if [ -f "/opt/wazuh-mcp-server/.env" ]; then
+    echo "Migrating configuration..."
+    cp /opt/wazuh-mcp-server/.env .env
+    
+    # Add new v3.0.0 variables
+    cat >> .env << 'EOF'
+# v3.0.0 Configuration
+MCP_SERVER_HOST=0.0.0.0
+MCP_SERVER_PORT=8443
+MCP_TRANSPORT=sse
+OAUTH_ENABLED=false
+ENABLE_METRICS=true
+METRICS_PORT=9090
+EOF
+fi
+
+# Validate migration
+echo "Validating migration..."
+python scripts/validate_setup.py
+
+echo "Migration completed successfully!"
+echo "To start using v3.0.0:"
+echo "  cd /opt/wazuh-mcp-server-v3"
+echo "  python3 -m wazuh_mcp_server.main --stdio"
+```
+
+### Configuration Update Script
+
+```bash
+#!/bin/bash
+# update_config_v3.sh
+
+set -euo pipefail
+
+ENV_FILE="${1:-.env}"
+
+echo "Updating configuration for v3.0.0..."
+
+# Add v3.0.0 variables if not present
+if ! grep -q "MCP_SERVER_HOST" "$ENV_FILE"; then
+    cat >> "$ENV_FILE" << 'EOF'
+
+# v3.0.0 Remote MCP Configuration
+MCP_SERVER_HOST=0.0.0.0
+MCP_SERVER_PORT=8443
+MCP_TRANSPORT=sse
+
+# OAuth2 Authentication (optional)
+OAUTH_ENABLED=false
+JWT_SECRET_KEY=your-secret-key
+OAUTH_CLIENT_ID=wazuh-mcp-client
+OAUTH_CLIENT_SECRET=your-client-secret
+
+# Monitoring
+ENABLE_METRICS=true
+METRICS_PORT=9090
+
+# Security
+ENABLE_AUDIT_LOG=true
+RATE_LIMIT_ENABLED=true
+EOF
+fi
+
+echo "Configuration updated successfully!"
+```
+
+## Support
+
+For migration support:
+- [GitHub Issues](https://github.com/gensecaihq/Wazuh-MCP-Server/issues)
+- [Production Deployment Guide](docs/operations/PRODUCTION_DEPLOYMENT.md)
+- [v3.0.0 Documentation](docs/v3/README_v3.md)
+- [Troubleshooting Guides](docs/troubleshooting/)
+
+## Next Steps
+
+After successful migration:
+1. Explore new remote MCP capabilities
+2. Set up production monitoring
+3. Configure security features
+4. Optimize performance settings
+5. Provide feedback on new features
+6. Consider contributing to the project
+
+This migration guide ensures a smooth transition while maintaining full compatibility with your existing setup and unlocking powerful new v3.0.0 features.

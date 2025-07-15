@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from enum import Enum
 from typing import Optional
 from pathlib import Path
-from pydantic import BaseModel, validator, Field
+from .utils.pydantic_compat import BaseModel, validator, Field, create_model_config
 from dotenv import load_dotenv
 
 # Import cross-platform utilities

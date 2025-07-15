@@ -6,10 +6,10 @@ import json
 from unittest.mock import Mock, AsyncMock, patch
 from datetime import datetime
 
-from src.config import WazuhConfig
-from src.api.wazuh_client_manager import WazuhClientManager
-from src.api.wazuh_indexer_client import WazuhIndexerClient
-from src.api.wazuh_field_mappings import WazuhFieldMapper, WazuhVersion
+from wazuh_mcp_server.config import WazuhConfig
+from wazuh_mcp_server.api.wazuh_client_manager import WazuhClientManager
+from wazuh_mcp_server.api.wazuh_indexer_client import WazuhIndexerClient
+from wazuh_mcp_server.api.wazuh_field_mappings import WazuhFieldMapper, WazuhVersion
 
 
 class TestWazuh48Integration:
@@ -543,7 +543,7 @@ class TestWazuh48Integration:
     async def test_production_error_recovery(self, wazuh_config):
         """Test production error recovery scenarios."""
         
-        from src.utils.production_error_handler import production_error_handler
+        from wazuh_mcp_server.utils.production_error_handler import production_error_handler
         
         # Test network error recovery
         retry_count = 0
@@ -566,7 +566,7 @@ class TestWazuh48Integration:
 
     def test_minimum_version_enforcement(self):
         """Test that minimum Wazuh version is properly enforced."""
-        from src.__version__ import __min_wazuh_version__
+        from wazuh_mcp_server.__version__ import __min_wazuh_version__
         
         # Verify minimum version is set correctly
         assert __min_wazuh_version__ == "4.8.0", "Minimum version should be 4.8.0"

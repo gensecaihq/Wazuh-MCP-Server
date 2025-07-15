@@ -12,7 +12,7 @@ class TestGetAgentProcesses:
     @pytest.fixture
     def server(self):
         """Create a mock server instance."""
-        from src.wazuh_mcp_server.main import WazuhMCPServer
+        from wazuh_mcp_server.wazuh_mcp_server.main import WazuhMCPServer
         with patch('src.wazuh_mcp_server.main.setup_logging'):
             with patch('src.wazuh_mcp_server.main.WazuhConfig'):
                 server = WazuhMCPServer()

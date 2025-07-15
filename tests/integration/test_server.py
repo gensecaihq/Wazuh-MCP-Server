@@ -3,8 +3,8 @@
 import pytest
 import json
 from unittest.mock import AsyncMock, patch, MagicMock
-from src.wazuh_mcp_server import WazuhMCPServer
-from src.config import WazuhConfig, ConfigurationError
+from wazuh_mcp_server.main import WazuhMCPServer
+from wazuh_mcp_server.config import WazuhConfig, ConfigurationError
 
 
 class TestWazuhMCPServer:

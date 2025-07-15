@@ -1,0 +1,329 @@
+# GitLeaks Configuration for Wazuh MCP Server v3.0.0
+# This configuration defines rules for detecting secrets in the codebase
+
+title = "Wazuh MCP Server GitLeaks Configuration"
+
+[extend]
+# Extend the default configuration
+useDefault = true
+
+# Custom rules for Wazuh MCP Server
+[[rules]]
+id = "wazuh-api-key"
+description = "Wazuh API Key"
+regex = '''(?i)wazuh[_-]?api[_-]?key[_-]?[:=]\s*['""]?([a-zA-Z0-9]{32,})'''
+keywords = ["wazuh", "api", "key"]
+
+[[rules]]
+id = "wazuh-api-password"
+description = "Wazuh API Password"
+regex = '''(?i)wazuh[_-]?api[_-]?password[_-]?[:=]\s*['""]?([a-zA-Z0-9!@#$%^&*()_+={}\[\]|\\:";'<>?,./]{8,})'''
+keywords = ["wazuh", "api", "password"]
+
+[[rules]]
+id = "jwt-secret"
+description = "JWT Secret Key"
+regex = '''(?i)jwt[_-]?secret[_-]?key[_-]?[:=]\s*['""]?([a-zA-Z0-9+/]{32,})'''
+keywords = ["jwt", "secret", "key"]
+
+[[rules]]
+id = "redis-password"
+description = "Redis Password"
+regex = '''(?i)redis[_-]?password[_-]?[:=]\s*['""]?([a-zA-Z0-9!@#$%^&*()_+={}\[\]|\\:";'<>?,./]{8,})'''
+keywords = ["redis", "password"]
+
+[[rules]]
+id = "admin-password"
+description = "Admin Password"
+regex = '''(?i)admin[_-]?password[_-]?[:=]\s*['""]?([a-zA-Z0-9!@#$%^&*()_+={}\[\]|\\:";'<>?,./]{8,})'''
+keywords = ["admin", "password"]
+
+[[rules]]
+id = "oauth-client-secret"
+description = "OAuth Client Secret"
+regex = '''(?i)oauth[_-]?client[_-]?secret[_-]?[:=]\s*['""]?([a-zA-Z0-9+/]{32,})'''
+keywords = ["oauth", "client", "secret"]
+
+[[rules]]
+id = "encryption-key"
+description = "Encryption Key"
+regex = '''(?i)encryption[_-]?key[_-]?[:=]\s*['""]?([a-zA-Z0-9+/]{32,})'''
+keywords = ["encryption", "key"]
+
+[[rules]]
+id = "ssl-private-key"
+description = "SSL Private Key"
+regex = '''-----BEGIN (?:RSA )?PRIVATE KEY-----'''
+keywords = ["private", "key", "ssl"]
+
+[[rules]]
+id = "ssl-certificate"
+description = "SSL Certificate"
+regex = '''-----BEGIN CERTIFICATE-----'''
+keywords = ["certificate", "ssl"]
+
+[[rules]]
+id = "database-connection-string"
+description = "Database Connection String"
+regex = '''(?i)(mysql|postgres|mongodb|redis)://[^\s'"]+'''
+keywords = ["mysql", "postgres", "mongodb", "redis", "connection"]
+
+[[rules]]
+id = "aws-access-key"
+description = "AWS Access Key"
+regex = '''(?i)aws[_-]?access[_-]?key[_-]?id[_-]?[:=]\s*['""]?([A-Z0-9]{20})'''
+keywords = ["aws", "access", "key"]
+
+[[rules]]
+id = "aws-secret-key"
+description = "AWS Secret Key"
+regex = '''(?i)aws[_-]?secret[_-]?access[_-]?key[_-]?[:=]\s*['""]?([A-Za-z0-9/+=]{40})'''
+keywords = ["aws", "secret", "access", "key"]
+
+[[rules]]
+id = "slack-webhook"
+description = "Slack Webhook URL"
+regex = '''https://hooks\.slack\.com/services/T[A-Z0-9]{8}/B[A-Z0-9]{8}/[A-Za-z0-9]{24}'''
+keywords = ["slack", "webhook"]
+
+[[rules]]
+id = "discord-webhook"
+description = "Discord Webhook URL"
+regex = '''https://discord(?:app)?\.com/api/webhooks/[0-9]{18}/[A-Za-z0-9\-_]{68}'''
+keywords = ["discord", "webhook"]
+
+[[rules]]
+id = "github-token"
+description = "GitHub Token"
+regex = '''(?i)github[_-]?token[_-]?[:=]\s*['""]?(ghp_[A-Za-z0-9]{36}|gho_[A-Za-z0-9]{36}|ghu_[A-Za-z0-9]{36})'''
+keywords = ["github", "token"]
+
+[[rules]]
+id = "docker-auth"
+description = "Docker Registry Authentication"
+regex = '''(?i)docker[_-]?auth[_-]?[:=]\s*['""]?([A-Za-z0-9+/]{40,})'''
+keywords = ["docker", "auth"]
+
+[[rules]]
+id = "api-token"
+description = "Generic API Token"
+regex = '''(?i)api[_-]?token[_-]?[:=]\s*['""]?([a-zA-Z0-9]{32,})'''
+keywords = ["api", "token"]
+
+[[rules]]
+id = "bearer-token"
+description = "Bearer Token"
+regex = '''(?i)bearer[_-]?token[_-]?[:=]\s*['""]?([a-zA-Z0-9\-._~+/]{32,})'''
+keywords = ["bearer", "token"]
+
+[[rules]]
+id = "session-secret"
+description = "Session Secret"
+regex = '''(?i)session[_-]?secret[_-]?[:=]\s*['""]?([a-zA-Z0-9+/]{32,})'''
+keywords = ["session", "secret"]
+
+[[rules]]
+id = "signing-key"
+description = "Signing Key"
+regex = '''(?i)signing[_-]?key[_-]?[:=]\s*['""]?([a-zA-Z0-9+/]{32,})'''
+keywords = ["signing", "key"]
+
+# Path-based allowlist - files to ignore
+[[rules.allowlist]]
+description = "Ignore test files"
+paths = [
+    '''tests/.*''',
+    '''test_.*\.py''',
+    '''.*_test\.py''',
+    '''.*\.test\.py''',
+    '''fixtures/.*''',
+    '''mocks/.*'''
+]
+
+[[rules.allowlist]]
+description = "Ignore documentation"
+paths = [
+    '''docs/.*''',
+    '''README\.md''',
+    '''CHANGELOG\.md''',
+    '''.*\.md'''
+]
+
+[[rules.allowlist]]
+description = "Ignore example files"
+paths = [
+    '''examples/.*''',
+    '''\.env\.example''',
+    '''config\.example\..*''',
+    '''.*\.example\..*'''
+]
+
+[[rules.allowlist]]
+description = "Ignore generated files"
+paths = [
+    '''node_modules/.*''',
+    '''venv/.*''',
+    '''\.venv/.*''',
+    '''__pycache__/.*''',
+    '''\.pyc''',
+    '''\.pyo''',
+    '''\.pyd''',
+    '''\.egg-info/.*''',
+    '''dist/.*''',
+    '''build/.*'''
+]
+
+[[rules.allowlist]]
+description = "Ignore version control"
+paths = [
+    '''\.git/.*''',
+    '''\.gitignore''',
+    '''\.gitmodules''',
+    '''\.gitattributes'''
+]
+
+[[rules.allowlist]]
+description = "Ignore CI/CD files"
+paths = [
+    '''\.github/.*''',
+    '''\.gitlab-ci\.yml''',
+    '''\.travis\.yml''',
+    '''\.circleci/.*''',
+    '''jenkins/.*''',
+    '''Jenkinsfile'''
+]
+
+# String-based allowlist - specific strings to ignore
+[[rules.allowlist]]
+description = "Ignore placeholder values"
+strings = [
+    "your-secret-key",
+    "your-api-key",
+    "your-password",
+    "your-token",
+    "placeholder",
+    "example",
+    "changeme",
+    "replace-me",
+    "TODO",
+    "FIXME",
+    "XXX",
+    "dummy",
+    "test",
+    "sample",
+    "demo",
+    "mock",
+    "fake",
+    "123456",
+    "password",
+    "secret",
+    "token"
+]
+
+# Regex-based allowlist - patterns to ignore
+[[rules.allowlist]]
+description = "Ignore environment variable references"
+regexes = [
+    '''os\.environ\.get\(['"].*['"]''',
+    '''os\.getenv\(['"].*['"]''',
+    '''process\.env\..*''',
+    '''\$\{.*\}''',
+    '''\$.*''',
+    '''env\['.*'\]''',
+    '''env\(".*"\)''',
+    '''getenv\(".*"\)''',
+    '''ENV\['.*'\]''',
+    '''ENV\(".*"\)'''
+]
+
+[[rules.allowlist]]
+description = "Ignore configuration references"
+regexes = [
+    '''config\.get\(['"].*['"]''',
+    '''settings\..*''',
+    '''conf\..*''',
+    '''cfg\..*''',
+    '''CONFIG\..*''',
+    '''SETTINGS\..*'''
+]
+
+[[rules.allowlist]]
+description = "Ignore logging statements"
+regexes = [
+    '''logger\..*''',
+    '''log\..*''',
+    '''logging\..*''',
+    '''print\(.*\)''',
+    '''console\.log\(.*\)''',
+    '''debug\(.*\)''',
+    '''info\(.*\)''',
+    '''warn\(.*\)''',
+    '''error\(.*\)'''
+]
+
+[[rules.allowlist]]
+description = "Ignore comments"
+regexes = [
+    '''#.*''',
+    '''//.*''',
+    '''/\*.*\*/''',
+    '''<!--.*-->''',
+    '''""".*"""''',
+    """'''.*'''""",
+    '''rem .*''',
+    '''REM .*'''
+]
+
+[[rules.allowlist]]
+description = "Ignore URL examples"
+regexes = [
+    '''https?://example\.com''',
+    '''https?://localhost''',
+    '''https?://127\.0\.0\.1''',
+    '''https?://.*\.example''',
+    '''https?://.*\.local''',
+    '''https?://.*\.test''',
+    '''https?://.*\.invalid'''
+]
+
+# Global settings
+[allowlist]
+description = "Global allowlist"
+paths = [
+    ".gitleaks.toml",
+    ".gitignore",
+    ".env.example",
+    "requirements.txt",
+    "setup.py",
+    "pyproject.toml",
+    "Dockerfile",
+    "docker-compose.yml",
+    "docker-compose.*.yml"
+]
+
+commits = [
+    # Add commit hashes to ignore if needed
+]
+
+# Entropy settings
+[entropy]
+# Entropy detection for base64 strings
+[[entropy.group]]
+name = "base64"
+regex = '''[A-Za-z0-9+/]{20,}={0,2}'''
+entropy = 4.3
+entropyGroup = 0
+
+# Entropy detection for hex strings
+[[entropy.group]]
+name = "hex"
+regex = '''[a-fA-F0-9]{32,}'''
+entropy = 3.0
+entropyGroup = 1
+
+# Entropy detection for random strings
+[[entropy.group]]
+name = "random"
+regex = '''[a-zA-Z0-9]{32,}'''
+entropy = 4.5
+entropyGroup = 2

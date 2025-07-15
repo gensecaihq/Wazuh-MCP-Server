@@ -1,7 +1,7 @@
 """Tests for validation utilities."""
 
 import pytest
-from src.utils.validation import (
+from wazuh_mcp_server.utils.validation import (
     ValidationError,
     AlertQuery,
     AgentQuery,

@@ -269,7 +269,7 @@ def check_dependencies():
     dependencies = [
         ("mcp", "0.1.0", "MCP protocol implementation"),
         ("aiohttp", "3.8.0", "Async HTTP client"),
-        ("pydantic", "1.10.0", "Data validation"),
+        ("pydantic", "1.10.0", "Data validation (V1/V2 compatible)"),
         ("dotenv", "0.19.0", "Environment variable loading"),
         ("websockets", "10.0", "WebSocket support"),
         ("urllib3", "1.26.0", "HTTP client library"),

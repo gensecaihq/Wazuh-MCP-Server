@@ -11,7 +11,7 @@ certifi>=2023.5.7
 # Utilities and data handling
 python-dateutil>=2.8.2
 python-dotenv>=1.0.0
-pydantic>=2.0.0
+pydantic>=1.10.0,<3.0.0
 packaging>=21.0
 
 # System monitoring

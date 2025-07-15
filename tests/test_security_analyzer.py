@@ -2,7 +2,7 @@
 
 import pytest
 from datetime import datetime, timedelta
-from src.analyzers.security_analyzer import SecurityAnalyzer, RiskLevel
+from wazuh_mcp_server.analyzers.security_analyzer import SecurityAnalyzer, RiskLevel
 
 
 class TestSecurityAnalyzer:

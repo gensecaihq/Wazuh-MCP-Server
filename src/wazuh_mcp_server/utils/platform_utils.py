@@ -19,6 +19,40 @@ def get_platform_info() -> Dict[str, Any]:
         architecture, and Python version information.
     """
     system = platform.system()
+    
+    # Detect Linux distribution
+    linux_distro = None
+    is_fedora = False
+    is_ubuntu = False
+    
+    if system == "Linux":
+        try:
+            # Try to read /etc/os-release for distribution info
+            if os.path.exists("/etc/os-release"):
+                with open("/etc/os-release", "r") as f:
+                    os_release = f.read().lower()
+                    if "fedora" in os_release:
+                        is_fedora = True
+                        linux_distro = "fedora"
+                    elif "ubuntu" in os_release:
+                        is_ubuntu = True
+                        linux_distro = "ubuntu"
+                    elif "debian" in os_release:
+                        linux_distro = "debian"
+                    elif "centos" in os_release:
+                        linux_distro = "centos"
+                    elif "rhel" in os_release or "red hat" in os_release:
+                        linux_distro = "rhel"
+        except Exception:
+            # Fallback detection methods
+            try:
+                import distro
+                linux_distro = distro.id()
+                is_fedora = linux_distro == "fedora"
+                is_ubuntu = linux_distro == "ubuntu"
+            except ImportError:
+                pass
+    
     return {
         "system": system,
         "release": platform.release(),
@@ -31,6 +65,9 @@ def get_platform_info() -> Dict[str, Any]:
         "is_linux": system == "Linux", 
         "is_macos": system == "Darwin",
         "is_unix": system in ("Linux", "Darwin"),
+        "is_fedora": is_fedora,
+        "is_ubuntu": is_ubuntu,
+        "linux_distro": linux_distro,
         "path_separator": os.sep,
         "line_separator": os.linesep,
         "env_path_separator": os.pathsep
