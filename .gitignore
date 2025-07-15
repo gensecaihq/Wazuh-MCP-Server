@@ -1,6 +1,9 @@
-# .gitignore for Wazuh MCP Server
+# Wazuh MCP Server v3.0.0 - Git Ignore File
+# ==========================================
 
-# Python
+# =============================================================================
+# PYTHON
+# =============================================================================
 __pycache__/
 *.py[cod]
 *$py.class
@@ -21,66 +24,171 @@ wheels/
 *.egg-info/
 .installed.cfg
 *.egg
+MANIFEST
 
-# Build artifacts
-*.whl
-*.tar.gz
-
-# Virtual environments
+# =============================================================================
+# VIRTUAL ENVIRONMENTS
+# =============================================================================
 .env
 .env.local
 .env.production
+.env.staging
+.env.development
 .env.test
 .venv
 venv/
 ENV/
+env/
+.conda/
 
-# IDE
+# =============================================================================
+# IDE & EDITORS
+# =============================================================================
 .idea/
 .vscode/
 *.swp
 *.swo
+*~
+.vim/
+.netrwhist
+*.sublime-project
+*.sublime-workspace
 
-# OS
+# =============================================================================
+# OPERATING SYSTEM
+# =============================================================================
 .DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
 Thumbs.db
+Desktop.ini
 
-# Logs
+# =============================================================================
+# LOGS & RUNTIME DATA
+# =============================================================================
 *.log
 logs/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+lerna-debug.log*
+.pids
+.pid
+.seed
+.pid.lock
 
-# Docker
+# =============================================================================
+# DOCKER & CONTAINERS
+# =============================================================================
 docker-compose.override.yml
+docker-compose.local.yml
+.dockerignore.local
+*.dockerfile.local
 
-# Production data
+# =============================================================================
+# PRODUCTION DATA & VOLUMES
+# =============================================================================
 data/
+volumes/
 letsencrypt/
 prometheus-data/
 grafana-data/
 redis-data/
+elasticsearch-data/
+backup/
+backups/
+dumps/
 
-# SSL certificates
+# =============================================================================
+# SSL CERTIFICATES & KEYS
+# =============================================================================
 *.pem
 *.crt
 *.key
+*.p12
+*.pfx
+*.jks
+*.keystore
+*.truststore
+certs/
+certificates/
+ssl/
+tls/
 
-# Testing
+# =============================================================================
+# SECRETS & CREDENTIALS
+# =============================================================================
+secrets/
+credentials/
+.secrets/
+.credentials/
+*.secret
+*.token
+*.apikey
+.auth
+auth.json
+service-account.json
+
+# =============================================================================
+# TESTING & COVERAGE
+# =============================================================================
 .coverage
+.coverage.*
 .pytest_cache/
 htmlcov/
+.tox/
+.cache
+nosetests.xml
+coverage.xml
+*.cover
+.hypothesis/
+.pytest_cache/
 
-# Temporary
+# =============================================================================
+# DEVELOPMENT & DEBUGGING
+# =============================================================================
+.mypy_cache/
+.dmypy.json
+dmypy.json
+.pyre/
+.pytype/
+.profile
+.prof
+
+# =============================================================================
+# TEMPORARY FILES
+# =============================================================================
 *.tmp
+*.temp
+.tmp/
 temp/
+tmp/
+*.bak
+*.backup
+*.old
+*.orig
+*~
+.#*
+\#*#
 
-# Validation reports
+# =============================================================================
+# VALIDATION & REPORTS
+# =============================================================================
 validation_report.json
 *_validation_report.md
 *_compatibility_report.json
 *_communication_report.json
 *_config_template.json
+audit_report.json
+security_report.html
+performance_report.json
 
-# Test files
+# =============================================================================
+# TEST FILES & ARTIFACTS
+# =============================================================================
 .test_resilience.py
 get-pip.py
 installation_test_report_*.json
@@ -88,10 +196,156 @@ test_installation.py
 test_claude_desktop_*.py
 static_claude_desktop_analysis.py
 test_venv/
+test_data/
+test_results/
+test_reports/
 
-# Development and planning files
+# =============================================================================
+# DEVELOPMENT ARTIFACTS
+# =============================================================================
 *_IMPLEMENTATION_PLAN.md
 *_SCOPE.md
+*_PLANNING.md
 fix-*.py
 production-checklist.md
+audit-todo.md
+audit.md
+*.draft
+*.wip
+*.todo
 
+# =============================================================================
+# MONITORING & METRICS
+# =============================================================================
+metrics/
+monitoring/
+alerting/
+dashboards/local/
+*.metrics
+*.stats
+
+# =============================================================================
+# DOCUMENTATION BUILDS
+# =============================================================================
+docs/_build/
+docs/build/
+site/
+_site/
+.jekyll-cache/
+.jekyll-metadata
+
+# =============================================================================
+# PACKAGE MANAGERS
+# =============================================================================
+node_modules/
+npm-debug.log
+yarn-error.log
+package-lock.json
+yarn.lock
+
+# =============================================================================
+# DATABASE FILES
+# =============================================================================
+*.db
+*.sqlite
+*.sqlite3
+*.db-journal
+dump.rdb
+*.dump
+
+# =============================================================================
+# COMPRESSED FILES
+# =============================================================================
+*.7z
+*.dmg
+*.gz
+*.iso
+*.jar
+*.rar
+*.tar
+*.zip
+
+# =============================================================================
+# MACOS SPECIFIC
+# =============================================================================
+.AppleDouble
+.LSOverride
+Icon
+._*
+.DocumentRevisions-V100
+.fseventsd
+.Spotlight-V100
+.TemporaryItems
+.Trashes
+.VolumeIcon.icns
+.com.apple.timemachine.donotpresent
+
+# =============================================================================
+# WINDOWS SPECIFIC
+# =============================================================================
+Thumbs.db
+ehthumbs.db
+ehthumbs_vista.db
+*.stackdump
+[Dd]esktop.ini
+$RECYCLE.BIN/
+*.cab
+*.msi
+*.msix
+*.msm
+*.msp
+*.lnk
+
+# =============================================================================
+# LINUX SPECIFIC
+# =============================================================================
+*~
+.fuse_hidden*
+.directory
+.Trash-*
+.nfs*
+
+# =============================================================================
+# CLOUD & DEPLOYMENT
+# =============================================================================
+.terraform/
+*.tfstate
+*.tfstate.*
+.terraform.lock.hcl
+terraform.tfvars
+terraform.tfvars.json
+
+# Kubernetes
+kustomization.yaml
+*.kubeconfig
+
+# Helm
+charts/
+Chart.lock
+
+# =============================================================================
+# SECURITY SCANNING
+# =============================================================================
+.bandit
+.safety
+.snyk
+security-reports/
+vulnerability-reports/
+dependency-check-report.html
+
+# =============================================================================
+# PERFORMANCE TESTING
+# =============================================================================
+locust-report.html
+performance-test-results/
+load-test-results/
+
+# =============================================================================
+# CUSTOM PROJECT EXCLUDES
+# =============================================================================
+# Add any project-specific files to ignore here
+.local/
+.custom/
+scratch/
+sandbox/
+playground/

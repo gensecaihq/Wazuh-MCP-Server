@@ -1,0 +1,521 @@
+# AlertManager Configuration for Wazuh MCP Server v3.0.0
+# This configuration defines how alerts are routed and delivered
+
+global:
+  # Global SMTP configuration
+  smtp_smarthost: '${SMTP_HOST}:${SMTP_PORT}'
+  smtp_from: 'alerts@wazuh-mcp.local'
+  smtp_auth_username: '${SMTP_USERNAME}'
+  smtp_auth_password: '${SMTP_PASSWORD}'
+  smtp_require_tls: true
+  
+  # Global Slack configuration
+  slack_api_url: '${SLACK_API_URL}'
+  
+  # Global HTTP client configuration
+  http_config:
+    proxy_url: '${HTTP_PROXY_URL}'
+    tls_config:
+      insecure_skip_verify: false
+  
+  # Resolve timeout
+  resolve_timeout: 5m
+
+# Templates for alert notifications
+templates:
+  - '/etc/alertmanager/templates/*.tmpl'
+
+# Routing configuration
+route:
+  # Default grouping key
+  group_by: ['alertname', 'cluster', 'service']
+  
+  # How long to wait before sending notification for a group
+  group_wait: 10s
+  
+  # How long to wait before sending notification about new alerts
+  group_interval: 10s
+  
+  # How long to wait before sending a notification again
+  repeat_interval: 12h
+  
+  # Default receiver
+  receiver: 'default'
+  
+  # Routing tree
+  routes:
+    # Critical alerts - immediate notification
+    - match:
+        severity: critical
+      receiver: 'critical-alerts'
+      group_wait: 0s
+      group_interval: 30s
+      repeat_interval: 5m
+      routes:
+        # Security incidents - immediate escalation
+        - match:
+            team: security
+          receiver: 'security-team'
+          group_wait: 0s
+          repeat_interval: 1m
+        
+        # Infrastructure issues
+        - match:
+            service: system
+          receiver: 'infrastructure-team'
+          group_wait: 0s
+          repeat_interval: 2m
+    
+    # High priority alerts
+    - match:
+        severity: high
+      receiver: 'high-priority-alerts'
+      group_wait: 30s
+      group_interval: 1m
+      repeat_interval: 30m
+      routes:
+        # Security team alerts
+        - match:
+            team: security
+          receiver: 'security-team'
+          repeat_interval: 15m
+        
+        # Performance issues
+        - match_re:
+            alertname: '.*Performance.*|.*Latency.*|.*ResponseTime.*'
+          receiver: 'performance-team'
+          repeat_interval: 15m
+    
+    # Medium priority alerts
+    - match:
+        severity: medium
+      receiver: 'medium-priority-alerts'
+      group_wait: 2m
+      group_interval: 5m
+      repeat_interval: 2h
+    
+    # Low priority alerts
+    - match:
+        severity: low
+      receiver: 'low-priority-alerts'
+      group_wait: 5m
+      group_interval: 10m
+      repeat_interval: 6h
+    
+    # Maintenance window - suppress non-critical alerts
+    - match:
+        maintenance: 'true'
+      receiver: 'maintenance-alerts'
+      group_wait: 30m
+      repeat_interval: 24h
+    
+    # Development environment - reduced frequency
+    - match:
+        environment: development
+      receiver: 'dev-alerts'
+      group_wait: 10m
+      repeat_interval: 24h
+    
+    # Test suppression
+    - match:
+        alertname: 'Watchdog'
+      receiver: 'null'
+
+# Inhibition rules - suppress alerts when related alerts are firing
+inhibit_rules:
+  # Suppress warning alerts when critical alerts are firing
+  - source_match:
+      severity: 'critical'
+    target_match:
+      severity: 'warning'
+    equal: ['alertname', 'instance']
+  
+  # Suppress high alerts when critical alerts are firing
+  - source_match:
+      severity: 'critical'
+    target_match:
+      severity: 'high'
+    equal: ['alertname', 'instance']
+  
+  # Suppress medium alerts when high alerts are firing
+  - source_match:
+      severity: 'high'
+    target_match:
+      severity: 'medium'
+    equal: ['alertname', 'instance']
+  
+  # Suppress alerts when server is down
+  - source_match:
+      alertname: 'WazuhMCPServerDown'
+    target_match_re:
+      alertname: 'WazuhMCP.*'
+    equal: ['instance']
+  
+  # Suppress Redis alerts when Redis is down
+  - source_match:
+      alertname: 'RedisDown'
+    target_match_re:
+      alertname: 'Redis.*'
+    equal: ['instance']
+  
+  # Suppress container alerts when container is down
+  - source_match:
+      alertname: 'ContainerDown'
+    target_match_re:
+      alertname: 'Container.*'
+    equal: ['container_label_com_docker_compose_service']
+
+# Receiver configurations
+receivers:
+  # Default receiver
+  - name: 'default'
+    email_configs:
+      - to: 'ops@wazuh-mcp.local'
+        subject: '[Wazuh MCP] {{ .GroupLabels.alertname }} - {{ .GroupLabels.severity }}'
+        body: |
+          {{ range .Alerts }}
+          Alert: {{ .Annotations.summary }}
+          Description: {{ .Annotations.description }}
+          Severity: {{ .Labels.severity }}
+          Instance: {{ .Labels.instance }}
+          Time: {{ .StartsAt }}
+          {{ end }}
+  
+  # Critical alerts receiver
+  - name: 'critical-alerts'
+    email_configs:
+      - to: 'ops@wazuh-mcp.local,sre@wazuh-mcp.local'
+        subject: '[CRITICAL] {{ .GroupLabels.alertname }} - Immediate Action Required'
+        body: |
+          🚨 CRITICAL ALERT 🚨
+          
+          {{ range .Alerts }}
+          Alert: {{ .Annotations.summary }}
+          Description: {{ .Annotations.description }}
+          Severity: {{ .Labels.severity }}
+          Service: {{ .Labels.service }}
+          Instance: {{ .Labels.instance }}
+          Started: {{ .StartsAt }}
+          Runbook: {{ .Annotations.runbook_url }}
+          Dashboard: {{ .Annotations.dashboard_url }}
+          {{ end }}
+        headers:
+          Priority: 'urgent'
+          X-Priority: '1'
+    
+    slack_configs:
+      - api_url: '${SLACK_WEBHOOK_URL}'
+        channel: '#critical-alerts'
+        username: 'AlertManager'
+        icon_emoji: ':rotating_light:'
+        title: 'Critical Alert - {{ .GroupLabels.alertname }}'
+        text: |
+          {{ range .Alerts }}
+          🚨 *{{ .Annotations.summary }}*
+          
+          *Description:* {{ .Annotations.description }}
+          *Severity:* {{ .Labels.severity }}
+          *Service:* {{ .Labels.service }}
+          *Instance:* {{ .Labels.instance }}
+          *Started:* {{ .StartsAt }}
+          
+          <{{ .Annotations.runbook_url }}|View Runbook> | <{{ .Annotations.dashboard_url }}|View Dashboard>
+          {{ end }}
+        actions:
+          - type: button
+            text: 'View Runbook'
+            url: '{{ .Annotations.runbook_url }}'
+          - type: button
+            text: 'View Dashboard'
+            url: '{{ .Annotations.dashboard_url }}'
+    
+    pagerduty_configs:
+      - service_key: '${PAGERDUTY_SERVICE_KEY}'
+        description: '{{ .GroupLabels.alertname }} - {{ .GroupLabels.severity }}'
+        severity: 'critical'
+        details:
+          summary: '{{ .Annotations.summary }}'
+          source: '{{ .Labels.instance }}'
+          timestamp: '{{ .StartsAt }}'
+          runbook: '{{ .Annotations.runbook_url }}'
+  
+  # High priority alerts receiver
+  - name: 'high-priority-alerts'
+    email_configs:
+      - to: 'ops@wazuh-mcp.local'
+        subject: '[HIGH] {{ .GroupLabels.alertname }} - Action Required'
+        body: |
+          ⚠️ HIGH PRIORITY ALERT ⚠️
+          
+          {{ range .Alerts }}
+          Alert: {{ .Annotations.summary }}
+          Description: {{ .Annotations.description }}
+          Severity: {{ .Labels.severity }}
+          Service: {{ .Labels.service }}
+          Instance: {{ .Labels.instance }}
+          Started: {{ .StartsAt }}
+          Runbook: {{ .Annotations.runbook_url }}
+          {{ end }}
+    
+    slack_configs:
+      - api_url: '${SLACK_WEBHOOK_URL}'
+        channel: '#alerts'
+        username: 'AlertManager'
+        icon_emoji: ':warning:'
+        title: 'High Priority Alert - {{ .GroupLabels.alertname }}'
+        text: |
+          {{ range .Alerts }}
+          ⚠️ *{{ .Annotations.summary }}*
+          
+          *Description:* {{ .Annotations.description }}
+          *Severity:* {{ .Labels.severity }}
+          *Service:* {{ .Labels.service }}
+          *Instance:* {{ .Labels.instance }}
+          *Started:* {{ .StartsAt }}
+          
+          <{{ .Annotations.runbook_url }}|View Runbook>
+          {{ end }}
+  
+  # Medium priority alerts receiver
+  - name: 'medium-priority-alerts'
+    email_configs:
+      - to: 'ops@wazuh-mcp.local'
+        subject: '[MEDIUM] {{ .GroupLabels.alertname }} - Review Required'
+        body: |
+          ℹ️ MEDIUM PRIORITY ALERT ℹ️
+          
+          {{ range .Alerts }}
+          Alert: {{ .Annotations.summary }}
+          Description: {{ .Annotations.description }}
+          Severity: {{ .Labels.severity }}
+          Service: {{ .Labels.service }}
+          Instance: {{ .Labels.instance }}
+          Started: {{ .StartsAt }}
+          {{ end }}
+    
+    slack_configs:
+      - api_url: '${SLACK_WEBHOOK_URL}'
+        channel: '#monitoring'
+        username: 'AlertManager'
+        icon_emoji: ':information_source:'
+        title: 'Medium Priority Alert - {{ .GroupLabels.alertname }}'
+        text: |
+          {{ range .Alerts }}
+          ℹ️ *{{ .Annotations.summary }}*
+          
+          *Description:* {{ .Annotations.description }}
+          *Service:* {{ .Labels.service }}
+          *Instance:* {{ .Labels.instance }}
+          {{ end }}
+  
+  # Low priority alerts receiver
+  - name: 'low-priority-alerts'
+    email_configs:
+      - to: 'ops@wazuh-mcp.local'
+        subject: '[LOW] {{ .GroupLabels.alertname }} - FYI'
+        body: |
+          📋 LOW PRIORITY ALERT 📋
+          
+          {{ range .Alerts }}
+          Alert: {{ .Annotations.summary }}
+          Description: {{ .Annotations.description }}
+          Service: {{ .Labels.service }}
+          Instance: {{ .Labels.instance }}
+          Started: {{ .StartsAt }}
+          {{ end }}
+  
+  # Security team receiver
+  - name: 'security-team'
+    email_configs:
+      - to: 'security@wazuh-mcp.local,soc@wazuh-mcp.local'
+        subject: '[SECURITY] {{ .GroupLabels.alertname }} - Immediate Investigation Required'
+        body: |
+          🔒 SECURITY ALERT 🔒
+          
+          {{ range .Alerts }}
+          Alert: {{ .Annotations.summary }}
+          Description: {{ .Annotations.description }}
+          Severity: {{ .Labels.severity }}
+          Service: {{ .Labels.service }}
+          Instance: {{ .Labels.instance }}
+          Started: {{ .StartsAt }}
+          Runbook: {{ .Annotations.runbook_url }}
+          
+          IMMEDIATE INVESTIGATION REQUIRED
+          {{ end }}
+        headers:
+          Priority: 'urgent'
+          X-Priority: '1'
+    
+    slack_configs:
+      - api_url: '${SLACK_WEBHOOK_URL}'
+        channel: '#security-alerts'
+        username: 'SecurityBot'
+        icon_emoji: ':lock:'
+        title: 'Security Alert - {{ .GroupLabels.alertname }}'
+        text: |
+          {{ range .Alerts }}
+          🔒 *SECURITY ALERT*
+          
+          *Alert:* {{ .Annotations.summary }}
+          *Description:* {{ .Annotations.description }}
+          *Severity:* {{ .Labels.severity }}
+          *Service:* {{ .Labels.service }}
+          *Instance:* {{ .Labels.instance }}
+          *Started:* {{ .StartsAt }}
+          
+          <{{ .Annotations.runbook_url }}|View Security Runbook>
+          
+          @channel - Immediate investigation required
+          {{ end }}
+    
+    pagerduty_configs:
+      - service_key: '${PAGERDUTY_SECURITY_KEY}'
+        description: 'Security Alert: {{ .GroupLabels.alertname }}'
+        severity: 'critical'
+        details:
+          summary: '{{ .Annotations.summary }}'
+          source: '{{ .Labels.instance }}'
+          timestamp: '{{ .StartsAt }}'
+          runbook: '{{ .Annotations.runbook_url }}'
+  
+  # Infrastructure team receiver
+  - name: 'infrastructure-team'
+    email_configs:
+      - to: 'infrastructure@wazuh-mcp.local'
+        subject: '[INFRA] {{ .GroupLabels.alertname }} - System Issue'
+        body: |
+          🏗️ INFRASTRUCTURE ALERT 🏗️
+          
+          {{ range .Alerts }}
+          Alert: {{ .Annotations.summary }}
+          Description: {{ .Annotations.description }}
+          Severity: {{ .Labels.severity }}
+          Service: {{ .Labels.service }}
+          Instance: {{ .Labels.instance }}
+          Started: {{ .StartsAt }}
+          Runbook: {{ .Annotations.runbook_url }}
+          {{ end }}
+    
+    slack_configs:
+      - api_url: '${SLACK_WEBHOOK_URL}'
+        channel: '#infrastructure'
+        username: 'InfraBot'
+        icon_emoji: ':building_construction:'
+        title: 'Infrastructure Alert - {{ .GroupLabels.alertname }}'
+        text: |
+          {{ range .Alerts }}
+          🏗️ *{{ .Annotations.summary }}*
+          
+          *Description:* {{ .Annotations.description }}
+          *Service:* {{ .Labels.service }}
+          *Instance:* {{ .Labels.instance }}
+          *Started:* {{ .StartsAt }}
+          {{ end }}
+  
+  # Performance team receiver
+  - name: 'performance-team'
+    email_configs:
+      - to: 'performance@wazuh-mcp.local'
+        subject: '[PERF] {{ .GroupLabels.alertname }} - Performance Issue'
+        body: |
+          ⚡ PERFORMANCE ALERT ⚡
+          
+          {{ range .Alerts }}
+          Alert: {{ .Annotations.summary }}
+          Description: {{ .Annotations.description }}
+          Severity: {{ .Labels.severity }}
+          Service: {{ .Labels.service }}
+          Instance: {{ .Labels.instance }}
+          Started: {{ .StartsAt }}
+          {{ end }}
+    
+    slack_configs:
+      - api_url: '${SLACK_WEBHOOK_URL}'
+        channel: '#performance'
+        username: 'PerfBot'
+        icon_emoji: ':zap:'
+        title: 'Performance Alert - {{ .GroupLabels.alertname }}'
+        text: |
+          {{ range .Alerts }}
+          ⚡ *{{ .Annotations.summary }}*
+          
+          *Description:* {{ .Annotations.description }}
+          *Service:* {{ .Labels.service }}
+          *Instance:* {{ .Labels.instance }}
+          {{ end }}
+  
+  # Maintenance alerts receiver
+  - name: 'maintenance-alerts'
+    email_configs:
+      - to: 'ops@wazuh-mcp.local'
+        subject: '[MAINTENANCE] {{ .GroupLabels.alertname }} - During Maintenance Window'
+        body: |
+          🔧 MAINTENANCE ALERT 🔧
+          
+          {{ range .Alerts }}
+          Alert: {{ .Annotations.summary }}
+          Description: {{ .Annotations.description }}
+          Service: {{ .Labels.service }}
+          Instance: {{ .Labels.instance }}
+          Started: {{ .StartsAt }}
+          
+          Note: This alert occurred during a maintenance window
+          {{ end }}
+  
+  # Development environment receiver
+  - name: 'dev-alerts'
+    slack_configs:
+      - api_url: '${SLACK_WEBHOOK_URL}'
+        channel: '#dev-alerts'
+        username: 'DevBot'
+        icon_emoji: ':computer:'
+        title: 'Development Alert - {{ .GroupLabels.alertname }}'
+        text: |
+          {{ range .Alerts }}
+          💻 *{{ .Annotations.summary }}*
+          
+          *Description:* {{ .Annotations.description }}
+          *Service:* {{ .Labels.service }}
+          *Instance:* {{ .Labels.instance }}
+          {{ end }}
+  
+  # Null receiver (for suppressed alerts)
+  - name: 'null'
+
+# Muting/Silencing configuration
+mute_time_intervals:
+  # Maintenance window
+  - name: maintenance-window
+    time_intervals:
+      - times:
+          - start_time: '02:00'
+            end_time: '04:00'
+        weekdays: ['sunday']
+        months: ['1:12']
+  
+  # Off-hours for low priority alerts
+  - name: off-hours
+    time_intervals:
+      - times:
+          - start_time: '18:00'
+            end_time: '08:00'
+        weekdays: ['monday:friday']
+      - times:
+          - start_time: '00:00'
+            end_time: '23:59'
+        weekdays: ['saturday', 'sunday']
+  
+  # Holiday periods
+  - name: holidays
+    time_intervals:
+      - times:
+          - start_time: '00:00'
+            end_time: '23:59'
+        days_of_month: ['25']
+        months: ['12']  # Christmas
+      - times:
+          - start_time: '00:00'
+            end_time: '23:59'
+        days_of_month: ['1']
+        months: ['1']   # New Year

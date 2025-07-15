@@ -5,7 +5,7 @@ import pytest
 from unittest.mock import patch
 from pydantic import ValidationError
 
-from src.config import WazuhConfig, ConfigurationError
+from wazuh_mcp_server.config import WazuhConfig, ConfigurationError
 
 
 class TestWazuhConfig:

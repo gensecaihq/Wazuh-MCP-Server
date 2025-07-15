@@ -1,0 +1,81 @@
+# Production Requirements for Wazuh MCP Server v3.0.0 (Remote MCP + Docker)
+# ===============================================================================
+# This file contains production-grade dependencies with exact pinned versions
+# for stability and security in production environments.
+
+# Core MCP and HTTP Framework
+mcp==1.10.1                      # MCP protocol implementation
+aiohttp==3.9.1                   # Async HTTP client and server framework
+aiofiles==23.2.0                 # Async file operations
+uvloop==0.19.0; sys_platform != "win32"  # Fast event loop for Unix
+
+# FastAPI for HTTP/SSE server
+fastapi==0.104.1                 # Fast, modern web framework
+uvicorn==0.24.0                  # ASGI server implementation
+starlette==0.27.0                # Lightweight ASGI framework
+
+# Server-Sent Events (SSE) support
+sse-starlette==1.6.5             # SSE support for Starlette/FastAPI
+
+# OAuth 2.0 and Security
+authlib==1.2.1                   # OAuth 2.0 and OpenID Connect
+python-jose[cryptography]==3.3.0 # JWT token handling
+passlib[bcrypt]==1.7.4           # Password hashing
+python-multipart==0.0.6          # Form data parsing
+
+# Data Validation and Configuration
+pydantic==2.5.0                  # Data validation and settings
+pydantic-settings==2.1.0         # Settings management
+python-dotenv==1.0.0             # Environment variable loading
+
+# HTTP and SSL
+urllib3==2.1.0                   # HTTP client library with security patches
+certifi==2023.11.17              # SSL certificate bundle
+requests==2.31.0                 # HTTP library for external APIs
+
+# System Monitoring and Performance
+psutil==5.9.6                    # System and process monitoring
+prometheus-client==0.19.0        # Metrics collection for monitoring
+
+# Logging and Error Handling
+structlog==23.2.0                # Structured logging
+sentry-sdk==1.38.0               # Error tracking and monitoring
+python-json-logger==2.0.7        # JSON logging formatter
+
+# Security and Cryptography
+cryptography==41.0.7             # Cryptographic operations
+bcrypt==4.1.1                    # Password hashing
+
+# Production Utilities
+click==8.1.7                     # CLI framework
+rich==13.7.0                     # Rich text and progress in terminal
+
+# Docker and Container Support
+gunicorn==21.2.0                 # WSGI/ASGI server for production
+supervisor==4.2.5                # Process management
+
+# Optional: Caching and Database
+redis==5.0.1                     # Redis client for caching
+asyncpg==0.29.0                  # PostgreSQL driver for audit logging
+
+# Testing and Development Dependencies (for v3.0.0 validation)
+pytest==7.4.3
+pytest-asyncio==0.21.1
+pytest-cov==4.1.0
+httpx==0.25.2                    # Test HTTP client
+pytest-mock==3.12.0              # Mocking support
+
+# Code Quality Tools
+black==23.11.0
+flake8==6.1.0
+mypy==1.7.1
+bandit==1.7.5                    # Security linting
+
+# Docker utilities
+docker==6.1.3                    # Docker API client
+
+# OpenTelemetry for Observability
+opentelemetry-api==1.21.0
+opentelemetry-sdk==1.21.0
+opentelemetry-instrumentation-fastapi==0.42b0
+opentelemetry-exporter-prometheus==1.12.0rc1

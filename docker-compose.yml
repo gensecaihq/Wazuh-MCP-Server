@@ -1,0 +1,225 @@
+# Docker Compose for Wazuh MCP Server v3.0.0
+# =============================================
+# Production-ready configuration with monitoring and security
+
+version: '3.8'
+
+services:
+  wazuh-mcp-server:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        BUILDPLATFORM: ${BUILDPLATFORM:-linux/amd64}
+        TARGETPLATFORM: ${TARGETPLATFORM:-linux/amd64}
+    image: wazuh-mcp-server:3.0.0
+    container_name: wazuh-mcp-server
+    restart: unless-stopped
+    
+    # Security settings
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    cap_add:
+      - NET_BIND_SERVICE
+    read_only: true
+    user: "1000:1000"
+    
+    # Network settings
+    ports:
+      - "8443:8443"  # MCP Server (HTTPS)
+      - "9090:9090"  # Metrics
+    
+    # Environment variables
+    environment:
+      # Server configuration
+      - MCP_SERVER_HOST=0.0.0.0
+      - MCP_SERVER_PORT=8443
+      - MCP_SERVER_MODE=remote
+      - MCP_TRANSPORT=sse
+      
+      # Wazuh API configuration
+      - WAZUH_API_URL=${WAZUH_API_URL:-https://wazuh-manager:55000}
+      - WAZUH_API_USERNAME=${WAZUH_API_USERNAME:-wazuh}
+      - WAZUH_API_PASSWORD=${WAZUH_API_PASSWORD}
+      - WAZUH_API_VERIFY_SSL=${WAZUH_API_VERIFY_SSL:-true}
+      
+      # OAuth configuration
+      - OAUTH_ENABLED=${OAUTH_ENABLED:-true}
+      - JWT_SECRET_KEY=${JWT_SECRET_KEY}
+      
+      # Logging configuration
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+      - LOG_FORMAT=json
+      
+      # Monitoring configuration
+      - ENABLE_METRICS=${ENABLE_METRICS:-true}
+      - METRICS_PORT=9090
+      
+      # Performance settings
+      - MAX_CONNECTIONS=${MAX_CONNECTIONS:-1000}
+      - REQUEST_TIMEOUT=${REQUEST_TIMEOUT:-30}
+      
+    # Volume mounts
+    volumes:
+      - ./config:/app/config:ro
+      - ./logs:/app/logs:rw
+      - ./data:/app/data:rw
+      - /tmp:/tmp:rw
+    
+    # Health check
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8443/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    
+    # Resource limits
+    deploy:
+      resources:
+        limits:
+          cpus: '2.0'
+          memory: 1G
+        reservations:
+          cpus: '0.5'
+          memory: 512M
+    
+    # Logging configuration
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    
+    # Dependencies
+    depends_on:
+      - redis
+      - prometheus
+    
+    # Networks
+    networks:
+      - wazuh-mcp-network
+
+  # Redis for caching and session storage
+  redis:
+    image: redis:7-alpine
+    container_name: wazuh-mcp-redis
+    restart: unless-stopped
+    
+    # Security settings
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    read_only: true
+    user: "999:999"
+    
+    # Configuration
+    command: redis-server --appendonly yes --requirepass ${REDIS_PASSWORD:-redis-secret}
+    
+    # Volumes
+    volumes:
+      - redis-data:/data
+    
+    # Health check
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    
+    # Networks
+    networks:
+      - wazuh-mcp-network
+
+  # Prometheus for metrics collection
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: wazuh-mcp-prometheus
+    restart: unless-stopped
+    
+    # Security settings
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    read_only: true
+    user: "65534:65534"
+    
+    # Ports
+    ports:
+      - "9091:9090"
+    
+    # Configuration
+    volumes:
+      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus-data:/prometheus
+    
+    # Command
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--web.console.libraries=/etc/prometheus/console_libraries'
+      - '--web.console.templates=/etc/prometheus/consoles'
+      - '--web.enable-lifecycle'
+      - '--web.enable-admin-api'
+    
+    # Networks
+    networks:
+      - wazuh-mcp-network
+
+  # Grafana for visualization (optional)
+  grafana:
+    image: grafana/grafana:latest
+    container_name: wazuh-mcp-grafana
+    restart: unless-stopped
+    
+    # Security settings
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    user: "472:472"
+    
+    # Ports
+    ports:
+      - "3000:3000"
+    
+    # Environment
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_PASSWORD:-admin}
+      - GF_SECURITY_ADMIN_USER=${GRAFANA_USER:-admin}
+    
+    # Volumes
+    volumes:
+      - grafana-data:/var/lib/grafana
+      - ./monitoring/grafana/dashboards:/var/lib/grafana/dashboards
+      - ./monitoring/grafana/provisioning:/etc/grafana/provisioning
+    
+    # Dependencies
+    depends_on:
+      - prometheus
+    
+    # Networks
+    networks:
+      - wazuh-mcp-network
+
+# Networks
+networks:
+  wazuh-mcp-network:
+    driver: bridge
+    ipam:
+      driver: default
+      config:
+        - subnet: 172.20.0.0/16
+
+# Volumes
+volumes:
+  redis-data:
+    driver: local
+  prometheus-data:
+    driver: local
+  grafana-data:
+    driver: local

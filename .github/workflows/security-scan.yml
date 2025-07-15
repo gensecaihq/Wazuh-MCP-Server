@@ -1,0 +1,543 @@
+name: Security Scanning
+
+on:
+  push:
+    branches: [ main, develop, v2-enhancements ]
+  pull_request:
+    branches: [ main, develop ]
+  schedule:
+    # Run security scan daily at 2 AM UTC
+    - cron: '0 2 * * *'
+  workflow_dispatch:
+
+env:
+  PYTHON_VERSION: '3.11'
+  NODE_VERSION: '18'
+
+jobs:
+  # Static Application Security Testing (SAST)
+  sast-scan:
+    name: Static Application Security Testing
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+    
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: ${{ env.PYTHON_VERSION }}
+    
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install bandit[toml] safety semgrep
+        if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
+    
+    - name: Run Bandit security scan
+      run: |
+        bandit -r src/ -f json -o bandit-report.json || true
+        bandit -r src/ -f txt
+      continue-on-error: true
+    
+    - name: Run Safety check for known vulnerabilities
+      run: |
+        safety check --json --output safety-report.json || true
+        safety check
+      continue-on-error: true
+    
+    - name: Run Semgrep security scan
+      run: |
+        semgrep --config=auto --json --output=semgrep-report.json src/ || true
+        semgrep --config=auto src/
+      continue-on-error: true
+    
+    - name: Upload Bandit results to GitHub Security tab
+      uses: github/codeql-action/upload-sarif@v2
+      if: always()
+      with:
+        sarif_file: bandit-report.json
+        category: bandit
+    
+    - name: Upload security scan artifacts
+      uses: actions/upload-artifact@v3
+      if: always()
+      with:
+        name: security-scan-reports
+        path: |
+          bandit-report.json
+          safety-report.json
+          semgrep-report.json
+        retention-days: 30
+
+  # Dependency Vulnerability Scanning
+  dependency-scan:
+    name: Dependency Vulnerability Scan
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+    
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: ${{ env.PYTHON_VERSION }}
+    
+    - name: Install pip-audit
+      run: pip install pip-audit
+    
+    - name: Run pip-audit
+      run: |
+        pip-audit --desc --format=json --output=pip-audit-report.json || true
+        pip-audit --desc
+      continue-on-error: true
+    
+    - name: Run Snyk to check for vulnerabilities
+      uses: snyk/actions/python@master
+      env:
+        SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
+      with:
+        args: --severity-threshold=high --file=requirements.txt
+      continue-on-error: true
+    
+    - name: Upload Snyk results to GitHub Security tab
+      uses: github/codeql-action/upload-sarif@v2
+      if: always()
+      with:
+        sarif_file: snyk.sarif
+        category: snyk
+    
+    - name: Upload dependency scan artifacts
+      uses: actions/upload-artifact@v3
+      if: always()
+      with:
+        name: dependency-scan-reports
+        path: |
+          pip-audit-report.json
+          snyk.sarif
+        retention-days: 30
+
+  # Container Security Scanning
+  container-scan:
+    name: Container Security Scan
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+    
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@v3
+    
+    - name: Build Docker image
+      run: |
+        docker build -t wazuh-mcp-server:security-scan .
+    
+    - name: Run Trivy vulnerability scanner
+      uses: aquasecurity/trivy-action@master
+      with:
+        image-ref: 'wazuh-mcp-server:security-scan'
+        format: 'sarif'
+        output: 'trivy-results.sarif'
+    
+    - name: Upload Trivy scan results to GitHub Security tab
+      uses: github/codeql-action/upload-sarif@v2
+      if: always()
+      with:
+        sarif_file: 'trivy-results.sarif'
+        category: trivy
+    
+    - name: Run Docker Bench for Security
+      run: |
+        docker run --rm --net host --pid host --userns host --cap-add audit_control \
+          -e DOCKER_CONTENT_TRUST=$DOCKER_CONTENT_TRUST \
+          -v /var/lib:/var/lib:ro \
+          -v /var/run/docker.sock:/var/run/docker.sock:ro \
+          -v /usr/lib/systemd:/usr/lib/systemd:ro \
+          -v /etc:/etc:ro \
+          --label docker_bench_security \
+          docker/docker-bench-security > docker-bench-results.txt || true
+    
+    - name: Upload container scan artifacts
+      uses: actions/upload-artifact@v3
+      if: always()
+      with:
+        name: container-scan-reports
+        path: |
+          trivy-results.sarif
+          docker-bench-results.txt
+        retention-days: 30
+
+  # Secrets Scanning
+  secrets-scan:
+    name: Secrets Scanning
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+    
+    - name: Run TruffleHog OSS
+      uses: trufflesecurity/trufflehog@main
+      with:
+        path: ./
+        base: main
+        head: HEAD
+        extra_args: --debug --only-verified
+    
+    - name: Run GitLeaks
+      uses: gitleaks/gitleaks-action@v2
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        GITLEAKS_LICENSE: ${{ secrets.GITLEAKS_LICENSE }}
+      with:
+        config-path: .gitleaks.toml
+    
+    - name: Run detect-secrets
+      run: |
+        pip install detect-secrets
+        detect-secrets scan --all-files --force-use-all-plugins --exclude-files '\.git/.*' > .secrets.baseline
+        detect-secrets audit .secrets.baseline
+      continue-on-error: true
+    
+    - name: Upload secrets scan artifacts
+      uses: actions/upload-artifact@v3
+      if: always()
+      with:
+        name: secrets-scan-reports
+        path: |
+          .secrets.baseline
+        retention-days: 30
+
+  # Code Quality and Security Analysis
+  codeql-analysis:
+    name: CodeQL Analysis
+    runs-on: ubuntu-latest
+    permissions:
+      actions: read
+      contents: read
+      security-events: write
+    
+    strategy:
+      fail-fast: false
+      matrix:
+        language: [ 'python' ]
+    
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+    
+    - name: Initialize CodeQL
+      uses: github/codeql-action/init@v2
+      with:
+        languages: ${{ matrix.language }}
+        queries: security-extended,security-and-quality
+    
+    - name: Autobuild
+      uses: github/codeql-action/autobuild@v2
+    
+    - name: Perform CodeQL Analysis
+      uses: github/codeql-action/analyze@v2
+      with:
+        category: "/language:${{matrix.language}}"
+
+  # Infrastructure as Code Security
+  iac-scan:
+    name: Infrastructure as Code Security
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+    
+    - name: Run Checkov
+      uses: bridgecrewio/checkov-action@master
+      with:
+        directory: .
+        framework: dockerfile,docker_compose,secrets
+        output_format: sarif
+        output_file_path: checkov-results.sarif
+        soft_fail: true
+    
+    - name: Upload Checkov results to GitHub Security tab
+      uses: github/codeql-action/upload-sarif@v2
+      if: always()
+      with:
+        sarif_file: checkov-results.sarif
+        category: checkov
+    
+    - name: Run Terraform Security Scan (if applicable)
+      run: |
+        if [ -d "terraform" ]; then
+          docker run --rm -v "$(pwd):/src" aquasec/tfsec /src/terraform --format=json > tfsec-results.json || true
+        fi
+      continue-on-error: true
+    
+    - name: Upload IaC scan artifacts
+      uses: actions/upload-artifact@v3
+      if: always()
+      with:
+        name: iac-scan-reports
+        path: |
+          checkov-results.sarif
+          tfsec-results.json
+        retention-days: 30
+
+  # License Compliance Check
+  license-scan:
+    name: License Compliance Check
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+    
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: ${{ env.PYTHON_VERSION }}
+    
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install pip-licenses licensecheck
+        if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
+    
+    - name: Check licenses
+      run: |
+        pip-licenses --format=json --output-file=licenses-report.json
+        pip-licenses --format=plain-vertical
+        licensecheck --dependencies --zero
+      continue-on-error: true
+    
+    - name: Upload license scan artifacts
+      uses: actions/upload-artifact@v3
+      if: always()
+      with:
+        name: license-scan-reports
+        path: |
+          licenses-report.json
+        retention-days: 30
+
+  # Security Compliance Check
+  compliance-check:
+    name: Security Compliance Check
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+    
+    - name: Run security compliance checks
+      run: |
+        # Check for security.md file
+        if [ ! -f "SECURITY.md" ]; then
+          echo "❌ SECURITY.md file is missing"
+          exit 1
+        fi
+        
+        # Check for proper .gitignore
+        if [ ! -f ".gitignore" ]; then
+          echo "❌ .gitignore file is missing"
+          exit 1
+        fi
+        
+        # Check for secrets in common files
+        echo "🔍 Checking for secrets in configuration files..."
+        if grep -r "password\|secret\|key" --include="*.yml" --include="*.yaml" --include="*.json" . | grep -v "example"; then
+          echo "❌ Potential secrets found in configuration files"
+          exit 1
+        fi
+        
+        # Check for proper file permissions in scripts
+        echo "🔍 Checking script file permissions..."
+        find . -name "*.sh" -type f ! -perm 755 -exec echo "❌ Script {} does not have proper permissions" \; -exec chmod 755 {} \;
+        
+        # Check for hardcoded IPs
+        echo "🔍 Checking for hardcoded IP addresses..."
+        if grep -r "127\.0\.0\.1\|localhost" --include="*.py" --include="*.js" --include="*.yml" src/ | grep -v "example\|test"; then
+          echo "⚠️  Hardcoded IP addresses found"
+        fi
+        
+        echo "✅ Security compliance check completed"
+    
+    - name: Check Docker security best practices
+      run: |
+        echo "🔍 Checking Dockerfile security best practices..."
+        
+        # Check for non-root user
+        if ! grep -q "USER" Dockerfile; then
+          echo "❌ Dockerfile should specify a non-root user"
+          exit 1
+        fi
+        
+        # Check for specific version tags
+        if grep -q "FROM.*:latest" Dockerfile; then
+          echo "❌ Dockerfile should not use 'latest' tag"
+          exit 1
+        fi
+        
+        # Check for HEALTHCHECK
+        if ! grep -q "HEALTHCHECK" Dockerfile; then
+          echo "⚠️  Dockerfile should include HEALTHCHECK instruction"
+        fi
+        
+        echo "✅ Docker security check completed"
+
+  # Generate Security Report
+  security-report:
+    name: Generate Security Report
+    runs-on: ubuntu-latest
+    needs: [sast-scan, dependency-scan, container-scan, secrets-scan, iac-scan, license-scan, compliance-check]
+    if: always()
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+    
+    - name: Download all artifacts
+      uses: actions/download-artifact@v3
+      with:
+        path: security-reports
+    
+    - name: Generate security summary
+      run: |
+        echo "# Security Scan Summary" > security-summary.md
+        echo "**Date:** $(date)" >> security-summary.md
+        echo "**Repository:** ${{ github.repository }}" >> security-summary.md
+        echo "**Branch:** ${{ github.ref_name }}" >> security-summary.md
+        echo "**Commit:** ${{ github.sha }}" >> security-summary.md
+        echo "" >> security-summary.md
+        
+        echo "## Scan Results" >> security-summary.md
+        echo "| Scan Type | Status | Report |" >> security-summary.md
+        echo "|-----------|--------|--------|" >> security-summary.md
+        
+        # Check each scan result
+        for scan in sast-scan dependency-scan container-scan secrets-scan iac-scan license-scan compliance-check; do
+          if [ -d "security-reports/${scan}-reports" ]; then
+            echo "| $scan | ✅ Completed | [View Report](security-reports/${scan}-reports/) |" >> security-summary.md
+          else
+            echo "| $scan | ❌ Failed | N/A |" >> security-summary.md
+          fi
+        done
+        
+        echo "" >> security-summary.md
+        echo "## Recommendations" >> security-summary.md
+        echo "- Review all security scan results" >> security-summary.md
+        echo "- Address any high or critical vulnerabilities" >> security-summary.md
+        echo "- Update dependencies with known vulnerabilities" >> security-summary.md
+        echo "- Ensure all secrets are properly managed" >> security-summary.md
+        echo "- Follow security best practices for Docker" >> security-summary.md
+        
+        cat security-summary.md
+    
+    - name: Upload security summary
+      uses: actions/upload-artifact@v3
+      with:
+        name: security-summary
+        path: security-summary.md
+        retention-days: 90
+    
+    - name: Comment on PR with security summary
+      if: github.event_name == 'pull_request'
+      uses: actions/github-script@v6
+      with:
+        script: |
+          const fs = require('fs');
+          const summary = fs.readFileSync('security-summary.md', 'utf8');
+          
+          github.rest.issues.createComment({
+            issue_number: context.issue.number,
+            owner: context.repo.owner,
+            repo: context.repo.repo,
+            body: summary
+          });
+
+  # Notify security team
+  notify-security:
+    name: Notify Security Team
+    runs-on: ubuntu-latest
+    needs: [security-report]
+    if: always() && (github.ref == 'refs/heads/main' || github.event_name == 'schedule')
+    
+    steps:
+    - name: Send Slack notification
+      uses: 8398a7/action-slack@v3
+      with:
+        status: custom
+        custom_payload: |
+          {
+            "text": "Security scan completed for ${{ github.repository }}",
+            "attachments": [
+              {
+                "color": "${{ job.status == 'success' && 'good' || 'danger' }}",
+                "fields": [
+                  {
+                    "title": "Repository",
+                    "value": "${{ github.repository }}",
+                    "short": true
+                  },
+                  {
+                    "title": "Branch",
+                    "value": "${{ github.ref_name }}",
+                    "short": true
+                  },
+                  {
+                    "title": "Status",
+                    "value": "${{ job.status }}",
+                    "short": true
+                  },
+                  {
+                    "title": "Commit",
+                    "value": "${{ github.sha }}",
+                    "short": true
+                  }
+                ]
+              }
+            ]
+          }
+      env:
+        SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+      if: always()
+    
+    - name: Send email notification
+      uses: dawidd6/action-send-mail@v3
+      with:
+        server_address: ${{ secrets.SMTP_SERVER }}
+        server_port: ${{ secrets.SMTP_PORT }}
+        username: ${{ secrets.SMTP_USERNAME }}
+        password: ${{ secrets.SMTP_PASSWORD }}
+        subject: "Security Scan Results - ${{ github.repository }}"
+        body: |
+          Security scan completed for ${{ github.repository }}
+          
+          Branch: ${{ github.ref_name }}
+          Commit: ${{ github.sha }}
+          Status: ${{ job.status }}
+          
+          Please review the security scan results in the GitHub Actions tab.
+        to: ${{ secrets.SECURITY_EMAIL }}
+        from: "GitHub Actions <${{ secrets.SMTP_USERNAME }}>"
+      if: always()
