@@ -136,10 +136,10 @@ chmod 644 certs/server.crt
 
 ```bash
 # Deploy high availability stack
-docker-compose -f docker-compose.ha.yml up -d
+docker compose -f docker compose.ha.yml up -d
 
 # Verify deployment
-docker-compose -f docker-compose.ha.yml ps
+docker compose -f docker compose.ha.yml ps
 ```
 
 #### Step 5: Post-Deployment Verification

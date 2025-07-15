@@ -31,7 +31,7 @@ log_error() {
 check_docker_services() {
     log_info "Checking Docker services..."
     
-    if ! docker-compose -f "$PROJECT_ROOT/$COMPOSE_FILE" ps | grep -q "Up"; then
+    if ! docker compose -f "$PROJECT_ROOT/$COMPOSE_FILE" ps | grep -q "Up"; then
         log_error "No Docker services are running"
         return 1
     fi
@@ -50,11 +50,11 @@ create_docker_backup() {
     
     # Stop services gracefully
     log_info "Stopping services gracefully..."
-    docker-compose -f "$PROJECT_ROOT/$COMPOSE_FILE" stop
+    docker compose -f "$PROJECT_ROOT/$COMPOSE_FILE" stop
     
     # Create volume backups
     log_info "Backing up Docker volumes..."
-    local volumes=$(docker-compose -f "$PROJECT_ROOT/$COMPOSE_FILE" config --volumes)
+    local volumes=$(docker compose -f "$PROJECT_ROOT/$COMPOSE_FILE" config --volumes)
     
     for volume in $volumes; do
         log_info "Backing up volume: $volume"
@@ -67,7 +67,7 @@ create_docker_backup() {
     
     # Backup container configurations
     log_info "Backing up container configurations..."
-    docker-compose -f "$PROJECT_ROOT/$COMPOSE_FILE" config > "$backup_path/docker-compose.yml"
+    docker compose -f "$PROJECT_ROOT/$COMPOSE_FILE" config > "$backup_path/docker-compose.yml"
     
     # Backup environment files
     if [ -f "$PROJECT_ROOT/.env" ]; then
@@ -93,21 +93,21 @@ create_docker_backup() {
     "hostname": "$(hostname)",
     "compose_file": "$COMPOSE_FILE",
     "volumes": [$(echo "$volumes" | sed 's/^/"/; s/$/"/; s/\n/", "/g' | tr -d '\n')],
-    "containers": [$(docker-compose -f "$PROJECT_ROOT/$COMPOSE_FILE" ps --services | sed 's/^/"/; s/$/"/; s/\n/", "/g' | tr -d '\n')]
+    "containers": [$(docker compose -f "$PROJECT_ROOT/$COMPOSE_FILE" ps --services | sed 's/^/"/; s/$/"/; s/\n/", "/g' | tr -d '\n')]
 }
 EOF
     
     # Restart services
     log_info "Restarting services..."
-    docker-compose -f "$PROJECT_ROOT/$COMPOSE_FILE" up -d
+    docker compose -f "$PROJECT_ROOT/$COMPOSE_FILE" up -d
     
     # Verify services are healthy
     log_info "Verifying service health..."
     sleep 30
     
     local healthy=true
-    for service in $(docker-compose -f "$PROJECT_ROOT/$COMPOSE_FILE" ps --services); do
-        if ! docker-compose -f "$PROJECT_ROOT/$COMPOSE_FILE" ps "$service" | grep -q "Up"; then
+    for service in $(docker compose -f "$PROJECT_ROOT/$COMPOSE_FILE" ps --services); do
+        if ! docker compose -f "$PROJECT_ROOT/$COMPOSE_FILE" ps "$service" | grep -q "Up"; then
             log_error "Service $service is not healthy after restart"
             healthy=false
         fi
@@ -159,7 +159,7 @@ restore_docker_backup() {
     
     # Stop current services
     log_info "Stopping current services..."
-    docker-compose -f "$PROJECT_ROOT/$COMPOSE_FILE" down -v
+    docker compose -f "$PROJECT_ROOT/$COMPOSE_FILE" down -v
     
     # Restore volumes
     log_info "Restoring Docker volumes..."
@@ -198,7 +198,7 @@ restore_docker_backup() {
     
     # Start services
     log_info "Starting restored services..."
-    docker-compose -f "$PROJECT_ROOT/$COMPOSE_FILE" up -d
+    docker compose -f "$PROJECT_ROOT/$COMPOSE_FILE" up -d
     
     # Verify restore
     log_info "Verifying restore..."
@@ -206,7 +206,7 @@ restore_docker_backup() {
     
     local restore_success=true
     for service in $containers; do
-        if ! docker-compose -f "$PROJECT_ROOT/$COMPOSE_FILE" ps "$service" | grep -q "Up"; then
+        if ! docker compose -f "$PROJECT_ROOT/$COMPOSE_FILE" ps "$service" | grep -q "Up"; then
             log_error "Service $service failed to start after restore"
             restore_success=false
         fi
@@ -244,7 +244,7 @@ live_backup() {
     
     # Backup volumes while services are running
     log_info "Creating live volume backups..."
-    local volumes=$(docker-compose -f "$PROJECT_ROOT/$COMPOSE_FILE" config --volumes)
+    local volumes=$(docker compose -f "$PROJECT_ROOT/$COMPOSE_FILE" config --volumes)
     
     for volume in $volumes; do
         log_info "Creating live backup of volume: $volume"
@@ -262,7 +262,7 @@ live_backup() {
     log_info "Backing up application state..."
     
     # Trigger Redis save
-    local redis_container=$(docker-compose -f "$PROJECT_ROOT/$COMPOSE_FILE" ps -q redis)
+    local redis_container=$(docker compose -f "$PROJECT_ROOT/$COMPOSE_FILE" ps -q redis)
     if [ -n "$redis_container" ]; then
         docker exec "$redis_container" redis-cli BGSAVE
         
@@ -314,7 +314,7 @@ backup_service() {
     mkdir -p "$backup_path"
     
     # Get service container
-    local container=$(docker-compose -f "$PROJECT_ROOT/$COMPOSE_FILE" ps -q "$service_name")
+    local container=$(docker compose -f "$PROJECT_ROOT/$COMPOSE_FILE" ps -q "$service_name")
     if [ -z "$container" ]; then
         log_error "Service not found: $service_name"
         return 1

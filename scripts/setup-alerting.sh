@@ -76,7 +76,7 @@ check_dependencies() {
     fi
     
     # Check if services are running
-    if ! docker-compose -f "$PROJECT_ROOT/docker-compose.yml" ps | grep -q "Up"; then
+    if ! docker compose -f "$PROJECT_ROOT/docker-compose.yml" ps | grep -q "Up"; then
         log_warn "Some services are not running. Consider starting them first."
     fi
     
@@ -491,7 +491,7 @@ cleanup() {
     log_info "Cleaning up alerting configuration..."
     
     # Stop monitoring services
-    docker-compose -f "$ALERTING_DIR/docker-compose.monitoring.yml" down || true
+    docker compose -f "$ALERTING_DIR/docker-compose.monitoring.yml" down || true
     
     # Remove generated files
     rm -rf "$ALERTING_DIR/prometheus/prometheus.yml"

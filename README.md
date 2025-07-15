@@ -58,10 +58,10 @@ cp .env.example .env
 # Edit .env with your Wazuh details and secure credentials
 
 # Deploy production stack
-docker-compose -f docker-compose.ha.yml up -d
+docker compose -f docker-compose.ha.yml up -d
 
 # Verify deployment
-docker-compose -f docker-compose.ha.yml ps
+docker compose -f docker-compose.ha.yml ps
 curl -f http://localhost:8443/health
 ```
 
@@ -408,8 +408,8 @@ docker-compose logs -f wazuh-mcp-server
 docker-compose restart
 
 # Clean deployment
-docker-compose down -v
-docker-compose up -d
+docker compose down -v
+docker compose up -d
 ```
 
 #### SSL Issues

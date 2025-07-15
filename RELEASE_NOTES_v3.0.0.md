@@ -66,7 +66,7 @@ cp .env.example .env
 # Edit .env with your Wazuh credentials
 
 # Deploy complete stack
-docker-compose up -d
+docker compose up -d
 
 # Access services
 # - MCP Server: https://localhost:8443

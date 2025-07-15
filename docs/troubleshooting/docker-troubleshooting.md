@@ -10,17 +10,17 @@ This guide provides comprehensive troubleshooting steps for Docker-related issue
 
 #### Issue: Containers fail to start
 **Symptoms:**
-- `docker-compose up` fails with errors
+- `docker compose up` fails with errors
 - Containers exit immediately after startup
-- Services show as "Exited" in `docker-compose ps`
+- Services show as "Exited" in `docker compose ps`
 
 **Diagnosis:**
 ```bash
 # Check container logs
-docker-compose logs -f wazuh-mcp-server
+docker compose logs -f wazuh-mcp-server
 
 # Check container status
-docker-compose ps
+docker compose ps
 
 # Check system resources
 docker system df
@@ -31,10 +31,10 @@ docker system df
 1. **Check Docker Configuration**
    ```bash
    # Validate Docker Compose file
-   docker-compose config
+   docker compose config
    
    # Check for syntax errors
-   docker-compose -f docker-compose.yml config
+   docker compose -f docker compose.yml config
    ```
 
 2. **Verify Environment Variables**
@@ -132,7 +132,7 @@ docker exec -it wazuh-mcp-server ping prometheus
    # Create custom network
    docker network create wazuh-mcp-network
    
-   # Update docker-compose.yml
+   # Update docker compose.yml
    networks:
      default:
        external:
@@ -144,7 +144,7 @@ docker exec -it wazuh-mcp-server ping prometheus
    # Check port usage
    netstat -tulpn | grep :8443
    
-   # Change port in docker-compose.yml
+   # Change port in docker compose.yml
    ports:
      - "8444:8443"  # Use different external port
    ```
@@ -152,7 +152,7 @@ docker exec -it wazuh-mcp-server ping prometheus
 3. **DNS Resolution**
    ```bash
    # Add custom DNS
-   # In docker-compose.yml
+   # In docker compose.yml
    services:
      wazuh-mcp-server:
        dns:
@@ -185,7 +185,7 @@ docker exec -it wazuh-mcp-server ls -la /app/data
    # Fix volume permissions
    sudo chown -R 1000:1000 ./data
    
-   # Update docker-compose.yml
+   # Update docker compose.yml
    volumes:
      - ./data:/app/data:rw
      - ./logs:/app/logs:rw
@@ -194,7 +194,7 @@ docker exec -it wazuh-mcp-server ls -la /app/data
 2. **Named Volumes**
    ```bash
    # Use named volumes instead of bind mounts
-   # In docker-compose.yml
+   # In docker compose.yml
    volumes:
      wazuh-mcp-data:
        driver: local
@@ -247,7 +247,7 @@ docker exec -it wazuh-mcp-server env | grep JWT
    JWT_SECRET_KEY=your-generated-secret-key
    
    # Restart containers
-   docker-compose restart
+   docker compose restart
    ```
 
 2. **SSL Certificate Issues**
@@ -297,7 +297,7 @@ htop
 
 1. **Memory Limits**
    ```bash
-   # Set memory limits in docker-compose.yml
+   # Set memory limits in docker compose.yml
    services:
      wazuh-mcp-server:
        deploy:
@@ -320,7 +320,7 @@ htop
 3. **Resource Monitoring**
    ```bash
    # Enable resource monitoring
-   # In docker-compose.yml
+   # In docker compose.yml
    services:
      wazuh-mcp-server:
        logging:
@@ -363,7 +363,7 @@ print(f'Memory: {psutil.virtual_memory().percent}%')
 2. **Database Optimization**
    ```bash
    # Redis optimization
-   # In docker-compose.yml
+   # In docker compose.yml
    redis:
      command: redis-server --maxmemory 256mb --maxmemory-policy allkeys-lru
    ```
@@ -371,7 +371,7 @@ print(f'Memory: {psutil.virtual_memory().percent}%')
 3. **Load Balancing**
    ```bash
    # Enable load balancing
-   docker-compose -f docker-compose.ha.yml up -d
+   docker compose -f docker compose.ha.yml up -d
    ```
 
 ### Monitoring and Logging Issues
@@ -415,13 +415,13 @@ curl -f http://localhost:3000/api/health
    ENABLE_AUDIT_LOG=true
    
    # Check log output
-   docker-compose logs -f wazuh-mcp-server
+   docker compose logs -f wazuh-mcp-server
    ```
 
 3. **Monitoring Stack**
    ```bash
    # Deploy full monitoring stack
-   docker-compose -f docker-compose.ha.yml up -d prometheus grafana alertmanager
+   docker compose -f docker compose.ha.yml up -d prometheus grafana alertmanager
    
    # Import Grafana dashboards
    curl -X POST http://admin:admin@localhost:3000/api/dashboards/db \
@@ -474,7 +474,7 @@ curl -f http://localhost:8445/health
 3. **Scaling Configuration**
    ```bash
    # Scale services
-   docker-compose up -d --scale wazuh-mcp-server=3
+   docker compose up -d --scale wazuh-mcp-server=3
    
    # Check service discovery
    docker exec -it haproxy nslookup wazuh-mcp-server
@@ -491,7 +491,7 @@ curl -f http://localhost:8445/health
 **Diagnosis:**
 ```bash
 # Check development configuration
-docker-compose -f docker-compose.dev.yml config
+docker compose -f docker compose.dev.yml config
 
 # Check file watching
 docker exec -it wazuh-mcp-server-dev ls -la /app/src/
@@ -502,7 +502,7 @@ docker exec -it wazuh-mcp-server-dev ls -la /app/src/
 1. **Development Setup**
    ```bash
    # Use development compose file
-   docker-compose -f docker-compose.dev.yml up -d
+   docker compose -f docker compose.dev.yml up -d
    
    # Enable debug mode
    # In .env.dev
@@ -514,7 +514,7 @@ docker exec -it wazuh-mcp-server-dev ls -la /app/src/
 2. **Volume Binding for Development**
    ```bash
    # Bind source code for development
-   # In docker-compose.dev.yml
+   # In docker compose.dev.yml
    volumes:
      - ./src:/app/src:rw
      - ./tests:/app/tests:rw
@@ -536,13 +536,13 @@ docker exec -it wazuh-mcp-server-dev ls -la /app/src/
 #### Step 1: Stop All Services
 ```bash
 # Stop all containers
-docker-compose down
+docker compose down
 
 # Stop and remove all containers
-docker-compose down --remove-orphans
+docker compose down --remove-orphans
 
 # Remove all volumes (WARNING: This will delete all data)
-docker-compose down -v
+docker compose down -v
 ```
 
 #### Step 2: Clean Docker Environment
@@ -563,13 +563,13 @@ docker network prune -f
 #### Step 3: Rebuild and Restart
 ```bash
 # Rebuild images
-docker-compose build --no-cache
+docker compose build --no-cache
 
 # Start services
-docker-compose up -d
+docker compose up -d
 
 # Verify services
-docker-compose ps
+docker compose ps
 ```
 
 ### Backup and Restore
@@ -615,12 +615,12 @@ echo
 
 # Check containers
 echo "Container status:"
-docker-compose ps
+docker compose ps
 echo
 
 # Check logs
 echo "Recent logs:"
-docker-compose logs --tail=20 wazuh-mcp-server
+docker compose logs --tail=20 wazuh-mcp-server
 echo
 
 # Check resources
@@ -712,7 +712,7 @@ echo "=== Performance Monitoring Complete ==="
    USER 1000:1000
    
    # Use read-only root filesystem
-   # In docker-compose.yml
+   # In docker compose.yml
    read_only: true
    tmpfs:
      - /tmp

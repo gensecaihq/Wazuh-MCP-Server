@@ -248,9 +248,9 @@ check_health() {
     log "Performing health checks..."
     
     # Check if all services are running
-    if docker-compose -f "$COMPOSE_FILE" ps | grep -q "Exit"; then
+    if docker compose -f "$COMPOSE_FILE" ps | grep -q "Exit"; then
         error "Some services have exited"
-        docker-compose -f "$COMPOSE_FILE" ps
+        docker compose -f "$COMPOSE_FILE" ps
         return 1
     fi
     
@@ -264,7 +264,7 @@ check_health() {
     done
     
     # Check Redis health
-    if ! docker-compose -f "$COMPOSE_FILE" exec redis-primary redis-cli ping > /dev/null 2>&1; then
+    if ! docker compose -f "$COMPOSE_FILE" exec redis-primary redis-cli ping > /dev/null 2>&1; then
         error "Redis primary is not responding"
         return 1
     fi
@@ -284,15 +284,15 @@ deploy() {
     
     # Pull latest images
     log "Pulling Docker images..."
-    docker-compose -f "$COMPOSE_FILE" pull
+    docker compose -f "$COMPOSE_FILE" pull
     
     # Build custom images
     log "Building custom images..."
-    docker-compose -f "$COMPOSE_FILE" build
+    docker compose -f "$COMPOSE_FILE" build
     
     # Start services
     log "Starting services..."
-    docker-compose -f "$COMPOSE_FILE" up -d
+    docker compose -f "$COMPOSE_FILE" up -d
     
     # Wait for services to be ready
     log "Waiting for services to be ready..."
@@ -313,31 +313,31 @@ deploy() {
 # Stop function
 stop() {
     log "Stopping HA deployment..."
-    docker-compose -f "$COMPOSE_FILE" down
+    docker compose -f "$COMPOSE_FILE" down
     log "HA deployment stopped"
 }
 
 # Status function
 status() {
     log "Checking HA deployment status..."
-    docker-compose -f "$COMPOSE_FILE" ps
+    docker compose -f "$COMPOSE_FILE" ps
     
     # Check cluster status
     log "Cluster status:"
-    docker-compose -f "$COMPOSE_FILE" exec redis-primary redis-cli info replication
+    docker compose -f "$COMPOSE_FILE" exec redis-primary redis-cli info replication
     
     # Check sentinel status
     log "Sentinel status:"
-    docker-compose -f "$COMPOSE_FILE" exec redis-sentinel-1 redis-cli -p 26379 info sentinel
+    docker compose -f "$COMPOSE_FILE" exec redis-sentinel-1 redis-cli -p 26379 info sentinel
 }
 
 # Logs function
 logs() {
     local service=${1:-}
     if [ -n "$service" ]; then
-        docker-compose -f "$COMPOSE_FILE" logs -f "$service"
+        docker compose -f "$COMPOSE_FILE" logs -f "$service"
     else
-        docker-compose -f "$COMPOSE_FILE" logs -f
+        docker compose -f "$COMPOSE_FILE" logs -f
     fi
 }
 
@@ -352,7 +352,7 @@ scale() {
     fi
     
     log "Scaling $service to $replicas replicas..."
-    docker-compose -f "$COMPOSE_FILE" up -d --scale "$service=$replicas"
+    docker compose -f "$COMPOSE_FILE" up -d --scale "$service=$replicas"
 }
 
 # Backup function
@@ -363,8 +363,8 @@ backup() {
     mkdir -p "$backup_dir"
     
     # Backup Redis data
-    docker-compose -f "$COMPOSE_FILE" exec redis-primary redis-cli bgsave
-    docker cp "$(docker-compose -f "$COMPOSE_FILE" ps -q redis-primary):/data/dump.rdb" "$backup_dir/"
+    docker compose -f "$COMPOSE_FILE" exec redis-primary redis-cli bgsave
+    docker cp "$(docker compose -f "$COMPOSE_FILE" ps -q redis-primary):/data/dump.rdb" "$backup_dir/"
     
     # Backup configuration
     cp -r "$CONFIG_DIR" "$backup_dir/"

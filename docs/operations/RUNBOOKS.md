@@ -46,11 +46,11 @@ This document contains operational runbooks for common maintenance, troubleshoot
 2. **Deploy Services**
    ```bash
    # Standard deployment
-   docker-compose up -d
+   docker compose up -d
    
    # Verify deployment
-   docker-compose ps
-   docker-compose logs -f
+   docker compose ps
+   docker compose logs -f
    ```
 
 3. **Verify Health**
@@ -65,13 +65,13 @@ This document contains operational runbooks for common maintenance, troubleshoot
 **Rollback Procedure**:
 ```bash
 # Stop services
-docker-compose down
+docker compose down
 
 # Restore from backup
 ./scripts/restore-backup.sh /path/to/backup
 
 # Restart services
-docker-compose up -d
+docker compose up -d
 ```
 
 ### High Availability Deployment
@@ -105,7 +105,7 @@ docker-compose up -d
 3. **Test Failover**
    ```bash
    # Simulate server failure
-   docker-compose -f docker-compose.ha.yml stop wazuh-mcp-server-1
+   docker compose -f docker compose.ha.yml stop wazuh-mcp-server-1
    
    # Verify automatic failover
    curl -k https://localhost:8443/health
@@ -200,15 +200,15 @@ BACKUP_DIR="/backup/redis/$(date +%Y%m%d_%H%M%S)"
 mkdir -p "$BACKUP_DIR"
 
 # Create Redis backup
-docker-compose exec redis redis-cli BGSAVE
+docker compose exec redis redis-cli BGSAVE
 
 # Wait for backup to complete
-while [ "$(docker-compose exec redis redis-cli LASTSAVE)" -eq "$last_save" ]; do
+while [ "$(docker compose exec redis redis-cli LASTSAVE)" -eq "$last_save" ]; do
     sleep 1
 done
 
 # Copy backup file
-docker cp $(docker-compose ps -q redis):/data/dump.rdb "$BACKUP_DIR/"
+docker cp $(docker compose ps -q redis):/data/dump.rdb "$BACKUP_DIR/"
 
 # Backup configuration
 cp config/redis.conf "$BACKUP_DIR/"
@@ -229,16 +229,16 @@ if [ -z "$BACKUP_PATH" ]; then
 fi
 
 # Stop Redis
-docker-compose stop redis
+docker compose stop redis
 
 # Restore backup
-docker cp "$BACKUP_PATH/dump.rdb" $(docker-compose ps -q redis):/data/
+docker cp "$BACKUP_PATH/dump.rdb" $(docker compose ps -q redis):/data/
 
 # Restore configuration
 cp "$BACKUP_PATH/redis.conf" config/
 
 # Start Redis
-docker-compose start redis
+docker compose start redis
 
 echo "Restore completed from: $BACKUP_PATH"
 ```
@@ -259,7 +259,7 @@ mkdir -p "$BACKUP_DIR"
 cp -r config/ "$BACKUP_DIR/"
 cp -r certs/ "$BACKUP_DIR/"
 cp .env "$BACKUP_DIR/"
-cp docker-compose*.yml "$BACKUP_DIR/"
+cp docker compose*.yml "$BACKUP_DIR/"
 
 # Create tarball
 tar -czf "$BACKUP_DIR.tar.gz" -C "$BACKUP_DIR" .
@@ -296,7 +296,7 @@ openssl x509 -req -days 365 -in certs/wazuh-mcp.csr \
 cat certs/wazuh-mcp.crt certs/wazuh-mcp.key > certs/wazuh-mcp.pem
 
 # Reload services
-docker-compose restart load-balancer
+docker compose restart load-balancer
 ```
 
 ### Security Audit
@@ -332,7 +332,7 @@ grep -r "password\|secret\|key" --include="*.yml" --include="*.yaml" . | grep -v
 
 # Check container security
 echo "5. Container Security:"
-docker-compose ps --format "table {{.Name}}\t{{.State}}\t{{.Ports}}"
+docker compose ps --format "table {{.Name}}\t{{.State}}\t{{.Ports}}"
 
 # Check network security
 echo "6. Network Configuration:"
@@ -421,7 +421,7 @@ echo "tcp-keepalive 300" >> config/redis.conf
 echo "timeout 0" >> config/redis.conf
 
 # Restart Redis
-docker-compose restart redis
+docker compose restart redis
 ```
 
 ### Load Balancer Tuning
@@ -494,7 +494,7 @@ df -h | grep "/$" | awk '{print $3 "/" $2 " (" $5 ")"}'
 **Diagnosis**:
 ```bash
 # Check container logs
-docker-compose logs wazuh-mcp-server
+docker compose logs wazuh-mcp-server
 
 # Check resource usage
 docker stats
@@ -508,7 +508,7 @@ free -h
 
 **Solutions**:
 1. **Insufficient Resources**: Increase memory/CPU allocation
-2. **Port Conflicts**: Change port mappings in docker-compose.yml
+2. **Port Conflicts**: Change port mappings in docker compose.yml
 3. **Permission Issues**: Fix file permissions
 4. **Configuration Errors**: Validate configuration files
 
@@ -527,7 +527,7 @@ redis-cli --latency
 ping wazuh-server
 
 # Check application logs
-docker-compose logs -f wazuh-mcp-server
+docker compose logs -f wazuh-mcp-server
 ```
 
 **Solutions**:
@@ -608,7 +608,7 @@ find "$LOG_DIR" -name "*.log" -mtime +1 -exec gzip {} \;
 find "$LOG_DIR" -name "*.gz" -mtime +$RETENTION_DAYS -delete
 
 # Restart services to create new log files
-docker-compose restart wazuh-mcp-server
+docker compose restart wazuh-mcp-server
 ```
 
 **Health Check**:
@@ -663,8 +663,8 @@ redis-cli --scan --pattern "blacklist:*" | xargs -r redis-cli DEL
 ./scripts/review-user-accounts.sh
 
 # Update dependencies
-docker-compose pull
-docker-compose up -d
+docker compose pull
+docker compose up -d
 
 # Certificate renewal check
 ./scripts/check-certificate-expiry.sh
@@ -696,7 +696,7 @@ sleep 30
 ./scripts/optimize-database.sh
 
 # 5. Restart services
-docker-compose restart
+docker compose restart
 
 # 6. Verify health
 ./scripts/health-check.sh
@@ -722,10 +722,10 @@ echo "Maintenance completed at $(date)" | tee -a logs/maintenance.log
 1. **Assess Impact**
    ```bash
    # Check service status
-   docker-compose ps
+   docker compose ps
    
    # Check logs for errors
-   docker-compose logs --tail=50
+   docker compose logs --tail=50
    
    # Check resource usage
    docker stats
@@ -734,13 +734,13 @@ echo "Maintenance completed at $(date)" | tee -a logs/maintenance.log
 2. **Immediate Actions**
    ```bash
    # Stop all services
-   docker-compose down
+   docker compose down
    
    # Clean up containers
    docker system prune -f
    
    # Restart services
-   docker-compose up -d
+   docker compose up -d
    ```
 
 3. **Verify Recovery**
@@ -749,7 +749,7 @@ echo "Maintenance completed at $(date)" | tee -a logs/maintenance.log
    ./scripts/health-check.sh
    
    # Monitor logs
-   docker-compose logs -f
+   docker compose logs -f
    ```
 
 ### Data Recovery
@@ -769,7 +769,7 @@ if [ -z "$BACKUP_PATH" ]; then
 fi
 
 # Stop all services
-docker-compose down
+docker compose down
 
 # Clear corrupted data
 rm -rf data/redis/*
@@ -778,14 +778,14 @@ rm -rf data/redis/*
 tar -xzf "$BACKUP_PATH" -C .
 
 # Restore database
-docker-compose up -d redis
+docker compose up -d redis
 sleep 10
 
 # Restore application data
-docker cp "$BACKUP_PATH/dump.rdb" $(docker-compose ps -q redis):/data/
+docker cp "$BACKUP_PATH/dump.rdb" $(docker compose ps -q redis):/data/
 
 # Restart all services
-docker-compose up -d
+docker compose up -d
 
 # Verify recovery
 ./scripts/health-check.sh
@@ -816,7 +816,7 @@ docker-compose up -d
    cp logs/* /evidence/logs/
    
    # Capture system state
-   docker-compose ps > /evidence/container-state.txt
+   docker compose ps > /evidence/container-state.txt
    ps aux > /evidence/process-state.txt
    netstat -an > /evidence/network-state.txt
    ```

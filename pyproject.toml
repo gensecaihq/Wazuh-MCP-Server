@@ -59,7 +59,7 @@ dev = [
 ]
 docker = [
     "docker>=6.0.0",
-    "docker-compose>=1.29.0",
+    "docker-compose>=2.0.0",
 ]
 testing = [
     "pytest>=7.0.0",

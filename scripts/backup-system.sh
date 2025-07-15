@@ -173,13 +173,13 @@ backup_redis() {
     mkdir -p "$redis_dir"
     
     # Check if Redis is running
-    if ! docker-compose -f "$PROJECT_ROOT/docker-compose.yml" ps redis | grep -q "Up"; then
+    if ! docker compose -f "$PROJECT_ROOT/docker-compose.yml" ps redis | grep -q "Up"; then
         log_error "Redis container is not running"
         return 1
     fi
     
     # Get Redis container ID
-    local redis_container=$(docker-compose -f "$PROJECT_ROOT/docker-compose.yml" ps -q redis)
+    local redis_container=$(docker compose -f "$PROJECT_ROOT/docker-compose.yml" ps -q redis)
     
     if [ "${REDIS_BACKUP_METHOD:-rdb}" = "rdb" ]; then
         # RDB backup
@@ -679,7 +679,7 @@ restore_backup() {
     
     # Stop services
     log_info "Stopping services..."
-    docker-compose -f "$PROJECT_ROOT/docker-compose.yml" down
+    docker compose -f "$PROJECT_ROOT/docker-compose.yml" down
     
     # Restore components
     local restore_success=true
@@ -713,7 +713,7 @@ restore_backup() {
     
     # Start services
     log_info "Starting services..."
-    docker-compose -f "$PROJECT_ROOT/docker-compose.yml" up -d
+    docker compose -f "$PROJECT_ROOT/docker-compose.yml" up -d
     
     # Verify restore
     sleep 30

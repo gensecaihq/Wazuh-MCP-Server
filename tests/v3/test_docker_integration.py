@@ -363,7 +363,7 @@ GRAFANA_PASSWORD=grafana_test_password
         try:
             # Run docker-compose up
             result = subprocess.run([
-                "docker-compose", 
+                "docker", "compose", 
                 "--env-file", str(env_file),
                 "-p", "wazuh-mcp-test",
                 "up", "-d", "--build"
@@ -382,7 +382,7 @@ GRAFANA_PASSWORD=grafana_test_password
             
             # Check service health
             services_result = subprocess.run([
-                "docker-compose", 
+                "docker", "compose", 
                 "-p", "wazuh-mcp-test",
                 "ps"
             ], 
@@ -402,7 +402,7 @@ GRAFANA_PASSWORD=grafana_test_password
             # Cleanup
             try:
                 subprocess.run([
-                    "docker-compose", 
+                    "docker", "compose", 
                     "-p", "wazuh-mcp-test",
                     "down", "-v"
                 ], 

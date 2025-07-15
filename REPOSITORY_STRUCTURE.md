@@ -227,10 +227,10 @@ python3 -m wazuh_mcp_server.main --stdio
 python3 -m wazuh_mcp_server.remote_server --transport sse
 
 # Docker production
-docker-compose up -d
+docker compose up -d
 
 # High availability
-docker-compose -f docker-compose.ha.yml up -d
+docker compose -f docker-compose.ha.yml up -d
 ```
 
 ## 📊 Repository Statistics

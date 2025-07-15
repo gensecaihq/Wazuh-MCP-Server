@@ -70,7 +70,7 @@ This guide helps you migrate from previous versions of Wazuh MCP Server to take 
    **Option C: Deploy with Docker**
    ```bash
    # Use Docker Compose for production
-   docker-compose up -d
+   docker compose up -d
    ```
 
 5. **Test Migration**
@@ -289,10 +289,10 @@ EOF
 #### Step 2: Docker Deployment
 ```bash
 # Deploy with high availability
-docker-compose -f docker-compose.ha.yml up -d
+docker compose -f docker compose.ha.yml up -d
 
 # Verify deployment
-docker-compose -f docker-compose.ha.yml ps
+docker compose -f docker compose.ha.yml ps
 curl -f https://localhost:8443/health
 ```
 
@@ -396,7 +396,7 @@ If migration fails, you can rollback:
 
 ```bash
 # Stop current services
-docker-compose down  # if using Docker
+docker compose down  # if using Docker
 # or
 pkill -f wazuh_mcp_server
 
@@ -511,13 +511,13 @@ curl -X POST http://localhost:8443/oauth/token \
 **Solution**: Check Docker configuration and logs
 ```bash
 # Check container status
-docker-compose ps
+docker compose ps
 
 # Check logs
-docker-compose logs -f wazuh-mcp-server
+docker compose logs -f wazuh-mcp-server
 
 # Restart services
-docker-compose restart
+docker compose restart
 ```
 
 #### Issue: Performance degradation

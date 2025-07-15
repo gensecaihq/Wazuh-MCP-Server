@@ -44,10 +44,10 @@ OAUTH_CLIENT_SECRET=$(openssl rand -base64 32)
 EOF
 
 # Start the complete stack
-docker-compose up -d
+docker compose up -d
 
 # Check service status
-docker-compose ps
+docker compose ps
 ```
 
 ### Option 2: Direct Docker Run
@@ -409,7 +409,7 @@ export LOG_LEVEL=DEBUG
 python -m wazuh_mcp_server.remote_server --log-level DEBUG
 
 # Check container logs
-docker-compose logs -f wazuh-mcp-server
+docker compose logs -f wazuh-mcp-server
 ```
 
 ### Health Check
