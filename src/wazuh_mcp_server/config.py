@@ -7,6 +7,7 @@ from enum import Enum
 from typing import Optional
 from pathlib import Path
 from .utils.pydantic_compat import BaseModel, validator, Field, create_model_config
+from .utils.config_encryption import get_secure_config_manager
 from dotenv import load_dotenv
 
 # Import cross-platform utilities
@@ -325,3 +326,18 @@ class WazuhConfig(BaseModel):
             )
         except Exception as e:
             raise ConfigurationError(f"Configuration validation failed: {str(e)}") from e
+    
+    def get_setting(self, key: str, default: any = None) -> any:
+        """Get a configuration setting with encryption support."""
+        config_manager = get_secure_config_manager()
+        return config_manager.get_secure_value(key, default)
+    
+    def set_setting(self, key: str, value: str, encrypt: bool = None) -> None:
+        """Set a configuration setting with optional encryption."""
+        config_manager = get_secure_config_manager()
+        config_manager.set_secure_value(key, value, encrypt)
+    
+    def get_encryption_status(self) -> dict:
+        """Get the encryption status of configuration values."""
+        config_manager = get_secure_config_manager()
+        return config_manager.get_encryption_status()

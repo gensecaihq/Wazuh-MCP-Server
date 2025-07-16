@@ -16,6 +16,7 @@ from aiohttp.web_runner import GracefulExit
 from .config import WazuhConfig
 from .transport import SSETransport, HttpTransport, StdioTransport, TransportAdapter
 from .auth import OAuth2Server, TokenManager, AuthMiddleware, SecurityHeaders
+from .auth.oauth2_patch import patch_oauth2_server
 from .auth.models import User, Client, AuthScope, GrantType
 from .main import WazuhMCPServer
 from .utils.logging import setup_logging, get_logger
@@ -71,8 +72,9 @@ class RemoteMCPServer:
             
             self.token_manager = TokenManager(secret_key=jwt_secret)
             
-            # Initialize OAuth2 server
+            # Initialize OAuth2 server with persistent storage
             self.oauth2_server = OAuth2Server(self.token_manager)
+            self.oauth2_server = patch_oauth2_server(self.oauth2_server)
             
             # Create default admin user if not exists
             admin_username = self.config.get_setting("ADMIN_USERNAME", "admin")
