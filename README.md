@@ -20,22 +20,24 @@ A production-grade Model Context Protocol (MCP) server that connects Wazuh SIEM 
 
 ## 🏷️ Version Information
 
-### **🐳 v3.0.0 - Production-Grade Security Platform** (Current - July 16, 2025)
-- **Status**: ✅ **PRODUCTION READY** - Security Hardened (v3-check branch)
-- **Security Score**: **9.5/10** - All critical security issues resolved
+### **🚀 v3.0.0 - Remote MCP Server with Docker** (🔜 **COMING SOON** - This Branch)
+- **Status**: 🔜 **COMING SOON** - Advanced containerized remote MCP server
+- **Architecture**: **Remote MCP Server** with **HTTP/SSE transport**
 - **Deployment**: **Docker-first** with complete containerization and monitoring
 - **Transport**: HTTPS/SSE for secure remote access + stdio for development
 - **Security**: OAuth2 authentication, persistent storage, configuration encryption
 - **Features**: Remote MCP server, High Availability, automated Docker Hub publishing
-- **Best For**: Production environments requiring enterprise-grade security and reliability
+- **Best For**: **Future production deployments** requiring enterprise-grade security and remote access
 - **Host Requirements**: **Docker only** - no Python/dependency management needed
+- **Preview**: Available on this branch for testing and evaluation
 
-### **🔧 v2.0.0 - Traditional Installation** 
-- **Status**: ✅ **Stable** - [GitHub Release](https://github.com/gensecaihq/Wazuh-MCP-Server/releases/tag/v2.0.0)
+### **📍 v2.0.0 - Local MCP Server** (✅ **CURRENT RELEASE** - main branch)
+- **Status**: ✅ **PRODUCTION READY** - [Current stable release on main branch](https://github.com/gensecaihq/Wazuh-MCP-Server/tree/main)
+- **Architecture**: **Local MCP Server** with **stdio transport**
 - **Deployment**: Traditional Python installation with manual dependency management
-- **Transport**: stdio (local only)
-- **Features**: 26 security tools with Phase 5 enhancement system
-- **Best For**: Local development, testing, and environments without Docker
+- **Transport**: stdio only (direct connection to Claude Desktop)
+- **Features**: 26 security tools with enhanced capabilities
+- **Best For**: **Current production use** - Local development, testing, and immediate deployment
 - **Host Requirements**: Python 3.9+, manual dependency installation
 
 ### **🏛️ v1.0.0 - Legacy** 
@@ -43,15 +45,15 @@ A production-grade Model Context Protocol (MCP) server that connects Wazuh SIEM 
 - **Features**: 14 core security tools
 - **Best For**: Minimal installations and legacy systems
 
-> **💡 Recommendation**: Use **v3.0.0** for all production deployments. Use **v2.0.0** for development environments without Docker.
+> **💡 Current Recommendation**: Use **v2.0.0** (main branch) for all current deployments. **v3.0.0** (this branch) is coming soon for users who need remote MCP server capabilities.
 
 ---
 
 ## 🚀 Quick Start
 
-### 🐳 v3.0.0: Production Docker Deployment (Recommended)
+### 🐳 v3.0.0: Remote MCP Server with Docker (🔜 Coming Soon)
 
-**Complete containerized deployment - no host dependencies required:**
+**🔬 Preview: Complete containerized deployment - no host dependencies required:**
 
 ```bash
 # Clone the repository
@@ -73,7 +75,7 @@ docker compose ps
 curl -f -k https://localhost:8443/health  # Note: HTTPS with SSL
 ```
 
-**✅ What you get with v3-check (Security Hardened):**
+**🔬 Preview Features (v3.0.0 Coming Soon):**
 - 🔐 **Security**: OAuth2 authentication + persistent storage + config encryption
 - 🌐 **Remote Access**: HTTPS/SSE transport for secure remote MCP connections
 - 📊 **Monitoring**: Complete Prometheus + Grafana + AlertManager stack
@@ -85,9 +87,9 @@ curl -f -k https://localhost:8443/health  # Note: HTTPS with SSL
 
 **🎯 Key Advantage**: Host OS becomes irrelevant - works identically on Windows, macOS, and Linux
 
-### 🐳 Alternative: Published Docker Images
+### 🐳 Alternative: Published Docker Images (🔜 When Available)
 
-**For quick deployment without building from source:**
+**Future: Quick deployment without building from source:**
 
 ```bash
 # Pull and run the latest v3 image (when published)
@@ -104,9 +106,9 @@ docker compose up -d
 **Available tags**: `v3.0.0`, `v3-latest`, `latest`  
 **Docker Hub**: https://hub.docker.com/r/gensecaihq/wazuh-mcp-server
 
-### 🔧 v2.0.0: Traditional Installation
+### 📍 v2.0.0: Current Release (Recommended for Now)
 
-**For development and non-Docker environments:**
+**✅ Production ready - Use this for current deployments:**
 
 ```bash
 # Clone and switch to v2
@@ -240,9 +242,9 @@ LOG_LEVEL=INFO
 - **High Availability**: Load balancing with auto-recovery
 - **Monitoring Stack**: Prometheus + Grafana dashboards
 
-## 🛡️ Security Features (v3-check Enhanced)
+## 🛡️ Security Features (v3.0.0 Preview)
 
-The v3-check branch includes comprehensive security hardening based on our V3 Comprehensive Security Audit:
+**🔜 Coming Soon**: The v3.0.0 version will include comprehensive security hardening based on our V3 Comprehensive Security Audit:
 
 ### 🔐 Configuration Security
 - **Configuration Encryption**: Automatic encryption of 15+ sensitive configuration keys
@@ -508,7 +510,7 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 ## 📊 Project Status
 
-- **Version**: v3.0.0 Docker (Production Ready - v3-check branch) / v2.0.0 Traditional (Stable)
+- **Current Version**: v2.0.0 (Production Ready - main branch) / v3.0.0 (Coming Soon - this branch)
 - **Security Status**: **9.5/10** - All critical security issues resolved in v3-check
 - **Maintenance**: Active development and support
 - **Security**: Comprehensive security hardening with encryption and OAuth2
@@ -516,8 +518,9 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 - **Platforms**: Linux, macOS, Windows
 - **License**: MIT License
 
-### 🎯 v3-check Branch Highlights
-- **✅ Production Ready**: Security-hardened with 9.5/10 audit score
+### 🎯 v3.0.0 Preview Highlights
+- **🔜 Coming Soon**: Security-hardened remote MCP server with 9.5/10 audit score
 - **🔐 Security Enhanced**: Configuration encryption, OAuth2 persistence, HTTPS health checks
 - **🐳 Docker Optimized**: All dependencies containerized with security best practices
 - **📋 Enterprise Grade**: High availability, monitoring, and incident response capabilities
+- **🌐 Remote Access**: First MCP server supporting HTTP/SSE transport for remote deployment
