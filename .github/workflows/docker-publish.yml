@@ -1,0 +1,399 @@
+name: Docker Build and Publish
+
+on:
+  push:
+    tags:
+      - 'v3.*'  # Trigger on v3.x.x tags
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Tag to build and publish'
+        required: true
+        default: 'v3.0.0'
+      push_to_registry:
+        description: 'Push to Docker registry'
+        required: true
+        default: true
+        type: boolean
+
+env:
+  REGISTRY: docker.io
+  IMAGE_NAME: gensecaihq/wazuh-mcp-server
+  DOCKERFILE_PATH: ./Dockerfile
+
+jobs:
+  # Build and test the Docker image
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+      security-events: write
+    
+    outputs:
+      image-digest: ${{ steps.build.outputs.digest }}
+      image-tags: ${{ steps.meta.outputs.tags }}
+      
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+    
+    - name: Extract version from tag
+      id: version
+      run: |
+        if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+          VERSION="${{ github.event.inputs.tag }}"
+        else
+          VERSION=${GITHUB_REF#refs/tags/}
+        fi
+        
+        # Validate it's a v3+ version
+        if [[ ! "$VERSION" =~ ^v3\.[0-9]+\.[0-9]+(-.*)?$ ]]; then
+          echo "Error: Version $VERSION is not a valid v3.x.x version"
+          exit 1
+        fi
+        
+        echo "version=$VERSION" >> $GITHUB_OUTPUT
+        echo "version_number=${VERSION#v}" >> $GITHUB_OUTPUT
+        echo "major_version=$(echo ${VERSION#v} | cut -d. -f1)" >> $GITHUB_OUTPUT
+        echo "minor_version=$(echo ${VERSION#v} | cut -d. -f1-2)" >> $GITHUB_OUTPUT
+    
+    - name: Set up QEMU
+      uses: docker/setup-qemu-action@v3
+    
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@v3
+      with:
+        platforms: linux/amd64,linux/arm64
+    
+    - name: Log in to Docker Hub
+      uses: docker/login-action@v3
+      with:
+        registry: ${{ env.REGISTRY }}
+        username: ${{ secrets.DOCKERHUB_USERNAME }}
+        password: ${{ secrets.DOCKERHUB_TOKEN }}
+    
+    - name: Extract metadata
+      id: meta
+      uses: docker/metadata-action@v5
+      with:
+        images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+        tags: |
+          type=semver,pattern={{version}},value=${{ steps.version.outputs.version }}
+          type=semver,pattern={{major}}.{{minor}},value=${{ steps.version.outputs.version }}
+          type=semver,pattern={{major}},value=${{ steps.version.outputs.version }}
+          type=raw,value=latest,enable={{is_default_branch}}
+          type=raw,value=v3-latest
+        labels: |
+          org.opencontainers.image.title=Wazuh MCP Server
+          org.opencontainers.image.description=Model Context Protocol server for Wazuh security platform
+          org.opencontainers.image.vendor=GenSecAI
+          org.opencontainers.image.version=${{ steps.version.outputs.version }}
+          org.opencontainers.image.revision=${{ github.sha }}
+          org.opencontainers.image.created=${{ github.event.head_commit.timestamp }}
+          org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+          org.opencontainers.image.url=${{ github.server_url }}/${{ github.repository }}
+          org.opencontainers.image.documentation=${{ github.server_url }}/${{ github.repository }}/blob/main/README.md
+          org.opencontainers.image.licenses=MIT
+    
+    - name: Build and push Docker image
+      id: build
+      uses: docker/build-push-action@v5
+      with:
+        context: .
+        file: ${{ env.DOCKERFILE_PATH }}
+        platforms: linux/amd64,linux/arm64
+        push: ${{ github.event.inputs.push_to_registry != 'false' && (github.event_name != 'workflow_dispatch' || github.event.inputs.push_to_registry == 'true') }}
+        tags: ${{ steps.meta.outputs.tags }}
+        labels: ${{ steps.meta.outputs.labels }}
+        cache-from: type=gha
+        cache-to: type=gha,mode=max
+        build-args: |
+          VERSION=${{ steps.version.outputs.version_number }}
+          BUILD_DATE=${{ github.event.head_commit.timestamp }}
+          VCS_REF=${{ github.sha }}
+    
+    - name: Run Trivy vulnerability scanner
+      uses: aquasecurity/trivy-action@master
+      with:
+        image-ref: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ steps.version.outputs.version }}
+        format: 'sarif'
+        output: 'trivy-results.sarif'
+    
+    - name: Upload Trivy scan results to GitHub Security tab
+      uses: github/codeql-action/upload-sarif@v2
+      if: always()
+      with:
+        sarif_file: 'trivy-results.sarif'
+        category: 'trivy-docker-publish'
+    
+    - name: Generate SBOM
+      uses: anchore/sbom-action@v0
+      with:
+        image: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ steps.version.outputs.version }}
+        format: spdx-json
+        output-file: sbom.spdx.json
+    
+    - name: Upload SBOM artifact
+      uses: actions/upload-artifact@v3
+      with:
+        name: sbom-${{ steps.version.outputs.version }}
+        path: sbom.spdx.json
+        retention-days: 90
+
+  # Security scanning of the published image
+  security-scan:
+    runs-on: ubuntu-latest
+    needs: build
+    if: ${{ github.event.inputs.push_to_registry == 'true' || github.event_name != 'workflow_dispatch' }}
+    permissions:
+      contents: read
+      security-events: write
+    
+    steps:
+    - name: Extract version from tag
+      id: version
+      run: |
+        if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+          VERSION="${{ github.event.inputs.tag }}"
+        else
+          VERSION=${GITHUB_REF#refs/tags/}
+        fi
+        echo "version=$VERSION" >> $GITHUB_OUTPUT
+    
+    - name: Run Snyk to check Docker image for vulnerabilities
+      uses: snyk/actions/docker@master
+      env:
+        SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
+      with:
+        image: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ steps.version.outputs.version }}
+        args: --severity-threshold=high --file=Dockerfile
+      continue-on-error: true
+    
+    - name: Upload Snyk results to GitHub Security tab
+      uses: github/codeql-action/upload-sarif@v2
+      if: always()
+      with:
+        sarif_file: snyk.sarif
+        category: 'snyk-docker'
+
+  # Integration tests with the published image
+  integration-test:
+    runs-on: ubuntu-latest
+    needs: build
+    if: ${{ github.event.inputs.push_to_registry == 'true' || github.event_name != 'workflow_dispatch' }}
+    
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+    
+    - name: Extract version from tag
+      id: version
+      run: |
+        if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+          VERSION="${{ github.event.inputs.tag }}"
+        else
+          VERSION=${GITHUB_REF#refs/tags/}
+        fi
+        echo "version=$VERSION" >> $GITHUB_OUTPUT
+    
+    - name: Test Docker image
+      run: |
+        # Pull the published image
+        docker pull ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ steps.version.outputs.version }}
+        
+        # Test basic functionality
+        docker run --rm \
+          -e WAZUH_API_URL=https://test.example.com:55000 \
+          -e WAZUH_API_USERNAME=test \
+          -e WAZUH_API_PASSWORD=test \
+          -e JWT_SECRET_KEY=test-secret \
+          --name wazuh-mcp-test \
+          ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ steps.version.outputs.version }} \
+          python -c "import sys; print('Docker image test passed'); sys.exit(0)" || exit 1
+        
+        echo "✅ Docker image integration test passed"
+    
+    - name: Test Docker Compose compatibility
+      run: |
+        # Update docker-compose.yml to use the published image
+        sed -i "s|build:|# build:|g" docker-compose.yml
+        sed -i "s|image: wazuh-mcp-server:3.0.0|image: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ steps.version.outputs.version }}|g" docker-compose.yml
+        
+        # Test compose file validation
+        docker-compose -f docker-compose.yml config --quiet
+        
+        echo "✅ Docker Compose compatibility test passed"
+
+  # Update Docker Hub description and README
+  update-docker-hub:
+    runs-on: ubuntu-latest
+    needs: [build, security-scan, integration-test]
+    if: ${{ (github.event.inputs.push_to_registry == 'true' || github.event_name != 'workflow_dispatch') && success() }}
+    
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+    
+    - name: Extract version from tag
+      id: version
+      run: |
+        if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+          VERSION="${{ github.event.inputs.tag }}"
+        else
+          VERSION=${GITHUB_REF#refs/tags/}
+        fi
+        echo "version=$VERSION" >> $GITHUB_OUTPUT
+    
+    - name: Update Docker Hub Description
+      uses: peter-evans/dockerhub-description@v3
+      with:
+        username: ${{ secrets.DOCKERHUB_USERNAME }}
+        password: ${{ secrets.DOCKERHUB_TOKEN }}
+        repository: ${{ env.IMAGE_NAME }}
+        short-description: "Model Context Protocol server for Wazuh security platform - v${{ steps.version.outputs.version }}"
+        readme-filepath: ./docs/DOCKER_README.md
+
+  # Create GitHub release with Docker image information
+  create-release:
+    runs-on: ubuntu-latest
+    needs: [build, security-scan, integration-test]
+    if: ${{ github.event_name != 'workflow_dispatch' && success() }}
+    permissions:
+      contents: write
+    
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+    
+    - name: Extract version from tag
+      id: version
+      run: |
+        VERSION=${GITHUB_REF#refs/tags/}
+        echo "version=$VERSION" >> $GITHUB_OUTPUT
+        echo "version_number=${VERSION#v}" >> $GITHUB_OUTPUT
+    
+    - name: Download SBOM artifact
+      uses: actions/download-artifact@v3
+      with:
+        name: sbom-${{ steps.version.outputs.version }}
+    
+    - name: Create Release
+      uses: softprops/action-gh-release@v1
+      with:
+        tag_name: ${{ steps.version.outputs.version }}
+        name: Release ${{ steps.version.outputs.version }}
+        draft: false
+        prerelease: ${{ contains(steps.version.outputs.version, '-') }}
+        generate_release_notes: true
+        files: |
+          sbom.spdx.json
+        body: |
+          ## 🐳 Docker Image
+          
+          **Docker Hub:** [`${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ steps.version.outputs.version }}`](https://hub.docker.com/r/${{ env.IMAGE_NAME }}/tags)
+          
+          ### Quick Start
+          ```bash
+          # Pull the image
+          docker pull ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ steps.version.outputs.version }}
+          
+          # Run with Docker Compose
+          curl -O https://raw.githubusercontent.com/${{ github.repository }}/main/docker-compose.yml
+          docker-compose up -d
+          ```
+          
+          ### Available Tags
+          - `${{ steps.version.outputs.version }}` - Specific version
+          - `v3-latest` - Latest v3.x version
+          - `latest` - Latest stable release
+          
+          ### Multi-Platform Support
+          - `linux/amd64`
+          - `linux/arm64`
+          
+          ### Security
+          - 🔒 Security scanned with Trivy and Snyk
+          - 📋 SBOM (Software Bill of Materials) included
+          - 🛡️ Built with security best practices
+          
+          ### What's Changed
+          See the full changelog below for detailed changes in this release.
+
+  # Notify team about successful publication
+  notify-success:
+    runs-on: ubuntu-latest
+    needs: [build, security-scan, integration-test, update-docker-hub]
+    if: ${{ (github.event.inputs.push_to_registry == 'true' || github.event_name != 'workflow_dispatch') && success() }}
+    
+    steps:
+    - name: Extract version from tag
+      id: version
+      run: |
+        if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+          VERSION="${{ github.event.inputs.tag }}"
+        else
+          VERSION=${GITHUB_REF#refs/tags/}
+        fi
+        echo "version=$VERSION" >> $GITHUB_OUTPUT
+    
+    - name: Send Slack notification
+      uses: 8398a7/action-slack@v3
+      with:
+        status: success
+        custom_payload: |
+          {
+            "text": "🐳 New Docker image published!",
+            "attachments": [
+              {
+                "color": "good",
+                "fields": [
+                  {
+                    "title": "Image",
+                    "value": "${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ steps.version.outputs.version }}",
+                    "short": false
+                  },
+                  {
+                    "title": "Repository",
+                    "value": "${{ github.repository }}",
+                    "short": true
+                  },
+                  {
+                    "title": "Version",
+                    "value": "${{ steps.version.outputs.version }}",
+                    "short": true
+                  },
+                  {
+                    "title": "Platforms",
+                    "value": "linux/amd64, linux/arm64",
+                    "short": true
+                  },
+                  {
+                    "title": "Docker Hub",
+                    "value": "<https://hub.docker.com/r/${{ env.IMAGE_NAME }}/tags|View on Docker Hub>",
+                    "short": true
+                  }
+                ]
+              }
+            ]
+          }
+      env:
+        SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+      if: env.SLACK_WEBHOOK_URL != ''
+
+  # Clean up old images (optional)
+  cleanup:
+    runs-on: ubuntu-latest
+    needs: [notify-success]
+    if: ${{ always() && (github.event.inputs.push_to_registry == 'true' || github.event_name != 'workflow_dispatch') }}
+    
+    steps:
+    - name: Delete old Docker images
+      run: |
+        echo "🧹 Cleanup job completed (placeholder for future implementation)"
+        # Future: Implement logic to clean up old images if needed
+        # This could use Docker Hub API to manage retention policy

@@ -159,7 +159,7 @@ health_check() {
     log_info "Waiting for server to be ready..."
     
     while [[ $attempt -le $max_attempts ]]; do
-        if curl -f -s "http://localhost:${MCP_SERVER_PORT:-8443}/health" >/dev/null 2>&1; then
+        if curl -f -s -k "https://localhost:${MCP_SERVER_PORT:-8443}/health" >/dev/null 2>&1; then
             log_info "Server is ready and healthy"
             return 0
         fi

@@ -321,29 +321,29 @@ run_container_scan() {
         fi
     fi
     
-    # Check docker-compose security
-    if [ -f "$PROJECT_ROOT/docker-compose.yml" ]; then
-        log_info "Checking docker-compose security..."
+    # Check docker compose security
+    if [ -f "$PROJECT_ROOT/docker compose.yml" ]; then
+        log_info "Checking docker compose security..."
         
         # Check for privileged mode
-        if grep -q "privileged:" "$PROJECT_ROOT/docker-compose.yml"; then
-            echo "❌ docker-compose.yml uses privileged mode" > "$container_dir/compose-checks.txt"
+        if grep -q "privileged:" "$PROJECT_ROOT/docker compose.yml"; then
+            echo "❌ docker compose.yml uses privileged mode" > "$container_dir/compose-checks.txt"
         else
-            echo "✅ docker-compose.yml doesn't use privileged mode" > "$container_dir/compose-checks.txt"
+            echo "✅ docker compose.yml doesn't use privileged mode" > "$container_dir/compose-checks.txt"
         fi
         
         # Check for host network
-        if grep -q "network_mode.*host" "$PROJECT_ROOT/docker-compose.yml"; then
-            echo "❌ docker-compose.yml uses host network" >> "$container_dir/compose-checks.txt"
+        if grep -q "network_mode.*host" "$PROJECT_ROOT/docker compose.yml"; then
+            echo "❌ docker compose.yml uses host network" >> "$container_dir/compose-checks.txt"
         else
-            echo "✅ docker-compose.yml uses isolated network" >> "$container_dir/compose-checks.txt"
+            echo "✅ docker compose.yml uses isolated network" >> "$container_dir/compose-checks.txt"
         fi
         
         # Check for volume mounts
-        if grep -q "/:/host" "$PROJECT_ROOT/docker-compose.yml"; then
-            echo "❌ docker-compose.yml mounts host root filesystem" >> "$container_dir/compose-checks.txt"
+        if grep -q "/:/host" "$PROJECT_ROOT/docker compose.yml"; then
+            echo "❌ docker compose.yml mounts host root filesystem" >> "$container_dir/compose-checks.txt"
         else
-            echo "✅ docker-compose.yml doesn't mount dangerous volumes" >> "$container_dir/compose-checks.txt"
+            echo "✅ docker compose.yml doesn't mount dangerous volumes" >> "$container_dir/compose-checks.txt"
         fi
     fi
     
@@ -401,8 +401,8 @@ run_iac_scan() {
         } > "$iac_dir/dockerfile-analysis.txt"
     fi
     
-    # Check docker-compose files
-    find "$PROJECT_ROOT" -name "docker-compose*.yml" -o -name "docker-compose*.yaml" | while read -r compose_file; do
+    # Check docker compose files
+    find "$PROJECT_ROOT" -name "docker compose*.yml" -o -name "docker compose*.yaml" | while read -r compose_file; do
         {
             echo "=== Docker Compose Security Analysis ==="
             echo "File: $compose_file"

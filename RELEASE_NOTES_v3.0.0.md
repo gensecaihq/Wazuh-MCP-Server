@@ -222,7 +222,7 @@ METRICS_PORT=9090
 
 ### Docker Configuration
 ```yaml
-# docker-compose.yml additions
+# docker compose.yml additions
 services:
   redis:
     image: redis:7-alpine

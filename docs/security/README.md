@@ -283,7 +283,7 @@ sudo ip route add 10.100.1.0/24 dev eth0.100
 #### Docker Network Security
 
 ```yaml
-# docker-compose.yml
+# docker compose.yml
 networks:
   frontend:
     driver: bridge
@@ -975,7 +975,7 @@ apt-get upgrade -y
 
 # Docker updates
 docker system prune -f
-docker-compose pull
+docker compose pull
 
 # Application updates
 cd /opt/wazuh-mcp-server
@@ -987,7 +987,7 @@ python3 scripts/security-scan.sh
 
 # Restart services
 systemctl restart wazuh-mcp-server
-docker-compose restart
+docker compose restart
 
 echo "Security updates completed"
 ```

@@ -6,7 +6,7 @@ set -euo pipefail
 # Configuration
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
-COMPOSE_FILE="$PROJECT_ROOT/docker-compose.ha.yml"
+COMPOSE_FILE="$PROJECT_ROOT/docker compose.ha.yml"
 ENV_FILE="$PROJECT_ROOT/.env"
 CONFIG_DIR="$PROJECT_ROOT/config"
 CERTS_DIR="$PROJECT_ROOT/certs"
@@ -43,7 +43,7 @@ check_prerequisites() {
     fi
     
     # Check Docker Compose
-    if ! command -v docker-compose &> /dev/null; then
+    if ! command -v docker compose &> /dev/null; then
         error "Docker Compose is not installed"
         exit 1
     fi

@@ -70,7 +70,7 @@ check_dependencies() {
     fi
     
     # Check Docker Compose
-    if ! command -v docker-compose &> /dev/null; then
+    if ! command -v docker compose &> /dev/null; then
         log_error "Docker Compose is not installed"
         exit 1
     fi
@@ -315,7 +315,7 @@ setup_exporters() {
     log_info "Setting up monitoring exporters..."
     
     # Create node exporter service
-    cat > "$ALERTING_DIR/docker-compose.monitoring.yml" << EOF
+    cat > "$ALERTING_DIR/docker compose.monitoring.yml" << EOF
 version: '3.8'
 
 services:
@@ -408,12 +408,12 @@ test_alerting() {
     log_info "Testing alerting system..."
     
     # Check if services are running
-    if ! docker-compose ps | grep -q "prometheus.*Up"; then
+    if ! docker compose ps | grep -q "prometheus.*Up"; then
         log_error "Prometheus is not running"
         return 1
     fi
     
-    if ! docker-compose ps | grep -q "alertmanager.*Up"; then
+    if ! docker compose ps | grep -q "alertmanager.*Up"; then
         log_error "AlertManager is not running"
         return 1
     fi
@@ -471,7 +471,7 @@ show_status() {
     log_info "Showing alerting status..."
     
     echo "=== Service Status ==="
-    docker-compose ps | grep -E "prometheus|alertmanager|grafana"
+    docker compose ps | grep -E "prometheus|alertmanager|grafana"
     
     echo -e "\n=== Active Alerts ==="
     curl -s "http://localhost:9090/api/v1/alerts" | jq '.data[] | select(.state == "firing") | {alertname: .labels.alertname, severity: .labels.severity, instance: .labels.instance}'
@@ -491,7 +491,7 @@ cleanup() {
     log_info "Cleaning up alerting configuration..."
     
     # Stop monitoring services
-    docker compose -f "$ALERTING_DIR/docker-compose.monitoring.yml" down || true
+    docker compose -f "$ALERTING_DIR/docker compose.monitoring.yml" down || true
     
     # Remove generated files
     rm -rf "$ALERTING_DIR/prometheus/prometheus.yml"

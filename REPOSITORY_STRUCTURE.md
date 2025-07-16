@@ -20,8 +20,8 @@ Wazuh-MCP-Server/
 │   └── RELEASE_NOTES_v3.0.0.md     # v3.0.0 release notes
 │
 ├── 🐳 Docker Configuration
-│   ├── docker-compose.yml           # Basic Docker setup
-│   ├── docker-compose.ha.yml       # High availability deployment
+│   ├── docker compose.yml           # Basic Docker setup
+│   ├── docker compose.ha.yml       # High availability deployment
 │   └── docker/
 │       └── entrypoint.sh           # Container entry point
 │
@@ -230,7 +230,7 @@ python3 -m wazuh_mcp_server.remote_server --transport sse
 docker compose up -d
 
 # High availability
-docker compose -f docker-compose.ha.yml up -d
+docker compose -f docker compose.ha.yml up -d
 ```
 
 ## 📊 Repository Statistics

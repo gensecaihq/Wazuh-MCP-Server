@@ -2,8 +2,8 @@
 # =======================================================================
 # Build for linux/amd64, linux/arm64, and windows/amd64
 
-# Build stage
-FROM python:3.11-slim-bullseye as builder
+# Build stage - using latest Python 3.12 on Debian 12 (bookworm)
+FROM python:3.12-slim-bookworm as builder
 
 # Set build arguments
 ARG TARGETPLATFORM
@@ -30,8 +30,8 @@ WORKDIR /home/builder
 COPY --chown=builder:builder requirements-v3.txt .
 RUN python -m pip install --no-cache-dir --user -r requirements-v3.txt
 
-# Production stage
-FROM python:3.11-slim-bullseye as production
+# Production stage - using latest Python 3.12 on Debian 12 (bookworm)
+FROM python:3.12-slim-bookworm as production
 
 # Set metadata
 LABEL maintainer="Wazuh MCP Server Project <info@wazuh-mcp-server.org>"
@@ -105,7 +105,7 @@ EXPOSE 9090
 
 # Health check
 HEALTHCHECK --interval=30s --timeout=10s --start-period=30s --retries=3 \
-    CMD curl -f http://localhost:8443/health || exit 1
+    CMD curl -f -k https://localhost:8443/health || exit 1
 
 # Volume mounts
 VOLUME ["/app/config", "/app/logs", "/app/data"]

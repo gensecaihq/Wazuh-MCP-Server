@@ -1,18 +1,20 @@
 # Docker Compose for Wazuh MCP Server v3.0.0
 # =============================================
 # Production-ready configuration with monitoring and security
-
-version: '3.8'
+# Uses latest Compose Specification (no version field required)
 
 services:
   wazuh-mcp-server:
-    build:
-      context: .
-      dockerfile: Dockerfile
-      args:
-        BUILDPLATFORM: ${BUILDPLATFORM:-linux/amd64}
-        TARGETPLATFORM: ${TARGETPLATFORM:-linux/amd64}
-    image: wazuh-mcp-server:3.0.0
+    # For v3.0.0+: Use published image from Docker Hub
+    # Uncomment build section below for local development
+    image: gensecaihq/wazuh-mcp-server:${WAZUH_MCP_VERSION:-v3-latest}
+    
+    # build:
+    #   context: .
+    #   dockerfile: Dockerfile
+    #   args:
+    #     BUILDPLATFORM: ${BUILDPLATFORM:-linux/amd64}
+    #     TARGETPLATFORM: ${TARGETPLATFORM:-linux/amd64}
     container_name: wazuh-mcp-server
     restart: unless-stopped
     
@@ -70,7 +72,7 @@ services:
     
     # Health check
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8443/health"]
+      test: ["CMD", "curl", "-f", "-k", "https://localhost:8443/health"]
       interval: 30s
       timeout: 10s
       retries: 3
@@ -104,7 +106,7 @@ services:
 
   # Redis for caching and session storage
   redis:
-    image: redis:7-alpine
+    image: redis:7.4-alpine
     container_name: wazuh-mcp-redis
     restart: unless-stopped
     
@@ -117,11 +119,15 @@ services:
     user: "999:999"
     
     # Configuration
-    command: redis-server --appendonly yes --requirepass ${REDIS_PASSWORD:-redis-secret}
+    command: /usr/local/bin/redis-entrypoint.sh
+    environment:
+      - REDIS_PASSWORD=${REDIS_PASSWORD:-redis-secret}
     
     # Volumes
     volumes:
       - redis-data:/data
+      - ./config/redis.conf:/usr/local/etc/redis/redis.conf.template:ro
+      - ./config/redis-entrypoint.sh:/usr/local/bin/redis-entrypoint.sh:ro
     
     # Health check
     healthcheck:
@@ -130,13 +136,23 @@ services:
       timeout: 10s
       retries: 3
     
+    # Resource limits
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 1G
+        reservations:
+          cpus: '0.5'
+          memory: 512M
+    
     # Networks
     networks:
       - wazuh-mcp-network
 
   # Prometheus for metrics collection
   prometheus:
-    image: prom/prometheus:latest
+    image: prom/prometheus:v2.55.0
     container_name: wazuh-mcp-prometheus
     restart: unless-stopped
     
@@ -172,7 +188,7 @@ services:
 
   # Grafana for visualization (optional)
   grafana:
-    image: grafana/grafana:latest
+    image: grafana/grafana:11.4.0
     container_name: wazuh-mcp-grafana
     restart: unless-stopped
     

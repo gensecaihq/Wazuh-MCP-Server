@@ -96,7 +96,7 @@ v2.0.0 (Current Stable)          →          v3.0.0 (Remote MCP)
 - **Remote Server** (`src/wazuh_mcp_server/remote_server.py`) - Complete HTTP/SSE server implementation
 - **OAuth 2.0 System** (`src/wazuh_mcp_server/auth/`) - Enterprise authentication system
 - **Transport Layer** (`src/wazuh_mcp_server/transport/`) - Multi-protocol transport framework
-- **Docker Stack** (`docker/`, `docker-compose.ha.yml`) - Production deployment infrastructure
+- **Docker Stack** (`docker/`, `docker compose.ha.yml`) - Production deployment infrastructure
 - **Monitoring** (`config/prometheus/`, `config/grafana/`) - Complete observability stack
 
 ### 📈 Enhanced Features

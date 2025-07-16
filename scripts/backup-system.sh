@@ -111,7 +111,7 @@ check_prerequisites() {
     fi
     
     # Check Docker Compose
-    if ! command -v docker-compose &> /dev/null; then
+    if ! command -v docker compose &> /dev/null; then
         log_error "Docker Compose is not installed"
         exit 1
     fi
@@ -263,7 +263,7 @@ backup_config() {
     fi
     
     # Backup Docker Compose files
-    cp "$PROJECT_ROOT"/docker-compose*.yml "$config_dir/"
+    cp "$PROJECT_ROOT"/docker compose*.yml "$config_dir/"
     
     # Backup scripts
     if [ -d "$PROJECT_ROOT/scripts" ]; then

@@ -275,7 +275,7 @@ Post-Incident Review: [Date/Time]
 1. **Immediate Actions**
    ```bash
    # Isolate affected systems
-   docker-compose stop wazuh-mcp-server
+   docker compose stop wazuh-mcp-server
    
    # Block suspicious IPs
    iptables -A INPUT -s [SUSPICIOUS_IP] -j DROP
@@ -325,7 +325,7 @@ Post-Incident Review: [Date/Time]
    df -h
    
    # Review container health
-   docker-compose ps
+   docker compose ps
    ```
 
 2. **Performance Troubleshooting**
