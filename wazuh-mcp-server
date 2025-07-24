@@ -1,29 +1,29 @@
 #!/usr/bin/env python3
 """
-Wazuh MCP Server - Production Ready Entry Point
-Entry point that launches the FastMCP-powered production server.
+Wazuh MCP Server - Production Entry Point
+Single, robust FastMCP-powered MCP server for Wazuh SIEM integration.
 """
 
 import sys
 import os
 from pathlib import Path
-import asyncio
 
 # Add the source directory to Python path
-sys.path.insert(0, str(Path(__file__).parent.parent))
+src_dir = Path(__file__).parent / "src"
+sys.path.insert(0, str(src_dir))
 
 # Check Python version early
 if sys.version_info < (3, 10):
-    print(f"ERROR: Python 3.10+ required for FastMCP. Current: {sys.version_info.major}.{sys.version_info.minor}")
+    print(f"ERROR: Python 3.10+ required. Current: {sys.version_info.major}.{sys.version_info.minor}")
     sys.exit(1)
 
-# Import and run the production server
+# Import and run the server
 try:
-    from wazuh_mcp_server.server import main as server_main
+    from wazuh_mcp_server.server import main
+    import asyncio
     
     if __name__ == "__main__":
-        print("Starting Wazuh MCP Server (Production FastMCP Implementation)")
-        asyncio.run(server_main())
+        asyncio.run(main())
         
 except ImportError as e:
     print(f"ERROR: Failed to import server module: {e}")

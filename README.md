@@ -1,19 +1,21 @@
-# Wazuh MCP Server
+# Wazuh MCP Server - Production Ready
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Python 3.9+](https://img.shields.io/badge/python-3.9+-blue.svg)](https://www.python.org/downloads/)
+[![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
+[![FastMCP](https://img.shields.io/badge/FastMCP-2.10.6+-green.svg)](https://github.com/anthropics/fastmcp)
 [![Wazuh Compatible](https://img.shields.io/badge/Wazuh-4.8%2B-orange.svg)](https://wazuh.com/)
-[![Current Release](https://img.shields.io/badge/Release-v2.0.0-green.svg)](https://github.com/gensecaihq/Wazuh-MCP-Server/releases)
+[![Production Ready](https://img.shields.io/badge/status-production%20ready-brightgreen.svg)](https://github.com/gensecaihq/Wazuh-MCP-Server)
 
-A **production-ready Model Context Protocol (MCP) server** that connects Wazuh SIEM with Claude Desktop for AI-powered security operations using **stdio transport**.
+A **single, robust, production-ready MCP server** built with FastMCP framework that provides AI-powered security operations through Wazuh SIEM integration. This is a clean, unified implementation focused on production deployment.
 
-## ✨ What it does
+## ✨ Key Features
 
-- **🔍 Security Monitoring**: Query Wazuh alerts, agents, and vulnerabilities through Claude
-- **🧠 AI Analysis**: Get AI-powered security insights, threat analysis, and compliance reports  
-- **💬 Natural Language**: Ask questions like "Show me critical alerts from the last hour"
-- **📱 Local Integration**: Direct stdio connection with Claude Desktop - no network setup required
-- **🛠️ 26 Security Tools**: Comprehensive coverage of Wazuh functionality
+- **🔍 AI-Powered Security**: Advanced threat analysis using Claude models
+- **🛡️ Production-Ready**: Comprehensive error handling, logging, and monitoring
+- **⚡ FastMCP Framework**: Built on the latest FastMCP 2.10.6+ for enhanced performance
+- **🔐 Security-First**: Input validation, rate limiting, and security audit trails
+- **📊 Real-Time Monitoring**: Health checks, metrics collection, and alerting
+- **🎯 Comprehensive Tools**: Complete Wazuh SIEM integration suite
 
 <img width="797" height="568" alt="claude0mcp-wazuh" src="https://github.com/user-attachments/assets/458d3c94-e1f9-4143-a1a4-85cb629287d4" />
 
@@ -21,32 +23,34 @@ A **production-ready Model Context Protocol (MCP) server** that connects Wazuh S
 
 ## 🚀 Quick Start
 
-### 1. Install
+### 1. Validate System
 
-**Option A: Automatic (Recommended)**
 ```bash
 git clone https://github.com/gensecaihq/Wazuh-MCP-Server.git
 cd Wazuh-MCP-Server
-python3 scripts/install.py
+python3 validate-production.py
 ```
 
-**Option B: Manual**
+### 2. Install Dependencies
+
 ```bash
 pip install -r requirements.txt
 ```
 
-### 2. Configure
+### 3. Configure Environment
 
-Create `.env` file with your Wazuh settings:
-```env
-WAZUH_HOST=your-wazuh-server.com
-WAZUH_PORT=55000
-WAZUH_USERNAME=your-api-user
-WAZUH_PASSWORD=your-password
-VERIFY_SSL=true
+```bash
+cp .env.production .env
+# Edit .env with your Wazuh credentials
 ```
 
-### 3. Connect to Claude Desktop
+### 4. Test Server
+
+```bash
+./wazuh-mcp-server
+```
+
+### 5. Connect to Claude Desktop
 
 Add to your Claude Desktop config:
 
@@ -58,119 +62,127 @@ Add to your Claude Desktop config:
   "mcpServers": {
     "wazuh": {
       "command": "python3",
-      "args": ["/path/to/Wazuh-MCP-Server/src/wazuh_mcp_server/main.py"]
+      "args": ["/full/path/to/Wazuh-MCP-Server/wazuh-mcp-server"]
     }
   }
 }
 ```
 
-### 4. Restart Claude Desktop
+### 6. Restart Claude Desktop
 
-That's it! Start asking Claude about your Wazuh security data.
+Start asking Claude about your Wazuh security data with AI-powered insights!
 
 ---
 
-## 🎯 v2.0.0 - Production Ready & Simplified
+## 🏗️ **Production Architecture**
 
-### ✅ **What's New**
-- **Fixed all GitHub issues** (#34, #33, #30, #25)  
-- **Simplified dependencies** - removed unnecessary complexity
-- **Cross-platform compatibility** - works on Windows, macOS, Linux
-- **Production-ready** - stable, tested, and reliable
-- **Pydantic V1/V2 support** - works with both versions
-- **26 security tools** - comprehensive Wazuh integration
+### ✅ **Core Features**
+- **FastMCP Framework**: Built on FastMCP 2.10.6+ for enhanced performance
+- **Production-Grade**: Comprehensive error handling, logging, and monitoring
+- **Security-First**: Input validation, rate limiting, and audit trails
+- **AI-Powered**: Advanced threat analysis using Claude models
+- **Real-Time Monitoring**: Health checks and performance metrics
 
-### 🔧 **Bug Fixes**
-- ✅ **Counter Import Error** (#34): Fixed `NameError` on Windows 11
-- ✅ **Websockets Dependency** (#33): Removed false requirement  
-- ✅ **Pydantic Compatibility** (#30, #25): Full V1/V2 support
+### 🔧 **Technical Stack**
+- **Framework**: FastMCP 2.10.6+ with HTTP/2 support
+- **Transport**: STDIO (standard MCP protocol)
+- **Platform**: Cross-platform Python 3.10+
+- **Dependencies**: Minimal, production-optimized
+- **Architecture**: Single unified server implementation
 
-### 🏗️ **Architecture** 
-- **Transport**: stdio (standard MCP protocol)
-- **Dependencies**: Minimal, essential only
-- **Platform**: Cross-platform Python 3.9+
-- **Deployment**: Local process, no containers needed
+### 🛡️ **Security & Reliability**
+- **Error Handling**: Graceful degradation with retry logic
+- **Rate Limiting**: API abuse prevention with burst protection
+- **Structured Logging**: JSON-formatted logs with security audit trails
+- **Health Monitoring**: Real-time system diagnostics and alerting
+- **Memory Management**: Efficient resource utilization
 
 ---
 
 ## 🛠️ Available Tools
 
-### Core Security Tools
-- `get_wazuh_alerts` - Query and analyze security alerts
-- `get_wazuh_agents` - Monitor agent status and health
-- `get_wazuh_vulnerabilities` - Vulnerability assessment
-- `analyze_security_threat` - AI-powered threat analysis
+### 🚨 **Core Security Tools**
+- **`get_wazuh_alerts`** - Retrieve and enrich alerts with risk scoring
+- **`analyze_security_threats`** - AI-powered threat analysis with Claude models
+- **`check_wazuh_agent_health`** - Comprehensive agent monitoring and diagnostics
+- **`get_server_health`** - Real-time server health and performance metrics
 
-### Statistics & Monitoring  
-- `get_wazuh_alert_summary` - Alert statistics and trends
-- `get_wazuh_weekly_stats` - Weekly security reports
-- `get_wazuh_running_agents` - Active agent monitoring
-- `get_wazuh_rules_summary` - Rule effectiveness analysis
+### 📊 **Resources & Data**
+- **Cluster Status** (`wazuh://cluster/status`) - Real-time cluster information
+- **Security Overview** (`wazuh://security/overview`) - Comprehensive security posture
 
-### Cluster & Infrastructure
-- `get_wazuh_cluster_health` - Cluster status monitoring
-- `get_wazuh_cluster_nodes` - Node information
-- `get_wazuh_remoted_stats` - Remote daemon statistics
-- `get_wazuh_log_collector_stats` - Log collection metrics
+### 📝 **AI Prompts**
+- **Security Briefing** - Generate executive security briefings
+- **Incident Investigation** - Structured incident response workflows
 
-### Advanced Analysis
-- `get_wazuh_vulnerability_summary` - Vulnerability summaries
-- `get_wazuh_critical_vulnerabilities` - Critical security issues
-- `search_wazuh_manager_logs` - Manager log analysis
-- `get_wazuh_manager_error_logs` - Error investigation
-
-**Total: 26 comprehensive security tools**
+### 🎯 **Production Features**
+- **Rate Limiting** - API abuse prevention
+- **Health Monitoring** - System diagnostics and alerting  
+- **Error Recovery** - Graceful failure handling with retries
+- **Performance Metrics** - Request tracking and optimization
+- **Security Audit** - Comprehensive logging and monitoring
 
 ---
 
 ## 📋 Requirements
 
 ### System Requirements
-- **Python**: 3.9 or higher
-- **RAM**: 256MB minimum
-- **Disk**: 100MB for installation
-- **Network**: HTTPS access to Wazuh Manager
+- **Python**: 3.10 or higher (FastMCP requirement)
+- **Memory**: 512MB minimum, 1GB recommended
+- **Storage**: 200MB for installation
+- **Network**: HTTPS access to Wazuh Manager (port 55000)
 
-### Dependencies (Auto-installed)
-```
-mcp>=1.10.1              # MCP protocol
-aiohttp>=3.8.0           # HTTP client
-urllib3>=1.26.0          # HTTP utilities  
-pydantic>=1.10.0         # Data validation (V1/V2 compatible)
-python-dotenv>=0.19.0    # Environment variables
-pyjwt>=2.8.0            # JWT authentication
-certifi>=2021.0.0       # SSL certificates
-python-dateutil>=2.8.2  # Date handling
-packaging>=21.0         # Version utilities
+### Core Dependencies
+```bash
+# FastMCP framework (requires Python 3.10+)
+fastmcp>=2.10.6
+
+# HTTP client with HTTP/2 support  
+httpx[http2]>=0.27.0
+
+# MCP protocol support
+mcp>=1.10.1
+
+# Data validation and utilities
+pydantic>=1.10.0,<3.0.0
+python-dateutil>=2.8.2
+python-dotenv>=0.19.0
+
+# Security and SSL
+pyjwt>=2.8.0
+certifi>=2021.0.0
+
+# System monitoring
+packaging>=21.0
+psutil>=5.9.0
 ```
 
 ---
 
-## 🔧 Installation Scripts
+## 🔧 Installation Options
 
-### Windows
-```batch
-scripts\install_windows.bat
+### Production Installation (Recommended)
+```bash
+# 1. Validate system readiness
+python3 validate-production.py
+
+# 2. Install all dependencies
+pip install -r requirements.txt
+
+# 3. Configure environment
+cp .env.production .env
 ```
 
-### macOS  
+### Platform-Specific Scripts
 ```bash
-scripts/install_macos.sh
-```
-
-### Linux (Ubuntu/Debian)
-```bash
-scripts/install_debian.sh
-```
-
-### Fedora/RHEL/CentOS
-```bash
-scripts/install_fedora.sh
-```
-
-### Universal (Recommended)
-```bash
+# Universal installer
 python3 scripts/install.py
+
+# Platform-specific installers available:
+# - scripts/install_windows.bat (Windows)
+# - scripts/install_macos.sh (macOS) 
+# - scripts/install_debian.sh (Ubuntu/Debian)
+# - scripts/install_fedora.sh (Fedora/RHEL/CentOS)
 ```
 
 ---
@@ -214,7 +226,7 @@ ALLOW_SELF_SIGNED=true
 
 **Import Errors**:
 ```bash
-# Ensure Python 3.9+
+# Ensure Python 3.10+ (FastMCP requirement)
 python3 --version
 
 # Reinstall dependencies
@@ -245,15 +257,15 @@ curl -k -X POST "https://your-wazuh-server:55000/security/user/authenticate" \
 
 ## 📚 Documentation
 
+### Core Files
+- **`server.py`** - Main FastMCP server implementation (single file)
+- **`requirements.txt`** - Production dependencies 
+- **`wazuh-mcp-server`** - Executable entry point
+- **`validate-production.py`** - System validation script
+
 ### Setup Guides
-- [Claude Desktop Setup](docs/user-guides/claude-desktop-setup.md)
 - [Configuration Examples](examples/configuration_examples/)
 - [Troubleshooting Guides](docs/troubleshooting/)
-
-### API Reference
-- [Tool Documentation](docs/api/)
-- [Configuration Reference](docs/configuration/)
-- [Security Best Practices](docs/security/)
 
 ---
 
@@ -271,17 +283,19 @@ Found a bug? [Open an issue](https://github.com/gensecaihq/Wazuh-MCP-Server/issu
 
 ## 📈 Roadmap
 
-### Current: v2.0.0 ✅
-- Simplified, production-ready MCP stdio server
-- Cross-platform compatibility
-- 26 comprehensive security tools
-- Bug fixes for all reported issues
+### Current: Single Production-Ready Server ✅
+- Unified FastMCP 2.10.6+ server implementation
+- Clean, single-file architecture (server.py)
+- Production-grade error handling and monitoring
+- AI-powered threat analysis with Claude models
+- Minimal dependencies, maximum reliability
 
-### Future: v2.1.0
-- Enhanced tool capabilities
+### Future Enhancements
+- Enhanced AI analysis capabilities
+- Additional Wazuh API integrations  
+- Advanced compliance reporting
+- Extended monitoring and alerting
 - Performance optimizations
-- Additional Wazuh integrations
-- Extended documentation
 
 ---
 
