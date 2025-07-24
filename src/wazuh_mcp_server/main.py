@@ -1,9 +1,11 @@
 #!/usr/bin/env python3
 """
-Wazuh MCP Server for Claude Desktop Integration - Production Edition
--------------------------------------------------------------------
+Wazuh MCP Server for Claude Desktop Integration - v3.0.0 Production Edition
+---------------------------------------------------------------------------
 Production-grade MCP server with advanced security analysis capabilities,
-comprehensive validation, and enterprise-ready features.
+comprehensive validation, enterprise-ready features, and backward compatibility.
+
+Supports both v2.0.0 stdio mode and v3.0.0 remote mode for seamless migration.
 """
 
 import os
@@ -24,6 +26,10 @@ import mcp.types as types
 # Clean absolute imports within the package
 from wazuh_mcp_server.config import WazuhConfig, ComplianceFramework
 from wazuh_mcp_server.__version__ import __version__
+
+# Check if running in Docker/self-contained mode
+SELF_CONTAINED = os.getenv('SELF_CONTAINED', 'false').lower() == 'true'
+PRESERVE_V2_COMPATIBILITY = os.getenv('PRESERVE_V2_COMPATIBILITY', 'true').lower() == 'true'
 from wazuh_mcp_server.api.wazuh_client_manager import WazuhClientManager
 from wazuh_mcp_server.analyzers import SecurityAnalyzer, ComplianceAnalyzer
 from wazuh_mcp_server.utils import (

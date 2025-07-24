@@ -2,525 +2,237 @@
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Python 3.9+](https://img.shields.io/badge/python-3.9+-blue.svg)](https://www.python.org/downloads/)
-[![Wazuh Compatible](https://img.shields.io/badge/Wazuh-4.8%2B-orange.svg)](https://wazuh.com/)
-[![Docker](https://img.shields.io/badge/Docker-Ready-blue.svg)](https://hub.docker.com/)
+[![Wazuh 4.5+](https://img.shields.io/badge/Wazuh-4.5+-orange.svg)](https://wazuh.com/)
+[![Docker Ready](https://img.shields.io/badge/Docker-Ready-blue.svg)](https://www.docker.com/)
 [![Production Ready](https://img.shields.io/badge/Production-Ready-green.svg)](https://github.com/gensecaihq/Wazuh-MCP-Server/releases)
 
-A production-grade Model Context Protocol (MCP) server that connects Wazuh SIEM with Claude Desktop and Claude Code for AI-powered security operations.
-
-## What it does
-
-- **Security Monitoring**: Query Wazuh alerts, agents, and vulnerabilities through Claude
-- **AI Analysis**: Get AI-powered security insights, threat analysis, and compliance reports
-- **Natural Language**: Ask questions like "Show me critical alerts from the last hour" or "Analyze this security incident"
-- **Flexible Deployment**: Choose between Docker containerization (v3) or traditional installation (v2)
-- **Production Ready**: Full monitoring, high availability, and security hardening
-
-<img width="797" height="568" alt="claude0mcp-wazuh" src="https://github.com/user-attachments/assets/458d3c94-e1f9-4143-a1a4-85cb629287d4" />
-
-## 🏷️ Version Information
-
-### **🚀 v3.0.0 - Remote MCP Server with Docker** (🔜 **COMING SOON** - This Branch)
-- **Status**: 🔜 **COMING SOON** - Advanced containerized remote MCP server
-- **Architecture**: **Remote MCP Server** with **HTTP/SSE transport**
-- **Deployment**: **Docker-first** with complete containerization and monitoring
-- **Transport**: HTTPS/SSE for secure remote access + stdio for development
-- **Security**: OAuth2 authentication, persistent storage, configuration encryption
-- **Features**: Remote MCP server, High Availability, automated Docker Hub publishing
-- **Best For**: **Future production deployments** requiring enterprise-grade security and remote access
-- **Host Requirements**: **Docker only** - no Python/dependency management needed
-- **Preview**: Available on this branch for testing and evaluation
-
-### **📍 v2.0.0 - Local MCP Server** (✅ **CURRENT RELEASE** - main branch)
-- **Status**: ✅ **PRODUCTION READY** - [Current stable release on main branch](https://github.com/gensecaihq/Wazuh-MCP-Server/tree/main)
-- **Architecture**: **Local MCP Server** with **stdio transport**
-- **Deployment**: Traditional Python installation with manual dependency management
-- **Transport**: stdio only (direct connection to Claude Desktop)
-- **Features**: 26 security tools with enhanced capabilities
-- **Best For**: **Current production use** - Local development, testing, and immediate deployment
-- **Host Requirements**: Python 3.9+, manual dependency installation
-
-### **🏛️ v1.0.0 - Legacy** 
-- **Status**: ✅ **Legacy Support** - [GitHub Release](https://github.com/gensecaihq/Wazuh-MCP-Server/releases/tag/v1.0.0)
-- **Features**: 14 core security tools
-- **Best For**: Minimal installations and legacy systems
-
-> **💡 Current Recommendation**: Use **v2.0.0** (main branch) for all current deployments. **v3.0.0** (this branch) is coming soon for users who need remote MCP server capabilities.
-
----
+Production-grade Model Context Protocol (MCP) server connecting Wazuh SIEM with Claude Desktop for AI-powered security operations.
 
 ## 🚀 Quick Start
 
-### 🐳 v3.0.0: Remote MCP Server with Docker (🔜 Coming Soon)
-
-**🔬 Preview: Complete containerized deployment - no host dependencies required:**
-
 ```bash
-# Clone the repository
+# 1. Clone repository
 git clone https://github.com/gensecaihq/Wazuh-MCP-Server.git
 cd Wazuh-MCP-Server
 
-# Switch to v3-check branch (production-ready)
-git checkout v3-check
+# 2. Configure Wazuh API
+cp .env.production .env
+vim .env  # Add WAZUH_API_URL, USERNAME, PASSWORD
 
-# Create environment configuration
-cp .env.example .env
-# Edit .env with your Wazuh details
+# 3. Deploy with Docker
+./scripts/deploy-production.sh
 
-# Single command deployment
-docker compose up -d
-
-# Verify secure deployment
-docker compose ps
-curl -f -k https://localhost:8443/health  # Note: HTTPS with SSL
+# 4. Verify
+curl -k https://localhost:8443/health
 ```
 
-**🔬 Preview Features (v3.0.0 Coming Soon):**
-- 🔐 **Security**: OAuth2 authentication + persistent storage + config encryption
-- 🌐 **Remote Access**: HTTPS/SSE transport for secure remote MCP connections
-- 📊 **Monitoring**: Complete Prometheus + Grafana + AlertManager stack
-- 🔄 **High Availability**: Redis Sentinel + HAProxy load balancing
-- 🛡️ **Container Security**: Security-hardened containers with proper health checks
-- 📋 **Operations**: Automated backups, incident response, and operational runbooks
-- ⚡ **Zero Dependencies**: Complete containerization - no host requirements
-- 🐳 **Auto-Publishing**: Automated Docker Hub publishing for v3+ releases
+## 🎯 Features
 
-**🎯 Key Advantage**: Host OS becomes irrelevant - works identically on Windows, macOS, and Linux
+### Core Security Tools (26 Total)
+- **Alert Management**: Query, analyze, and respond to security alerts
+- **Agent Monitoring**: Track agent health, processes, and connections
+- **Vulnerability Assessment**: Identify and prioritize security vulnerabilities
+- **Compliance Checking**: CIS, PCI-DSS, HIPAA compliance analysis
+- **Threat Intelligence**: IOC checking and threat analysis
+- **Cluster Management**: Monitor Wazuh cluster health
 
-### 🐳 Alternative: Published Docker Images (🔜 When Available)
+### Production Architecture
+- **Single Container**: Minimal resource usage (256MB RAM)
+- **Auto-Configuration**: Zero manual setup required
+- **Backward Compatible**: Preserves all v2.0.0 functionality
+- **Security Hardened**: OAuth 2.0, JWT tokens, non-root execution
 
-**Future: Quick deployment without building from source:**
+## 📋 Requirements
 
-```bash
-# Pull and run the latest v3 image (when published)
-docker pull gensecaihq/wazuh-mcp-server:v3-latest
-
-# Quick start with published image
-curl -O https://raw.githubusercontent.com/gensecaihq/Wazuh-MCP-Server/v3-check/docker-compose.yml
-curl -O https://raw.githubusercontent.com/gensecaihq/Wazuh-MCP-Server/v3-check/.env.example
-mv .env.example .env
-# Edit .env with your configuration
-docker compose up -d
-```
-
-**Available tags**: `v3.0.0`, `v3-latest`, `latest`  
-**Docker Hub**: https://hub.docker.com/r/gensecaihq/wazuh-mcp-server
-
-### 📍 v2.0.0: Current Release (Recommended for Now)
-
-**✅ Production ready - Use this for current deployments:**
-
-```bash
-# Clone and switch to v2
-git clone https://github.com/gensecaihq/Wazuh-MCP-Server.git
-cd Wazuh-MCP-Server
-git checkout main  # v2 is on main branch
-
-# Install dependencies (requires Python 3.9+)
-python3 scripts/install.py
-
-# Configure environment
-cp .env.example .env
-# Edit .env with your Wazuh details
-
-# Run locally (stdio mode)
-python3 -m wazuh_mcp_server.main --stdio
-```
-
----
-
-## 🔧 Configuration
-
-### v3.0.0 Security-Hardened Configuration
-
-**Environment file (`.env`):**
-```env
-# Wazuh Configuration (can be encrypted)
-WAZUH_HOST=your-wazuh-server.com
-WAZUH_USER=your-username
-WAZUH_PASS=your-password  # Auto-encrypted with CONFIG_MASTER_KEY
-WAZUH_PORT=55000
-
-# v3 Remote Server Configuration (HTTPS/SSL)
-MCP_SERVER_HOST=0.0.0.0
-MCP_SERVER_PORT=8443
-MCP_TRANSPORT=sse
-
-# Authentication (Production-Grade Security)
-JWT_SECRET_KEY=your-256-bit-secret-key  # Auto-encrypted
-ADMIN_PASSWORD=secure-admin-password    # Auto-encrypted
-OAUTH_ENABLED=true
-
-# v3.0.0 Enhanced Security Features
-CONFIG_MASTER_KEY=your-encryption-master-key  # For config encryption
-OAUTH2_ENABLE_PERSISTENCE=true                # Persistent OAuth2 storage
-REDIS_PASSWORD=secure-redis-password          # Auto-encrypted
-
-# Security (Hardened Defaults)
-VERIFY_SSL=true
-WAZUH_ALLOW_SELF_SIGNED=true
-
-# Monitoring
-ENABLE_METRICS=true
-METRICS_PORT=9090
-LOG_LEVEL=INFO
-```
-
-### v2.0.0 Traditional Configuration
-
-**Same `.env` file format, but simplified:**
-```env
-# Wazuh Configuration (Required)
-WAZUH_HOST=your-wazuh-server.com
-WAZUH_USER=your-username
-WAZUH_PASS=your-password
-WAZUH_PORT=55000
-
-# Security
-VERIFY_SSL=true
-WAZUH_ALLOW_SELF_SIGNED=true
-
-# Logging
-LOG_LEVEL=INFO
-```
-
----
-
-## 🔌 Claude Integration
-
-### v3.0.0: Remote MCP (Production)
-```json
-{
-  "mcpServers": {
-    "wazuh": {
-      "type": "url",
-      "url": "https://your-server:8443/sse",
-      "name": "wazuh-mcp",
-      "authorization": {
-        "type": "oauth2",
-        "authorization_url": "https://your-server:8443/oauth/authorize",
-        "token_url": "https://your-server:8443/oauth/token",
-        "client_id": "wazuh-mcp-client",
-        "scopes": ["read:alerts", "read:agents", "read:vulnerabilities"]
-      }
-    }
-  }
-}
-```
-
-### v2.0.0: Local stdio (Development)
-```json
-{
-  "mcpServers": {
-    "wazuh": {
-      "command": "/full/path/to/Wazuh-MCP-Server/scripts/mcp_wrapper.sh",
-      "args": ["--stdio"]
-    }
-  }
-}
-```
-
----
-
-## 🎯 Features (Both Versions)
-
-### 🔍 Security Tools (26 Total)
-- **get_alerts**: Retrieve and filter Wazuh alerts
-- **analyze_threats**: AI-powered threat analysis
-- **check_agent_health**: Monitor agent status
-- **compliance_check**: Compliance assessments (PCI DSS, GDPR, HIPAA, etc.)
-- **risk_assessment**: Comprehensive security risk analysis
-- **vulnerability_prioritization**: Risk-based vulnerability management
-- And 20 more advanced security tools...
-
-### 🔐 v3.0.0 Additional Enterprise Features
-- **OAuth 2.0 Server**: Full authorization server with client management
-- **JWT Token Management**: Secure token creation, validation, and revocation
-- **Rate Limiting**: Per-client rate limiting with abuse protection
-- **SSL/TLS Support**: Full HTTPS with certificate management
-- **Audit Logging**: Complete security event logging
-- **High Availability**: Load balancing with auto-recovery
-- **Monitoring Stack**: Prometheus + Grafana dashboards
-
-## 🛡️ Security Features (v3.0.0 Preview)
-
-**🔜 Coming Soon**: The v3.0.0 version will include comprehensive security hardening based on our V3 Comprehensive Security Audit:
-
-### 🔐 Configuration Security
-- **Configuration Encryption**: Automatic encryption of 15+ sensitive configuration keys
-- **Master Key Management**: Secure key generation and storage with CONFIG_MASTER_KEY support
-- **Encryption Utility**: Use `scripts/encrypt-config.py` to encrypt environment files
-- **Runtime Decryption**: Transparent decryption of encrypted values during runtime
-
-### 🔑 Authentication & Authorization
-- **OAuth2 Persistent Storage**: Persistent storage for OAuth2 tokens and user data using Redis
-- **JWT Token Security**: Secure token creation, validation, and revocation
-- **HTTPS Transport**: Mandatory HTTPS with SSL certificate validation
-- **Client Authentication**: OAuth2 client management with proper scopes
-
-### 🗄️ Data Protection
-- **Redis Security**: Password-protected Redis with secure configuration files
-- **Container Hardening**: Security-hardened Docker containers with proper entrypoints
-- **Health Check Security**: HTTPS health checks with SSL certificate handling
-- **Backup Security**: Secure backup system with encrypted configuration support
-
-### 📊 Monitoring & Compliance
-- **Security Audit Score**: 9.5/10 - All critical security issues resolved
-- **Continuous Monitoring**: Real-time security monitoring with Prometheus
-- **Incident Response**: Automated incident response procedures
-- **Compliance Ready**: Enhanced security posture for enterprise compliance
-
-### 🔧 Security Configuration Examples
-
-**Encrypt sensitive configuration:**
-```bash
-# Encrypt your .env file
-python scripts/encrypt-config.py .env --output .env.encrypted
-
-# List all sensitive keys that will be encrypted
-python scripts/encrypt-config.py --list-sensitive
-```
-
-**Use encrypted configuration in production:**
-```env
-# Example encrypted values (auto-generated)
-WAZUH_PASS=ENC:gAAAAABh...encrypted_password_here
-JWT_SECRET_KEY=ENC:gAAAAABh...encrypted_jwt_key_here
-REDIS_PASSWORD=ENC:gAAAAABh...encrypted_redis_password_here
-```
-
----
-
-## 📊 Performance & Requirements
-
-### v3.0.0 Docker Requirements
-```bash
-# Host Requirements (minimal)
+### Docker Deployment (Recommended)
 - Docker 20.10+
 - Docker Compose 2.0+
-- 2GB RAM minimum
-- 10GB storage
+- 1GB free disk space
 
-# Everything else containerized:
-- Python 3.12 (in container)
-- Redis 7.4 (in container)
-- Prometheus 2.55.0 (in container)
-- Grafana 11.4.0 (in container)
-- HAProxy 3.0 (in container)
-- All dependencies (in container)
-```
-
-### v2.0.0 Traditional Requirements
-```bash
-# Host Requirements (manual setup)
+### Manual Installation
 - Python 3.9+
-- pip/poetry for dependency management
-- Platform-specific dependencies
-- Manual SSL certificate management
-- Manual monitoring setup
+- Wazuh 4.5+ with API access
+- 512MB RAM minimum
+
+## 🔧 Installation
+
+### Option 1: Docker (Production)
+```bash
+# Using deployment script
+./scripts/deploy-production.sh
+
+# Or using docker-compose directly
+docker-compose up -d
 ```
 
-### Performance Benchmarks
-- **Startup Time**: v3: < 10s (includes stack), v2: < 5s
-- **Memory Usage**: v3: < 1GB (full stack), v2: < 512MB
-- **Response Time**: Both < 200ms (p95)
-- **Scaling**: v3: Horizontal scaling, v2: Single instance
-
----
-
-## 🛠️ Development
-
-### v3.0.0 Development with Docker
+### Option 2: Manual Installation
 ```bash
-# Development with live reload
-docker compose -f docker-compose.dev.yml up -d
-
-# Run tests in container
-docker compose exec wazuh-mcp-server pytest
-
-# Access container for debugging
-docker compose exec wazuh-mcp-server bash
-```
-
-### v2.0.0 Traditional Development
-```bash
-# Setup virtual environment
-python3 -m venv venv
-source venv/bin/activate
-pip install -r requirements.txt
-
-# Run tests
-pytest tests/
-
-# Start development server
-python3 -m wazuh_mcp_server.main --stdio
-```
-
----
-
-## 🔄 Migration Between Versions
-
-### From v2 to v3 (Recommended)
-```bash
-# Backup your configuration
-cp .env .env.backup
-
-# Switch to v3
-git checkout v3-check
-
-# Deploy with Docker (uses same .env)
-docker compose up -d
-```
-
-### From v3 to v2 (If needed)
-```bash
-# Switch to v2
-git checkout main
+# Create virtual environment
+python -m venv venv
+source venv/bin/activate  # or `venv\Scripts\activate` on Windows
 
 # Install dependencies
-python3 scripts/install.py
+pip install -r requirements-prod.txt
 
-# Use existing .env file
-python3 -m wazuh_mcp_server.main --stdio
+# Run server
+python -m wazuh_mcp_server.main
 ```
 
----
+## ⚙️ Configuration
 
-## 🧪 Testing
-
-### v3.0.0 Testing
+### Required Settings
 ```bash
-# Test full Docker stack
-docker compose -f docker-compose.test.yml up --abort-on-container-exit
-
-# Individual service tests
-docker compose exec wazuh-mcp-server pytest tests/
+# .env file
+WAZUH_API_URL=https://your-wazuh:55000
+WAZUH_API_USERNAME=your-api-user
+WAZUH_API_PASSWORD=your-api-password
 ```
 
-### v2.0.0 Testing
+### Optional Settings
 ```bash
-# Local testing
-pytest tests/
-pytest --cov=src --cov-report=html
+# Server Configuration
+MCP_SERVER_MODE=auto      # auto|stdio|remote
+MCP_SERVER_PORT=8443      # HTTPS port
+
+# Security
+OAUTH_ENABLED=true        # OAuth 2.0 authentication
+JWT_SECRET_KEY=           # Auto-generated if blank
+
+# Performance
+MAX_CONNECTIONS=1000      # Concurrent connections
+WORKER_PROCESSES=4        # CPU workers
 ```
 
----
+## 🔌 Claude Desktop Integration
 
-## 🔧 Troubleshooting
+### Configure Claude Desktop
+```json
+{
+  "mcpServers": {
+    "wazuh": {
+      "command": "docker",
+      "args": ["exec", "-i", "wazuh-mcp-server", 
+               "python", "-m", "wazuh_mcp_server.main", "--stdio"]
+    }
+  }
+}
+```
 
-### v3.0.0 Docker Troubleshooting
+### Example Usage
+```
+You: Show me critical alerts from the last hour
+Claude: I'll search for critical alerts from the last hour...
+
+You: Analyze security posture of web servers
+Claude: Let me analyze the security posture of your web servers...
+
+You: Check if any agents are disconnected
+Claude: I'll check the status of all Wazuh agents...
+```
+
+## 🛡️ Security
+
+- **Container Security**: Non-root user, read-only filesystem
+- **Network Security**: HTTPS only, isolated Docker network
+- **Authentication**: OAuth 2.0 with JWT tokens
+- **Audit Logging**: JSON structured logs
+- **Input Validation**: All endpoints validated
+
+## 📊 Available Tools
+
+<details>
+<summary>Click to see all 26 tools</summary>
+
+### Alert Tools
+- `get_wazuh_alerts` - Query security alerts
+- `get_wazuh_alert_summary` - Alert statistics
+- `analyze_wazuh_threats` - AI threat analysis
+
+### Agent Tools
+- `check_wazuh_agent_health` - Agent status
+- `get_wazuh_agent_processes` - Running processes
+- `get_wazuh_agent_ports` - Network connections
+- `get_wazuh_running_agents` - Active agents
+
+### Vulnerability Tools
+- `get_wazuh_vulnerability_summary` - Vulnerability overview
+- `get_wazuh_critical_vulnerabilities` - Critical CVEs
+
+### Compliance Tools
+- `check_wazuh_compliance` - Compliance status
+- `get_wazuh_risk_assessment` - Risk analysis
+
+### Statistics Tools
+- `get_wazuh_weekly_stats` - Weekly statistics
+- `get_wazuh_remoted_stats` - Remote statistics
+- `get_wazuh_log_collector_stats` - Log collection stats
+
+### Cluster Tools
+- `get_wazuh_cluster_health` - Cluster status
+- `get_wazuh_cluster_nodes` - Node information
+- `search_wazuh_manager_logs` - Log search
+
+### Additional Tools
+- `check_wazuh_ioc` - IOC checking
+- `get_wazuh_rules_summary` - Rule statistics
+- `get_wazuh_manager_error_logs` - Error logs
+
+</details>
+
+## 🚨 Troubleshooting
+
+### Container Won't Start
 ```bash
-# Check all services
-docker compose ps
+# Check logs
+docker-compose logs
 
-# View logs
-docker compose logs -f
+# Verify credentials
+cat .env | grep WAZUH_API
 
-# Health checks (HTTPS with SSL handling)
-curl -f -k https://localhost:8443/health
-docker compose exec wazuh-mcp-server python -c "import wazuh_mcp_server; print('OK')"
-
-# Clean restart
-docker compose down -v
-docker compose up -d
+# Test API connection
+curl -u user:pass https://wazuh:55000/security/user/authenticate
 ```
 
-### v2.0.0 Traditional Troubleshooting
+### Health Check Fails
 ```bash
-# Test setup
-python scripts/validate_setup.py
+# Check internal health
+docker exec wazuh-mcp-server curl -k https://localhost:8443/health
 
-# Check dependencies
-pip check
-
-# Test Wazuh connection
-curl -u username:password https://your-wazuh:55000/
+# Check container status
+docker ps
 ```
 
-### Common Issues
+### Performance Issues
+```bash
+# Monitor resources
+docker stats
 
-#### Authentication Issues
-**Both versions**: Wazuh Dashboard and API use separate authentication.
-
-1. **Create API User** in Wazuh Dashboard:
-   - Go to **Security** → **Internal users**
-   - Create user with `wazuh` backend role
-   - Use these credentials in `.env`
-
-2. **Test API Authentication**:
-   ```bash
-   curl -k -X POST "https://your-wazuh:55000/security/user/authenticate" \
-     -H "Content-Type: application/json" \
-     -d '{"username":"your-api-user","password":"your-api-password"}'
-   ```
-
----
+# Increase limits in docker-compose.yml
+# Restart: docker-compose up -d
+```
 
 ## 📚 Documentation
 
-### Quick References
-- **v3.0.0 Docker Guide**: [docs/v3/README_v3.md](docs/v3/README_v3.md)
-- **v2.0.0 Installation Guide**: [docs/user-guides/claude-desktop-setup.md](docs/user-guides/claude-desktop-setup.md)
-- **Migration Guide**: [docs/MIGRATION_GUIDE.md](docs/MIGRATION_GUIDE.md)
-- **Troubleshooting**: [docs/troubleshooting/](docs/troubleshooting/)
+- [Production Deployment Guide](PRODUCTION_README.md)
+- [API Documentation](docs/API.md)
+- [Security Guide](docs/security/README.md)
+- [Troubleshooting](docs/troubleshooting/)
 
-### Operations
-- **Production Deployment**: [docs/operations/PRODUCTION_DEPLOYMENT.md](docs/operations/PRODUCTION_DEPLOYMENT.md)
-- **High Availability**: [docs/operations/HIGH_AVAILABILITY.md](docs/operations/HIGH_AVAILABILITY.md)
-- **Security Guide**: [docs/security/README.md](docs/security/README.md)
+## 🤝 Contributing
 
----
+Contributions are welcome! Please read our [Contributing Guide](docs/development/CONTRIBUTING.md).
 
-## 🏆 Version Comparison Summary
+## 📄 License
 
-| Feature | v2.0.0 (Traditional) | v3.0.0 (Docker) | 
-|---------|----------------------|------------------|
-| **Deployment** | Manual installation | Single `docker compose up` |
-| **Host Dependencies** | Python 3.9+, manual deps | Docker only |
-| **Transport** | stdio only | HTTP/SSE + stdio |
-| **Authentication** | Basic | OAuth2 + JWT |
-| **Scaling** | Single instance | Horizontal scaling |
-| **Monitoring** | Manual setup | Built-in Prometheus/Grafana |
-| **Security** | Basic SSL | Enterprise hardening |
-| **Best For** | Development/Testing | Production |
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file.
+
+## 🔗 Links
+
+- **GitHub**: https://github.com/gensecaihq/Wazuh-MCP-Server
+- **Issues**: https://github.com/gensecaihq/Wazuh-MCP-Server/issues
+- **Wazuh**: https://wazuh.com/
+- **MCP**: https://modelcontextprotocol.io/
 
 ---
 
-## 🤝 Support
-
-- **GitHub Issues**: [Report bugs and request features](https://github.com/gensecaihq/Wazuh-MCP-Server/issues)
-- **Documentation**: [Complete documentation](docs/)
-- **Security Issues**: [Security policy](SECURITY.md)
-- **Community**: [Discussions](https://github.com/gensecaihq/Wazuh-MCP-Server/discussions)
-
----
-
-## 📝 License
-
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
-
-## 🙏 Acknowledgments
-
-- **Special Thanks**: [@marcolinux46](https://github.com/marcolinux46) for extensive testing and feedback
-- **Wazuh Team**: For the excellent SIEM platform
-- **Anthropic**: For the Claude AI models and MCP framework
-- **Community**: All contributors and users providing feedback
-
----
-
-## 📊 Project Status
-
-- **Current Version**: v2.0.0 (Production Ready - main branch) / v3.0.0 (Coming Soon - this branch)
-- **Security Status**: **9.5/10** - All critical security issues resolved in v3-check
-- **Maintenance**: Active development and support
-- **Security**: Comprehensive security hardening with encryption and OAuth2
-- **Compatibility**: Docker 20.10+ (v3) | Python 3.9+ (v2) | Wazuh 4.8+
-- **Platforms**: Linux, macOS, Windows
-- **License**: MIT License
-
-### 🎯 v3.0.0 Preview Highlights
-- **🔜 Coming Soon**: Security-hardened remote MCP server with 9.5/10 audit score
-- **🔐 Security Enhanced**: Configuration encryption, OAuth2 persistence, HTTPS health checks
-- **🐳 Docker Optimized**: All dependencies containerized with security best practices
-- **📋 Enterprise Grade**: High availability, monitoring, and incident response capabilities
-- **🌐 Remote Access**: First MCP server supporting HTTP/SSE transport for remote deployment
+**Built with ❤️ for the Security Community**

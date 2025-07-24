@@ -1,24 +1,21 @@
-# Docker Compose for Wazuh MCP Server v3.0.0
-# =============================================
-# Production-ready configuration with monitoring and security
-# Uses latest Compose Specification (no version field required)
+# Docker Compose for Wazuh MCP Server v3.0.0 - Production Core
+# =============================================================
+# Minimal production-grade configuration focused on core MCP functionality
+# No monitoring, no nice-to-have features - just production MCP
 
 services:
   wazuh-mcp-server:
-    # For v3.0.0+: Use published image from Docker Hub
-    # Uncomment build section below for local development
-    image: gensecaihq/wazuh-mcp-server:${WAZUH_MCP_VERSION:-v3-latest}
-    
-    # build:
-    #   context: .
-    #   dockerfile: Dockerfile
-    #   args:
-    #     BUILDPLATFORM: ${BUILDPLATFORM:-linux/amd64}
-    #     TARGETPLATFORM: ${TARGETPLATFORM:-linux/amd64}
+    # Production-ready build from source
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        BUILDPLATFORM: ${BUILDPLATFORM:-linux/amd64}
+        TARGETPLATFORM: ${TARGETPLATFORM:-linux/amd64}
     container_name: wazuh-mcp-server
     restart: unless-stopped
     
-    # Security settings
+    # Production security settings
     security_opt:
       - no-new-privileges:true
     cap_drop:
@@ -28,57 +25,62 @@ services:
     read_only: true
     user: "1000:1000"
     
-    # Network settings
+    # Network - single port for MCP
     ports:
-      - "8443:8443"  # MCP Server (HTTPS)
-      - "9090:9090"  # Metrics
+      - "${MCP_SERVER_PORT:-8443}:8443"  # MCP Server HTTPS/SSE
     
-    # Environment variables
+    # Core environment variables only
     environment:
       # Server configuration
       - MCP_SERVER_HOST=0.0.0.0
       - MCP_SERVER_PORT=8443
-      - MCP_SERVER_MODE=remote
-      - MCP_TRANSPORT=sse
+      - MCP_SERVER_MODE=${MCP_SERVER_MODE:-auto}
+      - MCP_TRANSPORT=${MCP_TRANSPORT:-sse}
       
-      # Wazuh API configuration
-      - WAZUH_API_URL=${WAZUH_API_URL:-https://wazuh-manager:55000}
-      - WAZUH_API_USERNAME=${WAZUH_API_USERNAME:-wazuh}
+      # Wazuh API configuration (REQUIRED)
+      - WAZUH_API_URL=${WAZUH_API_URL}
+      - WAZUH_API_USERNAME=${WAZUH_API_USERNAME}
       - WAZUH_API_PASSWORD=${WAZUH_API_PASSWORD}
       - WAZUH_API_VERIFY_SSL=${WAZUH_API_VERIFY_SSL:-true}
       
-      # OAuth configuration
+      # Production security
       - OAUTH_ENABLED=${OAUTH_ENABLED:-true}
-      - JWT_SECRET_KEY=${JWT_SECRET_KEY}
+      - JWT_SECRET_KEY=${JWT_SECRET_KEY:-auto-generate}
       
-      # Logging configuration
-      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+      # Production logging
+      - LOG_LEVEL=${LOG_LEVEL:-WARNING}
       - LOG_FORMAT=json
       
-      # Monitoring configuration
-      - ENABLE_METRICS=${ENABLE_METRICS:-true}
-      - METRICS_PORT=9090
+      # Disable non-essential features
+      - ENABLE_METRICS=false
+      - REDIS_ENABLED=false
       
-      # Performance settings
+      # Performance for production
       - MAX_CONNECTIONS=${MAX_CONNECTIONS:-1000}
       - REQUEST_TIMEOUT=${REQUEST_TIMEOUT:-30}
+      - WORKER_PROCESSES=${WORKER_PROCESSES:-4}
       
-    # Volume mounts
+      # Self-contained mode
+      - SELF_CONTAINED=true
+      - AUTO_GENERATE_CONFIG=true
+      - PRESERVE_V2_COMPATIBILITY=true
+      
+    # Minimal volumes - only essential data
     volumes:
-      - ./config:/app/config:ro
-      - ./logs:/app/logs:rw
-      - ./data:/app/data:rw
-      - /tmp:/tmp:rw
+      - wazuh-mcp-config:/app/config:rw
+      - wazuh-mcp-logs:/app/logs:rw
+      - wazuh-mcp-data:/app/data:rw
+      - /tmp:/tmp:rw  # Required for stdio mode
     
-    # Health check
+    # Production health check
     healthcheck:
       test: ["CMD", "curl", "-f", "-k", "https://localhost:8443/health"]
       interval: 30s
       timeout: 10s
       retries: 3
-      start_period: 30s
+      start_period: 40s
     
-    # Resource limits
+    # Production resource limits
     deploy:
       resources:
         limits:
@@ -86,156 +88,34 @@ services:
           memory: 1G
         reservations:
           cpus: '0.5'
-          memory: 512M
+          memory: 256M
     
-    # Logging configuration
+    # Production logging
     logging:
       driver: json-file
       options:
-        max-size: "10m"
-        max-file: "3"
+        max-size: "50m"
+        max-file: "5"
+        compress: "true"
     
-    # Dependencies
-    depends_on:
-      - redis
-      - prometheus
-    
-    # Networks
+    # Isolated network
     networks:
       - wazuh-mcp-network
 
-  # Redis for caching and session storage
-  redis:
-    image: redis:7.4-alpine
-    container_name: wazuh-mcp-redis
-    restart: unless-stopped
-    
-    # Security settings
-    security_opt:
-      - no-new-privileges:true
-    cap_drop:
-      - ALL
-    read_only: true
-    user: "999:999"
-    
-    # Configuration
-    command: /usr/local/bin/redis-entrypoint.sh
-    environment:
-      - REDIS_PASSWORD=${REDIS_PASSWORD:-redis-secret}
-    
-    # Volumes
-    volumes:
-      - redis-data:/data
-      - ./config/redis.conf:/usr/local/etc/redis/redis.conf.template:ro
-      - ./config/redis-entrypoint.sh:/usr/local/bin/redis-entrypoint.sh:ro
-    
-    # Health check
-    healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-    
-    # Resource limits
-    deploy:
-      resources:
-        limits:
-          cpus: '1.0'
-          memory: 1G
-        reservations:
-          cpus: '0.5'
-          memory: 512M
-    
-    # Networks
-    networks:
-      - wazuh-mcp-network
-
-  # Prometheus for metrics collection
-  prometheus:
-    image: prom/prometheus:v2.55.0
-    container_name: wazuh-mcp-prometheus
-    restart: unless-stopped
-    
-    # Security settings
-    security_opt:
-      - no-new-privileges:true
-    cap_drop:
-      - ALL
-    read_only: true
-    user: "65534:65534"
-    
-    # Ports
-    ports:
-      - "9091:9090"
-    
-    # Configuration
-    volumes:
-      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
-      - prometheus-data:/prometheus
-    
-    # Command
-    command:
-      - '--config.file=/etc/prometheus/prometheus.yml'
-      - '--storage.tsdb.path=/prometheus'
-      - '--web.console.libraries=/etc/prometheus/console_libraries'
-      - '--web.console.templates=/etc/prometheus/consoles'
-      - '--web.enable-lifecycle'
-      - '--web.enable-admin-api'
-    
-    # Networks
-    networks:
-      - wazuh-mcp-network
-
-  # Grafana for visualization (optional)
-  grafana:
-    image: grafana/grafana:11.4.0
-    container_name: wazuh-mcp-grafana
-    restart: unless-stopped
-    
-    # Security settings
-    security_opt:
-      - no-new-privileges:true
-    cap_drop:
-      - ALL
-    user: "472:472"
-    
-    # Ports
-    ports:
-      - "3000:3000"
-    
-    # Environment
-    environment:
-      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_PASSWORD:-admin}
-      - GF_SECURITY_ADMIN_USER=${GRAFANA_USER:-admin}
-    
-    # Volumes
-    volumes:
-      - grafana-data:/var/lib/grafana
-      - ./monitoring/grafana/dashboards:/var/lib/grafana/dashboards
-      - ./monitoring/grafana/provisioning:/etc/grafana/provisioning
-    
-    # Dependencies
-    depends_on:
-      - prometheus
-    
-    # Networks
-    networks:
-      - wazuh-mcp-network
-
-# Networks
+# Production network
 networks:
   wazuh-mcp-network:
     driver: bridge
     ipam:
       driver: default
       config:
-        - subnet: 172.20.0.0/16
+        - subnet: 172.20.0.0/24
 
-# Volumes
+# Essential volumes only
 volumes:
-  redis-data:
+  wazuh-mcp-config:
     driver: local
-  prometheus-data:
+  wazuh-mcp-logs:
     driver: local
-  grafana-data:
+  wazuh-mcp-data:
     driver: local

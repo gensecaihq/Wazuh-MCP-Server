@@ -45,15 +45,21 @@ class TokenManager:
         self._key_created_at = time.time()
         self._key_version = 1
         
-        # Redis for token blacklist
-        redis_url = os.getenv("REDIS_URL", "redis://localhost:6379")
-        try:
-            self._redis = redis.from_url(redis_url, decode_responses=True)
-            self._redis.ping()
-            logger.info("Connected to Redis for token blacklist")
-        except Exception as e:
-            logger.warning(f"Redis connection failed: {e}. Token blacklisting disabled.")
+        # Token blacklist - use in-memory store if Redis disabled
+        if os.getenv("REDIS_ENABLED", "false").lower() == "true":
+            redis_url = os.getenv("REDIS_URL", "redis://localhost:6379")
+            try:
+                import redis
+                self._redis = redis.from_url(redis_url, decode_responses=True)
+                self._redis.ping()
+                logger.info("Connected to Redis for token blacklist")
+            except Exception as e:
+                logger.info(f"Redis not available: {e}. Using in-memory token blacklist.")
+                self._redis = None
+                self._blacklist = set()  # In-memory fallback
+        else:
             self._redis = None
+            self._blacklist = set()  # In-memory token blacklist
         
         # Generate RSA key pair for advanced scenarios
         self._private_key = rsa.generate_private_key(

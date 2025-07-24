@@ -50,16 +50,22 @@ shutdown_handler() {
 # Set up signal handlers
 trap shutdown_handler SIGTERM SIGINT SIGQUIT
 
-# Configuration validation
+# Configuration validation with self-contained fallbacks
 validate_config() {
     log_info "Validating configuration..."
     
-    # Required environment variables
+    # Required environment variables with fallbacks
     local required_vars=(
         "WAZUH_API_URL"
         "WAZUH_API_USERNAME" 
         "WAZUH_API_PASSWORD"
     )
+    
+    # Auto-generate missing configuration in self-contained mode
+    if [[ "${SELF_CONTAINED:-true}" == "true" ]]; then
+        log_info "Running in self-contained mode - auto-generating missing config"
+        setup_self_contained_config
+    fi
     
     for var in "${required_vars[@]}"; do
         if [[ -z "${!var:-}" ]]; then
@@ -105,6 +111,34 @@ init_directories() {
     chmod 640 /app/logs/*.log
     
     log_info "Directory initialization complete"
+}
+
+# Setup self-contained configuration
+setup_self_contained_config() {
+    log_info "Setting up self-contained configuration..."
+    
+    # Copy embedded configurations to runtime locations
+    if [[ -d "/app/embedded-config" ]]; then
+        cp -r /app/embedded-config/* /app/config/ 2>/dev/null || true
+    fi
+    
+    # Generate minimal required configurations only
+    generate_ssl_certificates
+}
+
+# Generate SSL certificates for production
+generate_ssl_certificates() {
+    local cert_dir="/app/config/ssl"
+    mkdir -p "$cert_dir"
+    
+    if [[ ! -f "$cert_dir/cert.pem" ]] || [[ ! -f "$cert_dir/key.pem" ]]; then
+        log_info "Generating self-signed SSL certificates..."
+        openssl req -x509 -newkey rsa:4096 -keyout "$cert_dir/key.pem" \
+            -out "$cert_dir/cert.pem" -days 365 -nodes -subj \
+            "/C=US/ST=State/L=City/O=Organization/CN=wazuh-mcp-server" 2>/dev/null
+        chmod 600 "$cert_dir/key.pem"
+        chmod 644 "$cert_dir/cert.pem"
+    fi
 }
 
 # Generate default configuration if needed
@@ -172,27 +206,24 @@ health_check() {
     error_exit "Server failed to become ready within $(($max_attempts * 2)) seconds"
 }
 
-# Start monitoring in background
-start_monitoring() {
-    if [[ "${ENABLE_METRICS:-true}" == "true" ]]; then
-        log_info "Starting monitoring services..."
-        
-        # Background process for metrics collection
-        {
-            while true; do
-                if [[ -n "${MCP_PID:-}" ]] && kill -0 "$MCP_PID" 2>/dev/null; then
-                    # Log system metrics
-                    echo "$(date '+%Y-%m-%d %H:%M:%S') METRICS: CPU=$(top -bn1 | grep "Cpu(s)" | cut -d',' -f1 | cut -d':' -f2 | trim), MEM=$(free -m | awk 'NR==2{printf "%.1f%%", $3*100/$2}')" >> /app/logs/metrics.log
-                else
-                    break
-                fi
-                sleep 60
-            done
-        } &
-        
-        MONITORING_PID=$!
-        log_debug "Monitoring started with PID: $MONITORING_PID"
+# Production logging setup
+start_production_logging() {
+    # Ensure log rotation is configured
+    if [[ ! -f "/app/config/logrotate.conf" ]]; then
+        cat > "/app/config/logrotate.conf" << 'EOF'
+/app/logs/*.log {
+    size 100M
+    rotate 5
+    compress
+    delaycompress
+    missingok
+    notifempty
+    create 0640 wazuh-mcp wazuh-mcp
+}
+EOF
     fi
+    
+    log_info "Production logging configured"
 }
 
 # Main execution
@@ -211,13 +242,13 @@ main() {
         source "/app/config/server.env"
     fi
     
-    # Start monitoring
-    start_monitoring
+    # Start production logging
+    start_production_logging
     
-    # Determine startup command based on mode
-    case "${MCP_SERVER_MODE:-remote}" in
+    # Determine startup command based on mode with backward compatibility
+    case "${MCP_SERVER_MODE:-auto}" in
         "stdio")
-            log_info "Starting in stdio mode (local)"
+            log_info "Starting in stdio mode (v2.0.0 compatibility)"
             exec python -m wazuh_mcp_server.main &
             ;;
         "remote"|"http"|"sse")
@@ -227,6 +258,20 @@ main() {
                 --port "${MCP_SERVER_PORT:-8443}" \
                 --transport "${MCP_TRANSPORT:-sse}" \
                 --log-level "${LOG_LEVEL:-INFO}" &
+            ;;
+        "auto")
+            # Auto-detect mode based on environment
+            if [[ -n "${CLAUDE_DESKTOP_CONFIG:-}" ]] || [[ "${MCP_TRANSPORT:-}" == "stdio" ]]; then
+                log_info "Auto-detected stdio mode for local Claude Desktop"
+                exec python -m wazuh_mcp_server.main &
+            else
+                log_info "Auto-detected remote mode for production deployment"
+                exec python -m wazuh_mcp_server.remote_server \
+                    --host "${MCP_SERVER_HOST:-0.0.0.0}" \
+                    --port "${MCP_SERVER_PORT:-8443}" \
+                    --transport "${MCP_TRANSPORT:-sse}" \
+                    --log-level "${LOG_LEVEL:-INFO}" &
+            fi
             ;;
         *)
             error_exit "Invalid MCP_SERVER_MODE: ${MCP_SERVER_MODE}"
