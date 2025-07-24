@@ -23,14 +23,25 @@ A **production-ready Model Context Protocol (MCP) server** that connects Wazuh S
 
 ### 1. Install
 
-**Option A: Automatic (Recommended)**
+**Option A: Stable Release (Recommended)**
 ```bash
 git clone https://github.com/gensecaihq/Wazuh-MCP-Server.git
 cd Wazuh-MCP-Server
+# Use main branch (default) for production
 python3 scripts/install.py
 ```
 
-**Option B: Manual**
+**Option B: Experimental FastMCP (Testing)**
+```bash
+git clone https://github.com/gensecaihq/Wazuh-MCP-Server.git
+cd Wazuh-MCP-Server
+git checkout v2-fastmcp
+# Requires Python 3.10+
+python3 validate-production.py
+pip install -r requirements.txt
+```
+
+**Option C: Manual (Main Branch)**
 ```bash
 pip install -r requirements.txt
 ```
@@ -53,6 +64,7 @@ Add to your Claude Desktop config:
 **Windows**: `%APPDATA%\Claude\claude_desktop_config.json`
 **macOS/Linux**: `~/.config/claude/claude_desktop_config.json`
 
+**For Main Branch (v2.0.0):**
 ```json
 {
   "mcpServers": {
@@ -64,28 +76,55 @@ Add to your Claude Desktop config:
 }
 ```
 
+**For v2-fastmcp Branch (Experimental):**
+```json
+{
+  "mcpServers": {
+    "wazuh": {
+      "command": "python3",
+      "args": ["/path/to/Wazuh-MCP-Server/wazuh-mcp-server"]
+    }
+  }
+}
+```
+
 ### 4. Restart Claude Desktop
 
 That's it! Start asking Claude about your Wazuh security data.
 
 ---
 
-## 🎯 v2.0.0 - Production Ready & Simplified
+## 🎯 Version Information
 
-### ✅ **What's New**
+### 📦 **Current Stable Release: v2.0.0** (main branch)
 - **Fixed all GitHub issues** (#34, #33, #30, #25)  
-- **Simplified dependencies** - removed unnecessary complexity
 - **Cross-platform compatibility** - works on Windows, macOS, Linux
-- **Production-ready** - stable, tested, and reliable
-- **Pydantic V1/V2 support** - works with both versions
 - **26 security tools** - comprehensive Wazuh integration
+- **Pydantic V1/V2 support** - works with both versions
+- **Production-ready** - stable, tested, and reliable
 
-### 🔧 **Bug Fixes**
-- ✅ **Counter Import Error** (#34): Fixed `NameError` on Windows 11
-- ✅ **Websockets Dependency** (#33): Removed false requirement  
-- ✅ **Pydantic Compatibility** (#30, #25): Full V1/V2 support
+### 🧪 **Experimental: v2-fastmcp** (testing branch)
+- **FastMCP Framework** - Built with FastMCP 2.10.6+ for enhanced performance
+- **Single Server Architecture** - Unified, production-grade implementation
+- **Python 3.10+ Required** - Latest FastMCP compatibility
+- **Advanced Features** - Rate limiting, health monitoring, AI-powered analysis
+- **Minimal Dependencies** - Clean, optimized codebase
 
-### 🏗️ **Architecture** 
+> **Note**: The `v2-fastmcp` branch contains an experimental FastMCP-powered server for testing and evaluation. Use `main` branch for production deployments.
+
+### 🔀 **Branch Selection Guide**
+- **Use `main` branch** if you need:
+  - Stable, production-tested server
+  - Python 3.9+ compatibility
+  - Established tool ecosystem (26 tools)
+  
+- **Use `v2-fastmcp` branch** if you want to test:
+  - Latest FastMCP framework features
+  - Single unified server architecture
+  - Enhanced performance and monitoring
+  - Modern Python 3.10+ patterns
+
+### 🏗️ **Architecture (main branch)** 
 - **Transport**: stdio (standard MCP protocol)
 - **Dependencies**: Minimal, essential only
 - **Platform**: Cross-platform Python 3.9+
@@ -271,13 +310,20 @@ Found a bug? [Open an issue](https://github.com/gensecaihq/Wazuh-MCP-Server/issu
 
 ## 📈 Roadmap
 
-### Current: v2.0.0 ✅
+### Current: v2.0.0 (main) ✅
 - Simplified, production-ready MCP stdio server
-- Cross-platform compatibility
+- Cross-platform compatibility  
 - 26 comprehensive security tools
 - Bug fixes for all reported issues
 
+### Experimental: v2-fastmcp (testing) 🧪
+- FastMCP 2.10.6+ framework integration
+- Single unified server architecture
+- Advanced rate limiting and monitoring
+- AI-powered threat analysis enhancements
+
 ### Future: v2.1.0
+- Merge successful v2-fastmcp features into main
 - Enhanced tool capabilities
 - Performance optimizations
 - Additional Wazuh integrations
