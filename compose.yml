@@ -1,224 +1,36 @@
-# Docker Compose v2 configuration for Wazuh MCP Server
-# Production-ready deployment with latest Docker features
-
 name: wazuh-mcp-server
 
 services:
   wazuh-mcp-server:
-    build:
-      context: .
-      dockerfile: Dockerfile
-      args:
-        BUILD_DATE: ${BUILD_DATE}
-        VERSION: ${VERSION:-v2.0.0}
-        BUILD_ARCH: ${TARGETARCH:-amd64}
-      platforms:
-        - linux/amd64
-        - linux/arm64
-      cache_from:
-        - type=gha
-        - type=registry,ref=ghcr.io/gensecaihq/wazuh-mcp-server:cache
-      cache_to:
-        - type=gha,mode=max
-    image: wazuh-mcp-server:${VERSION:-v2.0.0}
+    build: .
     container_name: wazuh-mcp-server
-    hostname: wazuh-mcp-server
     restart: unless-stopped
-    init: true  # Use proper init system
+    init: true
     
-    # Environment variables with validation
     environment:
-      # REQUIRED: Wazuh server configuration
-      WAZUH_HOST: ${WAZUH_HOST:?WAZUH_HOST environment variable is required}
+      WAZUH_HOST: ${WAZUH_HOST:?Required}
       WAZUH_PORT: ${WAZUH_PORT:-55000}
-      WAZUH_USER: ${WAZUH_USER:?WAZUH_USER environment variable is required}
-      WAZUH_PASS: ${WAZUH_PASS:?WAZUH_PASS environment variable is required}
+      WAZUH_USER: ${WAZUH_USER:?Required}
+      WAZUH_PASS: ${WAZUH_PASS:?Required}
       
-      # Optional: Wazuh Indexer (distributed setup)
-      WAZUH_INDEXER_HOST: ${WAZUH_INDEXER_HOST:-}
-      WAZUH_INDEXER_PORT: ${WAZUH_INDEXER_PORT:-9200}
-      WAZUH_INDEXER_USER: ${WAZUH_INDEXER_USER:-}
-      WAZUH_INDEXER_PASS: ${WAZUH_INDEXER_PASS:-}
-      USE_INDEXER_FOR_ALERTS: ${USE_INDEXER_FOR_ALERTS:-true}
-      USE_INDEXER_FOR_VULNERABILITIES: ${USE_INDEXER_FOR_VULNERABILITIES:-true}
-      
-      # Transport mode: stdio (Claude Desktop) or http (remote access)
       MCP_TRANSPORT: ${MCP_TRANSPORT:-stdio}
       MCP_HOST: ${MCP_HOST:-0.0.0.0}
       MCP_PORT: ${MCP_PORT:-3000}
       
-      # Security settings
       VERIFY_SSL: ${VERIFY_SSL:-true}
-      ALLOW_SELF_SIGNED: ${ALLOW_SELF_SIGNED:-false}
-      SSL_TIMEOUT: ${SSL_TIMEOUT:-30}
-      
-      # Performance tuning
-      MAX_ALERTS_PER_QUERY: ${MAX_ALERTS_PER_QUERY:-1000}
-      MAX_CONNECTIONS: ${MAX_CONNECTIONS:-25}
-      REQUEST_TIMEOUT_SECONDS: ${REQUEST_TIMEOUT_SECONDS:-30}
-      CACHE_TTL_SECONDS: ${CACHE_TTL_SECONDS:-300}
-      
-      # Rate limiting
-      MAX_REQUESTS_PER_MINUTE: ${MAX_REQUESTS_PER_MINUTE:-100}
-      BURST_REQUEST_SIZE: ${BURST_REQUEST_SIZE:-20}
-      
-      # Logging and monitoring
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
-      STRUCTURED_LOGGING: ${STRUCTURED_LOGGING:-true}
-      ENABLE_METRICS: ${ENABLE_METRICS:-true}
-      
-      # Optional: External threat intelligence APIs
-      VIRUSTOTAL_API_KEY: ${VIRUSTOTAL_API_KEY:-}
-      SHODAN_API_KEY: ${SHODAN_API_KEY:-}
-      ABUSEIPDB_API_KEY: ${ABUSEIPDB_API_KEY:-}
-      
-      # Optional: Custom SSL certificates
-      CA_BUNDLE_PATH: ${CA_BUNDLE_PATH:-}
-      CLIENT_CERT_PATH: ${CLIENT_CERT_PATH:-}
-      CLIENT_KEY_PATH: ${CLIENT_KEY_PATH:-}
     
-    # Port mapping with explicit protocol (only needed for HTTP transport)
     ports:
-      - target: 3000
-        published: ${MCP_PORT:-3000}
-        protocol: tcp
-        mode: host
-    expose:
-      - "3000"
+      - "${MCP_PORT:-3000}:3000"
     
-    # Enhanced health check with proper startup time
     healthcheck:
-      test: ["CMD", "python3", "-c", "import sys; sys.path.insert(0, '/app/src'); from wazuh_mcp_server.config import WazuhConfig; WazuhConfig.from_env()"]
+      test: ["CMD", "python3", "-c", "from src.wazuh_mcp_server.config import WazuhConfig; WazuhConfig.from_env()"]
       interval: 30s
-      timeout: 15s
+      timeout: 10s
       retries: 3
-      start_period: 60s
-      start_interval: 5s
     
-    # Resource management with proper limits and reservations
     deploy:
       resources:
         limits:
-          memory: 1G
-          cpus: '1.0'
-        reservations:
           memory: 512M
           cpus: '0.5'
-      restart_policy:
-        condition: on-failure
-        delay: 5s
-        max_attempts: 3
-        window: 120s
-      update_config:
-        parallelism: 1
-        delay: 10s
-        failure_action: rollback
-        order: stop-first
-    
-    # Enhanced security configuration
-    security_opt:
-      - no-new-privileges:true
-      - apparmor:unconfined  # Adjust based on your AppArmor profile
-    read_only: false  # FastMCP needs write access for some operations
-    cap_drop:
-      - ALL
-    cap_add:
-      - NET_ADMIN  # Only if needed for network operations
-      - SYS_PTRACE  # Only if needed for debugging
-    tmpfs:
-      - /tmp:noexec,nosuid,size=100m
-      - /var/tmp:noexec,nosuid,size=50m
-    
-    # Volumes for persistent data and configuration
-    volumes:
-      - type: volume
-        source: wazuh-mcp-logs
-        target: /app/logs
-        volume:
-          nocopy: false
-      - type: volume
-        source: wazuh-mcp-config
-        target: /app/config
-        read_only: true
-        volume:
-          nocopy: false
-      - type: bind
-        source: ${CONFIG_DIR:-./config}
-        target: /app/config
-        read_only: true
-        bind:
-          create_host_path: true
-      - type: tmpfs
-        target: /app/tmp
-        tmpfs:
-          size: 100M
-          mode: 1777
-    
-    # Network configuration with custom settings
-    networks:
-      wazuh-mcp-network:
-        aliases:
-          - wazuh-mcp
-          - mcp-server
-        ipv4_address: ${STATIC_IP:-}
-    
-    # DNS configuration
-    dns:
-      - 8.8.8.8
-      - 8.8.4.4
-      - 1.1.1.1
-    dns_search:
-      - ${DNS_SEARCH_DOMAIN:-local}
-    
-    # Labels for monitoring and management
-    labels:
-      - "traefik.enable=true"
-      - "traefik.http.routers.wazuh-mcp.rule=Host(`${DOMAIN:-localhost}`)"
-      - "traefik.http.services.wazuh-mcp.loadbalancer.server.port=3000"
-      - "com.docker.compose.project=${COMPOSE_PROJECT_NAME:-wazuh-mcp-server}"
-      - "org.opencontainers.image.title=Wazuh MCP Server"
-      - "org.opencontainers.image.version=${VERSION:-v2.0.0}"
-      - "org.opencontainers.image.source=https://github.com/gensecaihq/Wazuh-MCP-Server"
-
-# Named volumes for persistent data
-volumes:
-  wazuh-mcp-logs:
-    driver: local
-    driver_opts:
-      type: none
-      o: bind
-      device: ${LOGS_DIR:-./logs}
-    labels:
-      - "com.docker.compose.project=${COMPOSE_PROJECT_NAME:-wazuh-mcp-server}"
-  
-  wazuh-mcp-config:
-    driver: local
-    driver_opts:
-      type: none
-      o: bind
-      device: ${CONFIG_DIR:-./config}
-    labels:
-      - "com.docker.compose.project=${COMPOSE_PROJECT_NAME:-wazuh-mcp-server}"
-
-# Network configuration with custom subnet
-networks:
-  wazuh-mcp-network:
-    name: ${NETWORK_NAME:-wazuh-mcp-network}
-    driver: bridge
-    ipam:
-      driver: default
-      config:
-        - subnet: ${SUBNET:-172.20.0.0/16}
-          gateway: ${GATEWAY:-172.20.0.1}
-    driver_opts:
-      com.docker.network.bridge.name: br-wazuh-mcp
-      com.docker.network.bridge.enable_icc: "true"
-      com.docker.network.bridge.enable_ip_masquerade: "true"
-      com.docker.network.driver.mtu: "1500"
-    labels:
-      - "com.docker.compose.project=${COMPOSE_PROJECT_NAME:-wazuh-mcp-server}"
-
-# Development and testing profiles
-profiles:
-  - dev
-  - test

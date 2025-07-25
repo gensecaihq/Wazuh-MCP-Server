@@ -84,10 +84,7 @@ def check_file_structure() -> bool:
         'src/wazuh_mcp_server/api',
         'src/wazuh_mcp_server/utils',
         'tests',
-        'docker',
-        'logs',
-        'config',
-        'config/certs'
+        'docker'
     ]
     
     all_good = True

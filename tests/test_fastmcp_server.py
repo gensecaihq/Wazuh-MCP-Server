@@ -1,15 +1,13 @@
 #!/usr/bin/env python3
 """
-FastMCP-Compliant Server Tests
-Tests the FastMCP-compliant Wazuh MCP Server implementation
+Wazuh MCP Server Tests
+Essential tests for production deployment
 """
 
 import pytest
 import asyncio
 from unittest.mock import Mock, AsyncMock, patch
-from typing import Dict, Any
 
-# Import the FastMCP server
 import sys
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
