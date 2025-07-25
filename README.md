@@ -1,4 +1,4 @@
-# Wazuh MCP Server - Production Security Operations Platform
+# Wazuh MCP Server - Remote HTTP Server with Docker
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
@@ -7,16 +7,18 @@
 [![Production Ready](https://img.shields.io/badge/Status-Production%20Ready-brightgreen.svg)](https://github.com/gensecaihq/Wazuh-MCP-Server)
 [![Security Audited](https://img.shields.io/badge/Security-Audited-red.svg)](https://github.com/gensecaihq/Wazuh-MCP-Server)
 
-A **production-ready, enterprise-grade MCP server** that provides AI-powered security operations through Wazuh SIEM integration. Built with FastMCP framework, featuring comprehensive security, monitoring, and performance optimization.
+A **remote HTTP-based MCP server** that provides AI-powered security operations through Wazuh SIEM integration. Unlike STDIO-based branches, this server runs as a remote service accessible via HTTP transport, designed for Docker deployment and multi-client enterprise environments.
 
-## 🌟 Why Choose Wazuh MCP Server?
+## 🌟 Why Choose Remote HTTP Server?
 
-- **🛡️ Enterprise Security**: JWT authentication, input sanitization, rate limiting, and audit logging
-- **⚡ Production Performance**: Optimized connection pooling, chunked processing, and memory management
+- **🌐 Remote Access**: HTTP-based MCP server accessible from anywhere
+- **🐳 Docker Deployment**: Complete containerization with docker-compose
+- **👥 Multi-Client Support**: Multiple clients can connect simultaneously
+- **🛡️ Enterprise Security**: JWT authentication, rate limiting, and comprehensive audit logging
+- **⚡ Production Performance**: Optimized for enterprise environments with monitoring
 - **🔍 AI-Powered Analysis**: Advanced threat detection using Claude models with structured insights
-- **📊 Comprehensive Monitoring**: Real-time health checks, metrics collection, and alerting
-- **🚀 Dual Transport**: Both STDIO (Claude Desktop) and HTTP/SSE (remote access) support
-- **🔐 Security-First**: Input validation, SQL injection protection, and secure credential handling
+
+> **Key Difference**: This branch provides a **remote HTTP server** instead of local STDIO transport. Perfect for team environments, Docker deployments, and enterprise scaling.
 
 <img width="797" height="568" alt="claude0mcp-wazuh" src="https://github.com/user-attachments/assets/458d3c94-e1f9-4143-a1a4-85cb629287d4" />
 
@@ -66,6 +68,40 @@ cp .env.production .env
 
 ---
 
+## 🔀 **Branch Comparison**
+
+This repository has three branches for different use cases:
+
+### Transport Comparison
+
+| Feature | main (v2.0.0) | v2-fastmcp | v3-fastmcp-remote (This Branch) |
+|---------|---------------|-------------|----------------------------------|
+| **Transport** | STDIO | STDIO | **HTTP** |
+| **Claude Desktop** | ✅ Direct | ✅ Direct | 🌐 Remote HTTP |
+| **Deployment** | Local process | Local process | **Docker container** |
+| **Multi-Client** | ❌ Single | ❌ Single | ✅ **Multiple clients** |
+| **Framework** | Standard MCP | FastMCP | **FastMCP** |
+| **Python Version** | 3.9+ | 3.10+ | **3.10+** |
+| **Enterprise Security** | Basic | Basic | ✅ **Advanced** |
+| **Monitoring** | Basic | Enhanced | ✅ **Full production** |
+
+### When to Use This Branch (v3-fastmcp-remote)
+
+✅ **Use this branch if you need:**
+- Remote MCP server accessible over network
+- Docker deployment with orchestration  
+- Multiple team members accessing same server
+- Enterprise security (JWT, rate limiting, audit logs)
+- Production monitoring and health checks
+- Scalable, containerized architecture
+
+❌ **Don't use this branch if you want:**
+- Simple local Claude Desktop integration → Use `main` or `v2-fastmcp`
+- STDIO transport for direct process communication
+- Minimal setup without Docker
+
+---
+
 ## 🏗️ Production Architecture
 
 ### ✅ Enterprise Features
@@ -82,10 +118,11 @@ cp .env.production .env
 ### 🔧 Technical Stack
 
 - **Framework**: FastMCP 2.10.6+ with HTTP/2 support
-- **Security**: JWT authentication, input validation, rate limiting
-- **Transport**: STDIO (local) + HTTP/SSE (remote) dual mode
+- **Transport**: **HTTP/SSE (remote access)** - primary mode
+- **Security**: JWT authentication, input validation, rate limiting  
 - **Platform**: Cross-platform Python 3.10+ with Docker support
-- **Architecture**: Microservice-ready with comprehensive monitoring
+- **Architecture**: Containerized microservice with comprehensive monitoring
+- **Deployment**: Docker Compose with health checks and scaling
 
 ---
 
@@ -170,25 +207,33 @@ curl -k -X POST "https://your-wazuh:55000/security/users/mcp-api-user/roles?role
 
 ## 🐳 Docker Deployment
 
-### Claude Desktop Integration
+### Claude Desktop Integration (Remote HTTP)
+
+For remote HTTP access through Claude Desktop:
 
 ```bash
-# 1. Start container
+# 1. Start container in HTTP mode
+export MCP_TRANSPORT=http
 docker compose up -d
 
-# 2. Add to Claude Desktop config
+# 2. Connect via HTTP transport
 # ~/.config/claude/claude_desktop_config.json
 {
   "mcpServers": {
     "wazuh": {
-      "command": "docker",
-      "args": ["exec", "-i", "wazuh-mcp-server", "./wazuh-mcp-server", "--stdio"]
+      "command": "npx",
+      "args": [
+        "@modelcontextprotocol/server-everything",
+        "http://localhost:3000/mcp"
+      ]
     }
   }
 }
 
 # 3. Restart Claude Desktop
 ```
+
+> **Note**: This uses HTTP transport instead of STDIO. The server runs as a container and Claude Desktop connects to it remotely.
 
 ### Remote Access (HTTP/SSE)
 
