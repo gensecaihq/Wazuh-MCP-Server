@@ -1,139 +1,107 @@
 # 🛡️ Wazuh MCP Server
 
-Production-grade FastMCP server for Wazuh SIEM integration with AI-powered security analysis.
+Production-grade FastMCP server for Wazuh SIEM integration with comprehensive security analysis.
 
-## 🚀 Quick Start
+## 🚀 Quick Deploy
 
-### 1. Configure
 ```bash
-# Set required environment variables
+# 1. Clone & Configure
+git clone <repository>
+cd Wazuh-MCP-Server
+
+# 2. Set credentials
 export WAZUH_HOST=your-wazuh-server.com
-export WAZUH_USER=your-api-user
+export WAZUH_USER=your-api-user  
 export WAZUH_PASS=your-password
 
-# Or use interactive configuration
-python3 configure.py
-```
-
-### 2. Deploy
-```bash
-# Start with Docker
+# 3. Deploy (works on any OS)
 docker compose up -d
 
-# Check status
-docker compose ps
+# 4. Verify
 docker compose logs wazuh-mcp-server
 ```
 
-### 3. Test
-```bash
-# Comprehensive functionality test
-python3 test-functionality.py
+## 📊 Features
 
-# Quick validation
-python3 deploy-validate.py
+**21 Security Tools + 2 Real-time Resources**
+- **Alert & Threat Analysis** - Real-time alerts with AI-powered threat categorization
+- **Incident Management** - Create, track, and manage security incidents  
+- **Active Response** - Execute automated response commands on agents
+- **Log Search** - Advanced log search with filtering capabilities
+- **Rule Management** - Query, analyze, and manage detection rules
+- **File Integrity Monitoring** - Monitor critical file changes
+- **CDB Lists** - Manage threat intelligence and blacklists
+- **Enhanced Analytics** - Performance, trends, and predictive insights
+- **Real-time Monitoring** - Live dashboards and alert streaming
+- **Agent & Vulnerability Management** - Complete asset visibility
+
+## 🏗️ Architecture
+
+```
+Claude/LLM → FastMCP Server → Wazuh API → Security Analysis → Insights
+                ↓
+        Docker Container (OS Agnostic)
 ```
 
-### 4. Connect MCP Client
-For Claude Desktop, add to configuration:
+**Production Ready:**
+- 🐳 **Fully Containerized** - Zero host dependencies
+- 🌍 **OS Agnostic** - Linux, macOS, Windows via Docker
+- 🔒 **Secure** - Non-root execution, SSL verification
+- ⚡ **Fast** - Async operations, connection pooling
+- 📈 **Scalable** - Resource limits, health monitoring
+
+## 🔧 Configuration
+
+### Required Variables
+```bash
+WAZUH_HOST=wazuh.company.com
+WAZUH_USER=api-user
+WAZUH_PASS=secure-password
+```
+
+### Optional Settings
+```bash
+WAZUH_PORT=55000          # API port
+MCP_TRANSPORT=stdio       # stdio|http  
+VERIFY_SSL=true          # SSL verification
+```
+
+## 💡 Usage Examples
+
+```
+"Show me recent critical alerts"
+"Create incident for brute force attack on server-01" 
+"Execute firewall-block on agent 001"
+"Search logs for authentication failures"
+"Generate security trends with predictions"
+"What's my agent health status?"
+```
+
+## 🎯 MCP Client Setup
+
+**Claude Desktop:**
 ```json
 {
   "mcpServers": {
     "wazuh": {
-      "command": "/path/to/wazuh-mcp-server",
-      "args": ["--stdio"]
+      "command": "docker",
+      "args": ["exec", "wazuh-mcp-server", "./wazuh-mcp-server", "--stdio"]
     }
   }
 }
 ```
 
-## 📊 Security Capabilities
-
-### 🛠️ Analysis Tools
-- **Alert Analysis** - Real-time security alert retrieval and filtering
-- **Threat Analysis** - AI-powered threat categorization with risk scoring
-- **Agent Monitoring** - Wazuh agent status and health metrics
-- **Vulnerability Assessment** - Security vulnerability analysis
-- **Cluster Status** - Infrastructure health monitoring
-
-### 📈 Real-time Resources
-- **Server Status** - Live connection and health monitoring
-- **Security Dashboard** - Real-time security metrics and alert breakdown
-
-## 🏗️ Architecture
-
-```
-User Query → FastMCP Server → Wazuh API → Security Analysis → Structured Response
-                    ↓
-            Context & Progress Tracking
-```
-
-**Key Features:**
-- FastMCP-compliant with 6 tools + 2 resources
-- Robust Wazuh API integration with authentication
-- AI-powered threat analysis and risk assessment
-- Production-ready Docker deployment
-- Comprehensive error handling and monitoring
-
-## 🔧 Configuration
-
-### Required Environment Variables
-```bash
-WAZUH_HOST=wazuh.company.com     # Wazuh server hostname/IP
-WAZUH_USER=api-user              # Wazuh API username
-WAZUH_PASS=secure-password       # Wazuh API password
-```
-
-### Optional Settings
-```bash
-WAZUH_PORT=55000                 # Wazuh API port (default: 55000)
-MCP_TRANSPORT=stdio              # Transport mode: stdio/http
-MCP_PORT=3000                    # HTTP port (for http transport)
-VERIFY_SSL=true                  # SSL verification (default: true)
-LOG_LEVEL=INFO                   # Logging level
-```
-
-## 🧪 Testing & Validation
+## 🔍 Validation
 
 ```bash
-# Full functionality test (recommended)
+# Test deployment
 python3 test-functionality.py
 
-# Deployment validation
-python3 deploy-validate.py
-
-# Unit tests
-pytest tests/ -v
+# Production validation  
+python3 validate-production.py
 ```
 
-## 🚀 Production Deployment
+## 📚 Documentation
 
-See [PRODUCTION_DEPLOYMENT.md](PRODUCTION_DEPLOYMENT.md) for comprehensive deployment guide including:
-- Production configuration
-- Security hardening
-- Monitoring and health checks
-- Troubleshooting guide
-
-## 💡 Example Usage
-
-Once deployed, users can interact with Wazuh through natural language:
-
-- *"Show me recent critical security alerts"*
-- *"Analyze threats from the last 24 hours"*
-- *"What's the status of my Wazuh agents?"*
-- *"Get vulnerability summary for high-severity issues"*
-
-The MCP server translates these requests into secure Wazuh API calls and provides structured, actionable security insights.
-
-## 🔒 Security Features
-
-- Non-root container execution
-- SSL certificate verification
-- Secure credential management
-- Connection retry and error handling
-- Resource limits and health monitoring
-- Production-grade authentication
-
-## 📄 License
-
-MIT License - see [LICENSE](LICENSE) file.
+- [PRODUCTION_DEPLOYMENT.md](PRODUCTION_DEPLOYMENT.md) - Deployment guide
+- [LICENSE](LICENSE) - MIT License

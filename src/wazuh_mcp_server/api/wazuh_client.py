@@ -70,6 +70,66 @@ class WazuhClient:
         """Get cluster status."""
         return await self._request("GET", "/cluster/status")
     
+    async def search_logs(self, **params) -> Dict[str, Any]:
+        """Search logs with advanced filtering capabilities."""
+        return await self._request("GET", "/manager/logs", params=params)
+    
+    async def get_incidents(self, **params) -> Dict[str, Any]:
+        """Get security incidents."""
+        return await self._request("GET", "/security/incidents", params=params)
+    
+    async def create_incident(self, data: Dict[str, Any]) -> Dict[str, Any]:
+        """Create a new security incident."""
+        return await self._request("POST", "/security/incidents", json=data)
+    
+    async def update_incident(self, incident_id: str, data: Dict[str, Any]) -> Dict[str, Any]:
+        """Update an existing security incident."""
+        return await self._request("PUT", f"/security/incidents/{incident_id}", json=data)
+    
+    async def get_rules(self, **params) -> Dict[str, Any]:
+        """Get Wazuh detection rules."""
+        return await self._request("GET", "/rules", params=params)
+    
+    async def get_rule_info(self, rule_id: str) -> Dict[str, Any]:
+        """Get detailed information about a specific rule."""
+        return await self._request("GET", f"/rules/{rule_id}")
+    
+    async def get_decoders(self, **params) -> Dict[str, Any]:
+        """Get Wazuh log decoders."""
+        return await self._request("GET", "/decoders", params=params)
+    
+    async def execute_active_response(self, data: Dict[str, Any]) -> Dict[str, Any]:
+        """Execute active response command on agents."""
+        return await self._request("PUT", "/active-response", json=data)
+    
+    async def get_active_response_commands(self, **params) -> Dict[str, Any]:
+        """Get available active response commands."""
+        return await self._request("GET", "/manager/configuration", params={"section": "active-response"})
+    
+    async def get_cdb_lists(self, **params) -> Dict[str, Any]:
+        """Get CDB lists."""
+        return await self._request("GET", "/lists", params=params)
+    
+    async def get_cdb_list_content(self, filename: str) -> Dict[str, Any]:
+        """Get specific CDB list content."""
+        return await self._request("GET", f"/lists/{filename}")
+    
+    async def get_fim_events(self, **params) -> Dict[str, Any]:
+        """Get File Integrity Monitoring events."""
+        return await self._request("GET", "/syscheck", params=params)
+    
+    async def get_syscollector_info(self, agent_id: str, **params) -> Dict[str, Any]:
+        """Get system inventory information from agent."""
+        return await self._request("GET", f"/syscollector/{agent_id}", params=params)
+    
+    async def get_manager_stats(self, **params) -> Dict[str, Any]:
+        """Get manager statistics."""
+        return await self._request("GET", "/manager/stats", params=params)
+    
+    async def get_agent_stats(self, agent_id: str, component: str = "logcollector") -> Dict[str, Any]:
+        """Get agent component statistics."""
+        return await self._request("GET", f"/agents/{agent_id}/stats/{component}")
+    
     async def _request(self, method: str, endpoint: str, **kwargs) -> Dict[str, Any]:
         """Make authenticated request to Wazuh API."""
         if not self.token:

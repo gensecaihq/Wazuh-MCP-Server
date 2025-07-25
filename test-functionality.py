@@ -115,10 +115,84 @@ async def test_fastmcp_server():
         alerts_result = await get_wazuh_alerts(limit=3)
         print_status(f"Alerts tool returned {alerts_result.get('total', 0)} alerts")
         
+        print_status("Testing search_wazuh_logs tool...")
+        from wazuh_mcp_server.server import search_wazuh_logs
+        logs_result = await search_wazuh_logs(limit=5, time_range_hours=24)
+        print_status(f"Log search returned {logs_result.get('total_found', 0)} log entries")
+        
         print_status("Testing analyze_security_threats tool...")
         from wazuh_mcp_server.server import analyze_security_threats
         threats_result = await analyze_security_threats(time_range_hours=24, severity_threshold=1)
         print_status(f"Threat analysis found {threats_result.get('summary', {}).get('total_threats', 0)} threats")
+        
+        print_status("Testing incident management tools...")
+        from wazuh_mcp_server.server import get_security_incidents, create_security_incident
+        incidents_result = await get_security_incidents(limit=5)
+        print_status(f"Found {incidents_result.get('total_incidents', 0)} security incidents")
+        
+        # Test incident creation
+        incident_result = await create_security_incident(
+            title="Test Security Incident", 
+            description="Testing incident management functionality",
+            severity="medium"
+        )
+        print_status(f"Created test incident: {incident_result.get('incident', {}).get('id', 'N/A')}")
+        
+        print_status("Testing rule management tools...")
+        from wazuh_mcp_server.server import get_wazuh_rules, analyze_rule_coverage
+        rules_result = await get_wazuh_rules(limit=10)
+        print_status(f"Retrieved {rules_result.get('total_rules', 0)} Wazuh rules")
+        
+        coverage_result = await analyze_rule_coverage(alert_timeframe_hours=24)
+        coverage_pct = coverage_result.get('coverage_summary', {}).get('coverage_percentage', 0)
+        print_status(f"Rule coverage analysis: {coverage_pct}% coverage")
+        
+        print_status("Testing advanced filtering tools...")
+        from wazuh_mcp_server.server import advanced_wazuh_query, multi_field_search
+        
+        # Test advanced query
+        advanced_result = await advanced_wazuh_query(
+            query_type="alerts", 
+            filters={"level": 5}, 
+            limit=10
+        )
+        print_status(f"Advanced query returned {advanced_result.get('total_results', 0)} filtered alerts")
+        
+        # Test multi-field search
+        search_result = await multi_field_search(
+            search_terms=["authentication", "failed"],
+            data_sources=["alerts"]
+        )
+        print_status(f"Multi-field search found {search_result.get('total_matches', 0)} matches")
+        
+        print_status("Testing real-time monitoring tools...")
+        from wazuh_mcp_server.server import get_realtime_alerts, get_live_dashboard_data
+        
+        # Test real-time monitoring
+        monitoring_result = await get_realtime_alerts(monitoring_duration_minutes=1, auto_refresh_seconds=30)
+        total_alerts = monitoring_result.get('alert_statistics', {}).get('total_new_alerts', 0)
+        print_status(f"Real-time monitoring detected {total_alerts} alerts")
+        
+        # Test live dashboard
+        dashboard_result = await get_live_dashboard_data(include_metrics=["alerts", "agents"])
+        dashboard_timestamp = dashboard_result.get('timestamp', 'N/A')
+        print_status(f"Live dashboard data collected at {dashboard_timestamp}")
+        
+        print_status("Testing high-priority missing features...")
+        from wazuh_mcp_server.server import execute_active_response, get_cdb_lists, get_fim_events, get_enhanced_analytics
+        
+        # Test CDB lists
+        cdb_result = await get_cdb_lists(limit=5)
+        print_status(f"Retrieved {cdb_result.get('total_lists', 0)} CDB lists")
+        
+        # Test FIM events  
+        fim_result = await get_fim_events(limit=5, time_range_hours=24)
+        print_status(f"Retrieved {fim_result.get('total_events', 0)} FIM events")
+        
+        # Test enhanced analytics
+        analytics_result = await get_enhanced_analytics(analysis_type="agent_health")
+        health_score = analytics_result.get('agent_health_metrics', {}).get('health_score', 0)
+        print_status(f"Enhanced analytics - agent health score: {health_score}%")
         
         print_status("FastMCP server test completed successfully")
         return True
