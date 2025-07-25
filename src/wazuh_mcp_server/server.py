@@ -49,6 +49,7 @@ from wazuh_mcp_server.utils.logging import setup_logging, get_logger, LogContext
 from wazuh_mcp_server.utils.exceptions import WazuhMCPError, APIError, ValidationError
 from wazuh_mcp_server.utils.rate_limiter import RateLimiter
 from wazuh_mcp_server.utils.validation import validate_int_range, validate_string, validate_time_range
+from wazuh_mcp_server.tools.factory import ToolFactory
 
 # Initialize logging
 logger = get_logger(__name__)
@@ -59,6 +60,7 @@ _http_client: Optional[httpx.AsyncClient] = None
 _rate_limiter: Optional[RateLimiter] = None
 _server_start_time: Optional[datetime] = None
 _health_status: Dict[str, Any] = {"status": "starting", "checks": {}}
+_tool_factory = None
 
 # Create FastMCP server instance
 mcp = FastMCP("Wazuh MCP Server")
@@ -156,7 +158,12 @@ async def wazuh_api_request(
     rate_limiter = await get_rate_limiter()
     
     # Apply rate limiting
-    await rate_limiter.acquire()
+    if not await rate_limiter.acquire():
+        # Rate limit exceeded, wait for reset
+        reset_time = await rate_limiter.time_until_reset()
+        if ctx:
+            await ctx.warning(f"Rate limit exceeded, waiting {reset_time:.1f}s")
+        await asyncio.sleep(min(reset_time, 5.0))  # Cap wait time at 5 seconds
     
     url = f"{config.base_url}{endpoint}"
     auth = (config.username, config.password)
@@ -1437,6 +1444,102 @@ def is_within_last_hour(timestamp: str) -> bool:
 
 
 # ============================================================================
+# TOOL FACTORY MANAGEMENT
+# ============================================================================
+
+async def initialize_tool_factory():
+    """Initialize tool factory and register all tools with FastMCP."""
+    global _tool_factory
+    
+    try:
+        logger.info("Initializing tool factory...")
+        
+        # Create a mock server instance for tool initialization
+        from types import SimpleNamespace
+        mock_server = SimpleNamespace()
+        mock_server.config = get_config()
+        mock_server.api_client = None  # Will be set later
+        mock_server.security_analyzer = None
+        mock_server.compliance_analyzer = None
+        mock_server._get_current_timestamp = lambda: datetime.now().isoformat()
+        
+        # Initialize tool factory
+        _tool_factory = ToolFactory(mock_server)
+        
+        # Get all tool definitions
+        all_tools = _tool_factory.get_all_tool_definitions()
+        
+        # Import FunctionTool for creating tool instances
+        from fastmcp.tools.tool import FunctionTool, ToolResult
+        
+        # Register each tool with FastMCP using the tool manager
+        registered_count = 0
+        for tool_def in all_tools:
+            try:
+                tool_name = tool_def.name
+                
+                # Create a dynamic handler function for this tool
+                def create_tool_handler(tool_name_capture):
+                    async def tool_handler(arguments: Dict[str, Any]):
+                        """Dynamic tool handler that routes to the tool factory."""
+                        try:
+                            result = await _tool_factory.handle_tool_call(tool_name_capture, arguments)
+                            # Convert result to ToolResult format
+                            if isinstance(result, dict):
+                                return ToolResult(structured_content=result)
+                            else:
+                                return ToolResult(content=[{"type": "text", "text": str(result)}])
+                        except Exception as e:
+                            logger.error(f"Error handling tool '{tool_name_capture}': {e}")
+                            return ToolResult(content=[{"type": "text", "text": f"Error: {str(e)}"}])
+                    return tool_handler
+                
+                # Create the handler with captured tool name
+                handler = create_tool_handler(tool_name)
+                
+                # Create FunctionTool instance with proper schema
+                function_tool = FunctionTool.from_function(
+                    fn=handler,
+                    name=tool_def.name,
+                    description=tool_def.description,
+                    output_schema={"type": "object", "properties": {"result": {"type": "object"}}}
+                )
+                
+                # Set the parameters to match the original tool definition
+                function_tool.parameters = tool_def.inputSchema
+                
+                # Add tool to FastMCP's tool manager
+                mcp._tool_manager.add_tool(function_tool)
+                
+                registered_count += 1
+                logger.debug(f"Registered tool: {tool_def.name}")
+                
+            except Exception as e:
+                logger.error(f"Failed to register tool '{tool_def.name}': {e}")
+                logger.error(traceback.format_exc())
+                continue
+        
+        # Get tool statistics
+        stats = _tool_factory.get_tool_statistics()
+        
+        logger.info(f"Tool factory initialized successfully:")
+        logger.info(f"  - Total categories: {stats['total_categories']}")
+        logger.info(f"  - Total tools available: {stats['total_tools']}")
+        logger.info(f"  - Tools registered with FastMCP: {registered_count}")
+        
+        # Log category breakdown
+        for category, info in stats['categories'].items():
+            logger.info(f"  - {category}: {info['tool_count']} tools")
+        
+        return True
+        
+    except Exception as e:
+        logger.error(f"Tool factory initialization failed: {e}")
+        logger.error(traceback.format_exc())
+        return False
+
+
+# ============================================================================
 # SERVER LIFECYCLE MANAGEMENT
 # ============================================================================
 
@@ -1461,6 +1564,9 @@ async def initialize_server() -> bool:
         # Initialize rate limiter
         await get_rate_limiter()
         logger.info("Rate limiter initialized")
+        
+        # Initialize tool factory and register tools with FastMCP
+        await initialize_tool_factory()
         
         # Test Wazuh API connectivity
         try:

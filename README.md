@@ -7,15 +7,16 @@
 [![Production Ready](https://img.shields.io/badge/Status-Production%20Ready-green.svg)](https://github.com/gensecaihq/Wazuh-MCP-Server)
 [![Security Audited](https://img.shields.io/badge/Security-Audited-blue.svg)](https://github.com/gensecaihq/Wazuh-MCP-Server)
 
-A **production-grade FastMCP-powered server** that provides AI-enhanced security operations through Wazuh SIEM integration. Supports both STDIO (Claude Desktop) and HTTP/SSE (remote access) transports with comprehensive Docker deployment.
+A **production-grade FastMCP-powered server** that provides AI-enhanced security operations through Wazuh SIEM integration. Supports both STDIO (Claude Desktop) and HTTP/SSE (remote access) transports with comprehensive Docker deployment and enhanced reliability.
 
 ## 🌟 Key Features
 
 - **🔄 Dual Transport Support**: STDIO for Claude Desktop + HTTP/SSE for remote access
+- **📱 Claude Desktop Compatible**: Full STDIO transport compatibility for seamless integration
+- **⚡ FastMCP Framework**: Built on FastMCP 2.10.6+ for enhanced performance and reliability
 - **🏗️ Distributed Architecture**: Full support for Wazuh Server + Indexer separation
 - **🐳 Enterprise Docker**: Production-ready containerization with security hardening
 - **🛡️ Security-First**: SSL/TLS, rate limiting, input validation, and audit logging
-- **⚡ High Performance**: Optimized connection pooling, caching, and async operations
 - **🔍 AI-Powered Analysis**: Advanced threat detection with Claude integration
 - **📊 Comprehensive Monitoring**: Health checks, metrics, and structured logging
 - **🎯 Zero Configuration**: Smart defaults with extensive customization options

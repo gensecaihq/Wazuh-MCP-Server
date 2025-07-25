@@ -13,6 +13,76 @@ class ValidationError(Exception):
     pass
 
 
+def validate_int_range(value: Any, min_val: int, max_val: int, default: Optional[int] = None) -> Optional[int]:
+    """Validate integer is within specified range."""
+    if value is None:
+        return default
+    
+    try:
+        int_val = int(value)
+        if int_val < min_val or int_val > max_val:
+            raise ValidationError(f"Value {int_val} must be between {min_val} and {max_val}")
+        return int_val
+    except (ValueError, TypeError):
+        if default is not None:
+            return default
+        raise ValidationError(f"Invalid integer value: {value}")
+
+
+def validate_string(value: Any, max_length: int, default: str = "") -> str:
+    """Validate string length and sanitize."""
+    if value is None:
+        return default
+    
+    try:
+        str_val = str(value).strip()
+        if len(str_val) > max_length:
+            raise ValidationError(f"String length {len(str_val)} exceeds maximum {max_length}")
+        
+        # Basic sanitization - remove control characters
+        sanitized = re.sub(r'[\x00-\x1f\x7f-\x9f]', '', str_val)
+        return sanitized
+    except Exception:
+        return default
+
+
+def validate_time_range(time_str: str) -> int:
+    """Convert time range string to seconds."""
+    if not time_str:
+        return 3600  # Default 1 hour
+    
+    time_str = time_str.lower().strip()
+    
+    # Parse time range patterns
+    if time_str.endswith('h'):
+        try:
+            hours = int(time_str[:-1])
+            return min(hours * 3600, 86400)  # Max 24 hours
+        except ValueError:
+            pass
+    elif time_str.endswith('m'):
+        try:
+            minutes = int(time_str[:-1])
+            return min(minutes * 60, 86400)  # Max 24 hours
+        except ValueError:
+            pass
+    elif time_str.endswith('d'):
+        try:
+            days = int(time_str[:-1])
+            return min(days * 86400, 86400 * 7)  # Max 7 days
+        except ValueError:
+            pass
+    else:
+        try:
+            # Assume seconds
+            seconds = int(time_str)
+            return min(max(seconds, 300), 86400)  # Min 5 minutes, max 24 hours
+        except ValueError:
+            pass
+    
+    return 3600  # Default fallback
+
+
 class AlertQuery(BaseModel):
     """Validated alert query parameters."""
     limit: int = Field(default=100, ge=1, le=10000, description="Maximum number of alerts")

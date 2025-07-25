@@ -280,8 +280,8 @@ except ImportError as e:
     
     ValidationInfo = None
     
-    # Error message with platform-specific guidance
-    error_msg = f"Pydantic is required but not installed on {PLATFORM_INFO['distro_name'] or PLATFORM_INFO['system']}"
+    # Warning message with platform-specific guidance instead of hard error
+    error_msg = f"Pydantic is not installed on {PLATFORM_INFO['distro_name'] or PLATFORM_INFO['system']}"
     
     if PLATFORM_INFO['is_fedora']:
         if PLATFORM_INFO['distro_name'] == 'fedora':
@@ -300,7 +300,8 @@ except ImportError as e:
     else:
         error_msg += "\nInstall with: pip install pydantic"
     
-    raise ImportError(error_msg) from None
+    # Only warn, don't crash - allow graceful degradation
+    warnings.warn(f"Using fallback mode - {error_msg}", RuntimeWarning)
 
 # Export unified interface
 __all__ = [
