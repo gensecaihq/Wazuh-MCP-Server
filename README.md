@@ -1,11 +1,15 @@
 # Wazuh MCP Server - Remote HTTP Server with Docker
 
+> **🧪 EXPERIMENTAL - EXTENSIVE TESTING NEEDED** 🧪
+> 
+> This branch implements a remote HTTP-based MCP server with Docker deployment. While feature-complete, it requires extensive testing in production environments before enterprise deployment.
+
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
 [![FastMCP](https://img.shields.io/badge/FastMCP-2.10.6+-green.svg)](https://github.com/anthropics/fastmcp)
 [![Wazuh Compatible](https://img.shields.io/badge/Wazuh-4.8%2B-orange.svg)](https://wazuh.com/)
-[![Production Ready](https://img.shields.io/badge/Status-Production%20Ready-brightgreen.svg)](https://github.com/gensecaihq/Wazuh-MCP-Server)
-[![Security Audited](https://img.shields.io/badge/Security-Audited-red.svg)](https://github.com/gensecaihq/Wazuh-MCP-Server)
+[![Experimental](https://img.shields.io/badge/Status-Experimental-orange.svg)](https://github.com/gensecaihq/Wazuh-MCP-Server)
+[![Testing Needed](https://img.shields.io/badge/Testing-Extensive%20Needed-red.svg)](https://github.com/gensecaihq/Wazuh-MCP-Server)
 
 A **remote HTTP-based MCP server** that provides AI-powered security operations through Wazuh SIEM integration. Unlike STDIO-based branches, this server runs as a remote service accessible via HTTP transport, designed for Docker deployment and multi-client enterprise environments.
 
