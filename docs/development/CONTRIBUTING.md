@@ -2,6 +2,17 @@
 
 Thank you for your interest in contributing to the Wazuh MCP Server! This document provides guidelines and instructions for contributing to this project.
 
+## 📚 Complete Documentation Suite
+
+For comprehensive guidance based on your role:
+
+- **🧑‍💻 [Developer Guide](../../DEVELOPER_GUIDE.md)** - Complete developer contribution guide with architecture, coding standards, and workflows
+- **🔧 [Wazuh Admin Guide](../../WAZUH_ADMIN_GUIDE.md)** - Production deployment and configuration for Wazuh administrators  
+- **🛡️ [Security Professional Guide](../../SECURITY_PROFESSIONAL_GUIDE.md)** - AI-enhanced security operations and threat analysis
+- **📖 [Main README](../../README.md)** - Project overview and quick start guide
+
+This document provides a quick reference for contributors. For detailed information, please refer to the **[Developer Guide](../../DEVELOPER_GUIDE.md)**.
+
 ## 🎯 How to Contribute
 
 ### Reporting Issues

@@ -690,7 +690,12 @@ AUTO_DETECT_SSL_ISSUES=true
 
 ## 🤝 Contributing
 
-We welcome contributions! Please see our [Contributing Guide](CONTRIBUTING.md) for details.
+We welcome contributions! Please see our comprehensive documentation:
+
+- **🧑‍💻 [Developer Guide](DEVELOPER_GUIDE.md)** - Complete developer contribution guide with architecture, coding standards, and workflows
+- **🔧 [Wazuh Admin Guide](WAZUH_ADMIN_GUIDE.md)** - Production deployment and configuration for Wazuh administrators  
+- **🛡️ [Security Professional Guide](SECURITY_PROFESSIONAL_GUIDE.md)** - AI-enhanced security operations and threat analysis
+- **📝 [Contributing Guide](docs/development/CONTRIBUTING.md)** - Quick reference for contributors
 
 ### Development Setup
 
