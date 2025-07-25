@@ -31,25 +31,27 @@ cd Wazuh-MCP-Server
 python3 scripts/install.py
 ```
 
-**Option B: Enhanced FastMCP STDIO (v2-fastmcp)**
+**Option B: Enhanced FastMCP STDIO (v2-fastmcp) - ⚠️ TESTING NEEDED**
 ```bash
 git clone https://github.com/gensecaihq/Wazuh-MCP-Server.git
 cd Wazuh-MCP-Server
 git checkout v2-fastmcp
+# ⚠️ WARNING: Not stable - testing needed before production use
 # Enhanced stdio server with FastMCP - requires Python 3.10+
 pip install -r requirements.txt
 # Still uses stdio transport for Claude Desktop
 ```
 
-**Option C: Remote HTTP Server (v3-fastmcp-remote)**
+**Option C: Remote HTTP Server (v3-fastmcp-remote) - 🧪 EXPERIMENTAL**
 ```bash
 git clone https://github.com/gensecaihq/Wazuh-MCP-Server.git
 cd Wazuh-MCP-Server
 git checkout v3-fastmcp-remote
+# 🧪 WARNING: Experimental - extensive testing needed
 # Remote MCP server with Docker - requires Python 3.10+
 python3 validate-production.py
 pip install -r requirements.txt
-# Use Docker deployment: docker-compose up -d
+# Use Docker deployment: docker compose up -d
 # See docs/ for comprehensive deployment guides
 ```
 
@@ -64,8 +66,8 @@ Create `.env` file with your Wazuh settings:
 ```env
 WAZUH_HOST=your-wazuh-server.com
 WAZUH_PORT=55000
-WAZUH_USERNAME=your-api-user
-WAZUH_PASSWORD=your-password
+WAZUH_USER=your-api-user
+WAZUH_PASS=your-password
 VERIFY_SSL=true
 ```
 
@@ -115,7 +117,7 @@ Add to your Claude Desktop config:
 }
 ```
 
-> **Note**: v3-fastmcp-remote runs as a remote HTTP server. You connect to it via HTTP transport, not direct stdio. Start the server with `docker-compose up -d` first.
+> **Note**: v3-fastmcp-remote runs as a remote HTTP server. You connect to it via HTTP transport, not direct stdio. Start the server with `docker compose up -d` first.
 
 ### 4. Restart Claude Desktop
 
@@ -132,20 +134,19 @@ That's it! Start asking Claude about your Wazuh security data.
 - **Pydantic V1/V2 support** - works with both versions
 - **Production-ready** - stable, tested, and reliable
 
-### 🧪 **Enhanced: v2-fastmcp** (FastMCP stdio branch)
+### 🧪 **Enhanced: v2-fastmcp** (FastMCP stdio branch) - ⚠️ **TESTING NEEDED**
 - **FastMCP Framework** - Built with FastMCP 2.10.6+ for enhanced performance
 - **STDIO Transport** - Standard MCP protocol over stdio (like main branch)
 - **Python 3.10+ Required** - Latest FastMCP compatibility
 - **Enhanced Performance** - Improved async operations and memory management
-- **Cleaner Architecture** - Modern FastMCP patterns and structure
+- **⚠️ NOT STABLE** - Requires extensive testing before production use
 
-### 🚀 **Remote Server: v3-fastmcp-remote** (Docker/HTTP branch)
+### 🧪 **Remote Server: v3-fastmcp-remote** (Docker/HTTP branch) - 🧪 **EXPERIMENTAL**
 - **Remote MCP Server** - HTTP-based MCP server for remote access
 - **Docker Deployment** - Complete containerization with docker-compose
 - **HTTP Transport** - MCP over HTTP for remote client connections
 - **Enterprise Security** - JWT authentication, rate limiting, input validation
-- **Production Ready** - Health monitoring, audit logging, performance optimization
-- **Comprehensive Documentation** - Full deployment guides, security docs, troubleshooting
+- **🧪 EXPERIMENTAL** - Feature-complete but requires extensive testing
 
 > **Note**: `main` branch is the stable stdio MCP server. `v2-fastmcp` is an enhanced stdio version using FastMCP framework. `v3-fastmcp-remote` is a remote HTTP-based MCP server with Docker deployment for enterprise use.
 
@@ -158,19 +159,19 @@ That's it! Start asking Claude about your Wazuh security data.
   - Established tool ecosystem (26 tools)
   - Maximum compatibility and reliability
   
-- **Use `v2-fastmcp` branch** if you want:
-  - Enhanced stdio MCP server with FastMCP framework
-  - Better performance and modern architecture
+- **Use `v2-fastmcp` branch** if you want to test:
+  - ⚠️ **Testing needed** - Enhanced stdio MCP server with FastMCP framework
+  - Better performance and modern architecture (requires testing)
   - Python 3.10+ with latest FastMCP features
   - Still uses stdio transport for Claude Desktop
 
 **🌐 For Remote/Enterprise Deployments (HTTP):**
-- **Use `v3-fastmcp-remote` branch** for:
-  - Remote MCP server accessible over HTTP
-  - Docker deployment with docker-compose
-  - Enterprise security (JWT auth, rate limiting)
+- **Use `v3-fastmcp-remote` branch** for experimental testing:
+  - 🧪 **Experimental** - Remote MCP server accessible over HTTP
+  - Docker deployment with docker-compose (needs extensive testing)
+  - Enterprise security features (JWT auth, rate limiting)
   - Multi-client access and scalability
-  - Production monitoring and audit logging
+  - **Requires extensive testing before production use**
 
 ### 🏗️ **Architecture (main branch)** 
 - **Transport**: stdio (standard MCP protocol)
@@ -364,19 +365,19 @@ Found a bug? [Open an issue](https://github.com/gensecaihq/Wazuh-MCP-Server/issu
 - 26 comprehensive security tools
 - Bug fixes for all reported issues
 
-### Enhanced STDIO: v2-fastmcp 🧪
+### Enhanced STDIO: v2-fastmcp 🧪 ⚠️ **TESTING NEEDED**
 - FastMCP 2.10.6+ framework integration for stdio transport
 - Modern async architecture with improved performance
 - Same stdio compatibility as main branch for Claude Desktop
 - Enhanced error handling and resource management
-- Cleaner codebase with FastMCP patterns
+- **⚠️ NOT STABLE** - Requires extensive testing before production use
 
-### Remote HTTP Server: v3-fastmcp-remote 🚀
-- Remote MCP server accessible over HTTP transport
-- Docker deployment with docker-compose for easy scaling
+### Remote HTTP Server: v3-fastmcp-remote 🧪 **EXPERIMENTAL**
+- Remote MCP server accessible over HTTP transport  
+- Docker deployment with docker compose for easy scaling
 - Enterprise security with JWT authentication and rate limiting
 - Multi-client support for team environments
-- Production monitoring, audit logging, and health checks
+- **🧪 EXPERIMENTAL** - Feature-complete but requires extensive testing
 
 ### Future: v2.1.0
 - Merge successful v3-fastmcp-remote features into main
