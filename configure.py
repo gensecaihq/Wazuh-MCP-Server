@@ -160,7 +160,7 @@ def configure_mcp_transport() -> Dict[str, Any]:
     config = {}
     
     print("\nTransport modes:")
-    print("  • stdio: For Claude Desktop integration (recommended)")
+    print("  • stdio: For desktop integration (recommended)")
     print("  • http:  For remote access and web interfaces")
     
     transport_mode = get_user_input(
@@ -642,8 +642,8 @@ docker run -d \\
   wazuh-mcp-server:latest
 ```
 
-### 4. For Claude Desktop Integration
-Add this to your Claude Desktop configuration:
+### 4. For Desktop Integration
+Add this to your MCP client configuration:
 
 ```json
 {{

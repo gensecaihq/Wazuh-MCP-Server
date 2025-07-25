@@ -1,45 +1,6 @@
-# Production Wazuh MCP Server Dependencies
-# Optimized for Docker deployment and production use with pinned versions
-# FastMCP-compliant dependencies following official gofastmcp.com standards
-
-# FastMCP Framework - Core MCP capabilities (Latest stable version)
+# Core dependencies for Wazuh MCP Server
 fastmcp>=2.11.0
-
-# HTTP Client - Wazuh API communication with HTTP/2 support
-httpx[http2]==0.28.0
-h2==4.1.0
-hypercorn==0.17.3
-
-# Data Validation and Parsing
-pydantic==2.10.3
-pydantic-core==2.27.1
-
-# Security and Authentication
-pyjwt==2.8.0
-certifi==2024.8.30
-cryptography==43.0.3
-
-# Configuration and Environment
-python-dotenv==1.0.1
-
-# Date/Time Utilities
-python-dateutil==2.8.2
-
-# System Information
-psutil==6.1.0
-
-# Performance optimization for production
-uvloop==0.19.0; sys_platform != "win32"  # Better event loop for Linux/macOS
-orjson==3.10.12  # Faster JSON processing
-
-# Additional production dependencies
-typing-extensions==4.12.2
-anyio==4.6.2.post1
-sniffio==1.3.1
-idna==3.10
-
-# Logging and monitoring
-structlog==24.4.0
-
-# Security hardening
-secure==0.3.0
+httpx>=0.28.0
+pydantic>=2.10.0
+python-dotenv>=1.0.0
+uvicorn>=0.32.0

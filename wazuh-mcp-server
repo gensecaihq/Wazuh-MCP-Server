@@ -5,7 +5,7 @@ Single, robust FastMCP-powered MCP server for Wazuh SIEM integration.
 Supports both stdio (local) and HTTP/SSE (remote) transports.
 
 Usage:
-  ./wazuh-mcp-server              # STDIO transport (default, for Claude Desktop)
+  ./wazuh-mcp-server              # STDIO transport (default, for desktop integration)
   ./wazuh-mcp-server --stdio      # STDIO transport (explicit)
   ./wazuh-mcp-server --http       # HTTP/SSE transport (for remote access)
   ./wazuh-mcp-server --remote     # HTTP/SSE transport (alias)
@@ -71,7 +71,7 @@ try:
             print(f"🌐 Starting Wazuh MCP Server in HTTP/SSE mode on {host}:{port}")
             uvicorn.run(mcp.create_app(), host=host, port=port, log_level="info")
         else:
-            print("📱 Starting Wazuh MCP Server in STDIO mode for Claude Desktop")
+            print("📱 Starting Wazuh MCP Server in STDIO mode for desktop integration")
             mcp.run()
         
 except ImportError as e:
