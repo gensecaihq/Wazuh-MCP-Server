@@ -242,7 +242,7 @@ def check_virtual_environment():
     if python_works:
         try:
             result = subprocess.run([str(python_exe), "--version"], 
-                                  capture_output=True, text=True)
+                                  capture_output=True, text=True, encoding='utf-8', errors='replace')
             print_check("Python version check", result.returncode == 0, 
                        result.stdout.strip() if result.returncode == 0 else result.stderr)
         except Exception as e:
@@ -281,7 +281,7 @@ def check_dependencies():
         try:
             # Check if package is installed
             result = subprocess.run([str(python_exe), "-c", f"import {dep}; print('OK')"],
-                                  capture_output=True, text=True)
+                                  capture_output=True, text=True, encoding='utf-8', errors='replace')
             success = result.returncode == 0
             
             if success:
@@ -289,7 +289,7 @@ def check_dependencies():
                 try:
                     version_result = subprocess.run([str(python_exe), "-c", 
                                                    f"import {dep}; print(getattr({dep}, '__version__', 'unknown'))"],
-                                                  capture_output=True, text=True)
+                                                  capture_output=True, text=True, encoding='utf-8', errors='replace')
                     version = version_result.stdout.strip() if version_result.returncode == 0 else "unknown"
                     print_check(f"Package: {dep}", success, f"v{version} - {description}")
                 except:
@@ -305,7 +305,7 @@ def check_dependencies():
     # Check for potential security vulnerabilities
     try:
         vulns_result = subprocess.run([str(python_exe), "-m", "pip", "check"],
-                                    capture_output=True, text=True)
+                                    capture_output=True, text=True, encoding='utf-8', errors='replace')
         if vulns_result.returncode == 0 and not vulns_result.stdout.strip():
             print_security_check("Package security check", True, "low", "No known vulnerabilities")
         else:
@@ -346,7 +346,7 @@ def check_package_installation():
             result = subprocess.run([
                 str(python_exe), "-c", 
                 f"from {module} import {class_name}; print('{class_name} imported successfully')"
-            ], capture_output=True, text=True)
+            ], capture_output=True, text=True, encoding='utf-8', errors='replace')
             success = result.returncode == 0
             print_check(name, success, result.stdout.strip() if success else result.stderr.strip())
             if not success:
@@ -523,7 +523,7 @@ def test_connection():
         start_time = time.time()
         
         result = subprocess.run([str(python_exe), str(validator_script)],
-                              capture_output=True, text=True, timeout=60)
+                              capture_output=True, text=True, timeout=60, encoding='utf-8', errors='replace')
         
         end_time = time.time()
         response_time = end_time - start_time
@@ -653,7 +653,7 @@ if __name__ == "__main__":
             f.write(test_script)
         
         result = subprocess.run([str(python_exe), '.test_resilience.py'],
-                              capture_output=True, text=True, timeout=30)
+                              capture_output=True, text=True, timeout=30, encoding='utf-8', errors='replace')
         
         Path('.test_resilience.py').unlink()  # Clean up
         
@@ -707,7 +707,7 @@ def check_production_readiness():
         python_exe = Path("venv") / ("Scripts/python.exe" if platform.system() == "Windows" else "bin/python")
         result = subprocess.run([str(python_exe), "-c", 
                                "from wazuh_mcp_server.config import WazuhConfig; WazuhConfig.from_env()"],
-                              capture_output=True, text=True, env={**dict(os.environ), "DOTENV_PATH": str(test_config)})
+                              capture_output=True, text=True, env={**dict(os.environ), "DOTENV_PATH": str(test_config)}, encoding='utf-8', errors='replace')
         
         test_config.unlink()
         
@@ -756,7 +756,7 @@ class AutoFixer:
         """Run command with sudo privileges."""
         if os.geteuid() == 0:
             # Already root
-            return subprocess.run(cmd, capture_output=True, text=True)
+            return subprocess.run(cmd, capture_output=True, text=True, encoding='utf-8', errors='replace')
         
         # Need sudo
         if self.interactive:
@@ -765,7 +765,7 @@ class AutoFixer:
         else:
             # Non-interactive mode
             sudo_cmd = ['sudo', '-n'] + cmd
-            return subprocess.run(sudo_cmd, capture_output=True, text=True)
+            return subprocess.run(sudo_cmd, capture_output=True, text=True, encoding='utf-8', errors='replace')
     
     def detect_package_manager(self) -> Optional[str]:
         """Detect the system package manager."""
@@ -859,7 +859,7 @@ class AutoFixer:
                 # Install packages
                 for pkg in install_packages:
                     print(f"   Installing {pkg}...")
-                    result = subprocess.run(['brew', 'install', pkg], capture_output=True, text=True)
+                    result = subprocess.run(['brew', 'install', pkg], capture_output=True, text=True, encoding='utf-8', errors='replace')
                     if result.returncode != 0:
                         print(f"   ⚠️  Failed to install {pkg}")
                 
@@ -914,7 +914,7 @@ class AutoFixer:
         for exe in python_executables:
             if shutil.which(exe):
                 # Check version
-                result = subprocess.run([exe, '--version'], capture_output=True, text=True)
+                result = subprocess.run([exe, '--version'], capture_output=True, text=True, encoding='utf-8', errors='replace')
                 if result.returncode == 0:
                     version = result.stdout.strip()
                     if '3.13' in version or '3.12' in version or '3.11' in version or '3.10' in version or '3.9' in version or '3.8' in version:
@@ -930,7 +930,7 @@ class AutoFixer:
         # Method 1: Standard venv creation
         try:
             print("   Creating virtual environment...")
-            result = subprocess.run([python_exe, '-m', 'venv', 'venv'], capture_output=True, text=True)
+            result = subprocess.run([python_exe, '-m', 'venv', 'venv'], capture_output=True, text=True, encoding='utf-8', errors='replace')
             
             if result.returncode == 0:
                 # Verify pip works
@@ -939,7 +939,7 @@ class AutoFixer:
                 # Upgrade pip
                 print("   Upgrading pip...")
                 upgrade_result = subprocess.run([str(venv_python), '-m', 'pip', 'install', '--upgrade', 'pip'], 
-                                              capture_output=True, text=True)
+                                              capture_output=True, text=True, encoding='utf-8', errors='replace')
                 
                 if upgrade_result.returncode == 0:
                     self.fixes_applied.append("Virtual environment")
@@ -962,7 +962,7 @@ class AutoFixer:
         try:
             # Create venv without pip
             result = subprocess.run([python_exe, '-m', 'venv', 'venv', '--without-pip'], 
-                                  capture_output=True, text=True)
+                                  capture_output=True, text=True, encoding='utf-8', errors='replace')
             
             if result.returncode != 0:
                 print("❌ Failed to create virtual environment")
@@ -993,7 +993,7 @@ class AutoFixer:
             venv_python = Path("venv") / ('Scripts/python.exe' if platform.system() == 'Windows' else 'bin/python')
             
             print("   Installing pip in virtual environment...")
-            result = subprocess.run([str(venv_python), get_pip_path], capture_output=True, text=True)
+            result = subprocess.run([str(venv_python), get_pip_path], capture_output=True, text=True, encoding='utf-8', errors='replace')
             
             # Clean up
             os.unlink(get_pip_path)
