@@ -1,0 +1,86 @@
+services:
+  wazuh-mcp-server:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        BUILD_DATE: ${BUILD_DATE:-2024-01-01}
+        VERSION: v3-fastmcp-check
+    image: wazuh-mcp-server:v3-fastmcp-check
+    container_name: wazuh-mcp-server
+    restart: unless-stopped
+    
+    # Environment variables (customize these)
+    environment:
+      # REQUIRED: Wazuh server configuration
+      WAZUH_HOST: ${WAZUH_HOST:-your-wazuh-server.com}
+      WAZUH_PORT: ${WAZUH_PORT:-55000}
+      WAZUH_USER: ${WAZUH_USER:-your-api-user}
+      WAZUH_PASS: ${WAZUH_PASS:-your-password}
+      
+      # Transport mode: stdio (Claude Desktop) or http (remote access)
+      MCP_TRANSPORT: ${MCP_TRANSPORT:-stdio}
+      MCP_HOST: ${MCP_HOST:-0.0.0.0}
+      MCP_PORT: ${MCP_PORT:-3000}
+      
+      # Security settings
+      VERIFY_SSL: ${VERIFY_SSL:-true}
+      
+      # Optional: Performance tuning
+      MAX_ALERTS_PER_QUERY: ${MAX_ALERTS_PER_QUERY:-1000}
+      REQUEST_TIMEOUT_SECONDS: ${REQUEST_TIMEOUT_SECONDS:-30}
+      
+      # Optional: External APIs
+      # VIRUSTOTAL_API_KEY: ${VIRUSTOTAL_API_KEY}
+      # SHODAN_API_KEY: ${SHODAN_API_KEY}
+    
+    # Port mapping (only needed for HTTP transport)
+    ports:
+      - "${MCP_PORT:-3000}:3000"
+    
+    # Health check
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import sys; sys.path.insert(0, '/app/src'); from wazuh_mcp_server.config import WazuhConfig; WazuhConfig.from_env()"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+    
+    # Resource limits (adjust as needed)
+    mem_limit: 512m
+    cpus: 0.5
+    mem_reservation: 256m
+    
+    # Logging configuration
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+    
+    # Security options
+    security_opt:
+      - no-new-privileges:true
+    read_only: false  # FastMCP needs write access for some operations
+    
+    # Volumes (optional: for persistent logs)
+    volumes:
+      - type: tmpfs
+        target: /tmp
+        tmpfs:
+          size: 100M
+    
+    # Network configuration
+    networks:
+      - wazuh-mcp-network
+
+# Named volumes (optional: for persistent data)
+volumes:
+  wazuh-mcp-logs:
+    driver: local
+
+# Network configuration
+networks:
+  wazuh-mcp-network:
+    driver: bridge
+    name: wazuh-mcp-network

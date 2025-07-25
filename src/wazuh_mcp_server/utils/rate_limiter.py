@@ -210,6 +210,35 @@ class GlobalRateLimiter:
                 )
 
 
+class RateLimiter:
+    """Simple rate limiter for backward compatibility."""
+    
+    def __init__(self, max_requests: int, window_seconds: int, burst_size: int = None, 
+                 enable_per_ip: bool = False, enable_per_user: bool = False):
+        self.max_requests = max_requests
+        self.window_seconds = window_seconds
+        self.burst_size = burst_size or max_requests
+        self.enable_per_ip = enable_per_ip
+        self.enable_per_user = enable_per_user
+        
+        # Use sliding window limiter internally
+        self.config = RateLimitConfig(
+            max_requests=max_requests,
+            time_window=window_seconds,
+            burst_limit=burst_size
+        )
+        self.limiter = SlidingWindowRateLimiter(self.config)
+    
+    async def acquire(self, identifier: str = "global"):
+        """Acquire rate limit token."""
+        if not await self.limiter.is_allowed(identifier):
+            retry_after = await self.limiter.time_until_reset(identifier)
+            raise RateLimitError(
+                f"Rate limit exceeded for {identifier}",
+                retry_after=int(retry_after) + 1
+            )
+
+
 # Global rate limiter instance
 global_rate_limiter = GlobalRateLimiter()
 

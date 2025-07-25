@@ -1,0 +1,104 @@
+# Docker ignore file for Wazuh MCP Server
+
+# Git and version control
+.git/
+.gitignore
+.github/
+
+# Docker files (not needed in build context)
+compose.yml
+docker-compose.yml
+
+# Environment files (will be handled by Docker)
+.env
+.env.*
+!.env.docker.template
+!docker/.env.docker
+
+# Python cache and artifacts
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Virtual environments
+.venv/
+venv/
+ENV/
+env/
+
+# IDE and editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS-specific files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# Documentation and examples (not needed in container)
+docs/
+examples/
+*.md
+!README.md
+
+# Test files and coverage
+tests/
+.coverage
+.pytest_cache/
+.tox/
+htmlcov/
+
+# Log files
+*.log
+logs/
+
+# Temporary files
+tmp/
+temp/
+.tmp/
+
+# Scripts that aren't needed in container
+scripts/
+!validate-production.py
+
+# CI/CD files
+.travis.yml
+.gitlab-ci.yml
+Jenkinsfile
+
+# Package manager files
+package-lock.json
+yarn.lock
+
+# Jupyter notebooks
+*.ipynb
+.ipynb_checkpoints
+
+# mypy
+.mypy_cache/
+.dmypy.json
+dmypy.json

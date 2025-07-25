@@ -1038,6 +1038,27 @@ def sanitize_string(input_str: str, max_length: int = 1000) -> str:
     # Remove null bytes and control characters
     sanitized = re.sub(r'[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]', '', input_str)
     
+    # Prevent SQL injection patterns
+    sql_patterns = [
+        r"(\b(SELECT|INSERT|UPDATE|DELETE|DROP|UNION|ALTER|CREATE)\b)",
+        r"(--|#|/\*|\*/)",
+        r"(\bOR\b.*=.*)",
+        r"(;.*\bEXEC\b)",
+        r"(\bEXEC\b\s*\()",
+        r"(CAST\s*\()",
+        r"(CONVERT\s*\()"
+    ]
+    for pattern in sql_patterns:
+        sanitized = re.sub(pattern, '', sanitized, flags=re.IGNORECASE)
+    
+    # Prevent command injection
+    cmd_chars = ['`', '$', '&', '|', ';', '\n', '\r', '>', '<', '(', ')']
+    for char in cmd_chars:
+        sanitized = sanitized.replace(char, '')
+    
+    # Prevent path traversal
+    sanitized = sanitized.replace('..', '').replace('./', '').replace('/.', '')
+    
     # Limit length
     if len(sanitized) > max_length:
         sanitized = sanitized[:max_length]
@@ -1057,3 +1078,38 @@ def validate_json_payload(payload: Any, max_size: int = 10000) -> Dict[str, Any]
         raise ValidationError(f"Payload too large (max {max_size} bytes)")
     
     return payload
+
+
+def validate_int_range(value: Any, min_val: int, max_val: int, default: int) -> int:
+    """Validate integer in range with security checks."""
+    if value is None:
+        return default
+    try:
+        int_val = int(value)
+        if min_val <= int_val <= max_val:
+            return int_val
+        return default
+    except (ValueError, TypeError):
+        return default
+
+
+def validate_string(value: Any, max_length: int, default: str) -> str:
+    """Validate and sanitize string input with enhanced security."""
+    if value is None:
+        return default
+    
+    # Use sanitize_string for comprehensive sanitization
+    return sanitize_string(str(value), max_length) or default
+
+
+def validate_time_range(value: str) -> int:
+    """Validate time range string and convert to seconds."""
+    time_map = {
+        '1h': 3600,
+        '6h': 21600,
+        '12h': 43200,
+        '24h': 86400,
+        '7d': 604800,
+        '30d': 2592000
+    }
+    return time_map.get(value, 86400)  # Default 24h

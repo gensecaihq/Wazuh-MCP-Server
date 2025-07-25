@@ -367,6 +367,87 @@ class ProductionValidator:
             }
             return True  # Not a critical failure
     
+    def check_transport_options(self) -> bool:
+        """Validate MCP transport options and HTTP/SSE support."""
+        print(header("MCP Transport Options"))
+        
+        transport_checks = []
+        
+        # Check FastMCP version for HTTP/SSE support
+        try:
+            import fastmcp
+            print(success(f"FastMCP version: {fastmcp.__version__}"))
+            transport_checks.append("fastmcp_available")
+        except ImportError:
+            print(error("FastMCP not available"))
+            self.results["errors"].append("FastMCP not installed")
+            return False
+        except AttributeError:
+            print(warning("FastMCP version not detectable"))
+        
+        # Check HTTP transport dependencies
+        http_deps = ["fastapi", "uvicorn", "starlette"]
+        missing_http_deps = []
+        
+        for dep in http_deps:
+            try:
+                __import__(dep)
+                print(success(f"HTTP transport dependency available: {dep}"))
+                transport_checks.append(f"http_dep_{dep}")
+            except ImportError:
+                print(warning(f"HTTP transport dependency missing: {dep}"))
+                missing_http_deps.append(dep)
+        
+        # Check transport configuration in .env files
+        env_files = [".env", ".env.production"]
+        transport_config_valid = False
+        
+        for env_file in env_files:
+            env_path = self.project_root / env_file
+            if env_path.exists():
+                with open(env_path, 'r') as f:
+                    content = f.read()
+                
+                if "MCP_TRANSPORT" in content:
+                    print(success(f"Transport configuration found in {env_file}"))
+                    transport_config_valid = True
+                    transport_checks.append("transport_config")
+                    
+                if "MCP_HOST" in content and "MCP_PORT" in content:
+                    print(success(f"HTTP transport settings found in {env_file}"))
+                    transport_checks.append("http_config")
+        
+        if not transport_config_valid:
+            print(info("Transport configuration not found (will use defaults)"))
+        
+        # Check entry point supports transport selection
+        entry_point = self.project_root / "wazuh-mcp-server"
+        if entry_point.exists():
+            with open(entry_point, 'r') as f:
+                content = f.read()
+            
+            if "--http" in content and "--stdio" in content:
+                print(success("Entry point supports transport selection"))
+                transport_checks.append("entry_point_transport")
+            else:
+                print(warning("Entry point may not support transport selection"))
+        
+        # Summary
+        if missing_http_deps:
+            print(warning(f"HTTP transport will not work without: {', '.join(missing_http_deps)}"))
+            self.results["warnings"].append(f"Missing HTTP dependencies: {missing_http_deps}")
+        else:
+            print(success("All transport modes supported"))
+        
+        self.results["checks"]["transport"] = {
+            "status": "pass",
+            "checks_passed": transport_checks,
+            "total_checks": len(transport_checks),
+            "missing_http_deps": missing_http_deps
+        }
+        
+        return True
+    
     def check_security(self) -> bool:
         """Check security configurations."""
         print(header("Security Configuration"))
@@ -496,6 +577,7 @@ class ProductionValidator:
             self.check_dependencies,
             self.check_file_structure,
             self.check_configuration,
+            self.check_transport_options,
             self.check_server_module,
             self.check_tests,
             self.check_security
@@ -519,8 +601,26 @@ class ProductionValidator:
 
 def main():
     """Main validation function."""
+    # Check for quick validation flag (for Docker health checks)
+    quick_mode = "--quick" in sys.argv
+    
     validator = ProductionValidator()
-    success = validator.run_all_checks()
+    
+    if quick_mode:
+        # Quick validation for Docker containers
+        print("🚀 Quick Docker validation...")
+        success = (
+            validator.check_python_version() and
+            validator.check_file_structure()
+        )
+        if success:
+            print("✅ Quick validation passed")
+        else:
+            print("❌ Quick validation failed")
+    else:
+        # Full validation
+        success = validator.run_all_checks()
+        validator.generate_report()
     
     # Exit with appropriate code
     sys.exit(0 if success else 1)

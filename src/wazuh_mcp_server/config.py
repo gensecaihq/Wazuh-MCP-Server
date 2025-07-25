@@ -195,13 +195,41 @@ class WazuhConfig(BaseModel):
     
     @validator('password')
     def validate_password(cls, v):
-        """Validate password meets minimum security requirements."""
+        """Validate password meets enhanced security requirements."""
         if not v or v.strip() == "":
             raise ValueError("WAZUH_PASS must be provided")
-        if len(v) < 8:
-            raise ValueError("Password must be at least 8 characters long")
-        if v.lower() in ["admin", "password", "123456", "wazuh"]:
-            raise ValueError("Password is too weak. Use a strong, unique password.")
+        
+        # Minimum length check
+        if len(v) < 12:
+            raise ValueError("Password must be at least 12 characters long")
+        
+        # Character complexity checks
+        if not any(c.isupper() for c in v):
+            raise ValueError("Password must contain at least one uppercase letter")
+        
+        if not any(c.islower() for c in v):
+            raise ValueError("Password must contain at least one lowercase letter")
+        
+        if not any(c.isdigit() for c in v):
+            raise ValueError("Password must contain at least one number")
+        
+        if not any(c in '!@#$%^&*()_+-=[]{}|;:,.<>?' for c in v):
+            raise ValueError("Password must contain at least one special character")
+        
+        # Common password check (expanded list)
+        weak_passwords = [
+            "admin", "password", "123456", "wazuh", "security", "password123",
+            "admin123", "wazuh123", "password!", "admin!", "123456789",
+            "qwerty", "abc123", "password1", "welcome", "letmein"
+        ]
+        
+        if v.lower() in weak_passwords:
+            raise ValueError("Password is too common. Use a strong, unique password.")
+        
+        # Check for repeated characters
+        if any(v[i] == v[i+1] == v[i+2] for i in range(len(v)-2)):
+            raise ValueError("Password cannot contain three consecutive identical characters")
+        
         return v
     
     @validator('log_level')

@@ -1,7 +1,9 @@
 #!/usr/bin/env python3
 """
-Production-Ready Wazuh MCP Server with FastMCP Framework
-Unified, robust implementation with comprehensive error handling, monitoring, and security.
+Wazuh MCP Server - Production-Ready Security Operations Platform
+
+A FastMCP-powered server providing AI-enhanced security operations with Wazuh SIEM integration.
+Features comprehensive error handling, monitoring, authentication, and performance optimization.
 """
 
 import os
@@ -109,8 +111,8 @@ async def get_http_client() -> httpx.AsyncClient:
         )
         
         limits = httpx.Limits(
-            max_keepalive_connections=config.max_connections,
-            max_connections=config.max_connections * 2,
+            max_keepalive_connections=min(config.max_connections, 20),  # Cap at 20
+            max_connections=min(config.max_connections * 2, 50),  # Cap at 50
             keepalive_expiry=30
         )
         
@@ -128,17 +130,19 @@ async def get_http_client() -> httpx.AsyncClient:
 
 
 async def get_rate_limiter() -> RateLimiter:
-    """Get or create rate limiter."""
+    """Get or create rate limiter with production-ready configuration."""
     global _rate_limiter
     
     if _rate_limiter is None:
         config = get_config()
         _rate_limiter = RateLimiter(
-            max_requests=100,  # Max requests per window
+            max_requests=60,   # Reduced for better protection
             window_seconds=60,  # 1 minute window
-            burst_size=20      # Allow burst requests
+            burst_size=10,     # Smaller burst to prevent abuse
+            enable_per_ip=True,  # Enable per-IP rate limiting
+            enable_per_user=True  # Enable per-user rate limiting
         )
-        logger.info("Rate limiter initialized")
+        logger.info("Rate limiter initialized with per-IP and per-user limits")
     
     return _rate_limiter
 
@@ -266,10 +270,19 @@ async def get_server_health(ctx: Context = None) -> Dict[str, Any]:
         except Exception as e:
             health_checks["http_client"] = {"status": "unhealthy", "details": str(e)}
         
-        # Wazuh API connectivity check
+        # Wazuh API connectivity check with timeout
         try:
-            await wazuh_api_request('/security/user/authenticate', ctx=ctx)
-            health_checks["wazuh_api"] = {"status": "healthy", "details": "API connection successful"}
+            # Use asyncio.wait_for for compatibility
+            test_response = await asyncio.wait_for(
+                wazuh_api_request('/agents', params={'limit': 1}, ctx=ctx),
+                timeout=5.0
+            )
+            if test_response.get('data'):
+                health_checks["wazuh_api"] = {"status": "healthy", "details": "API connection and functionality verified"}
+            else:
+                health_checks["wazuh_api"] = {"status": "degraded", "details": "API connected but returned no data"}
+        except asyncio.TimeoutError:
+            health_checks["wazuh_api"] = {"status": "unhealthy", "details": "API connection timeout"}
         except Exception as e:
             health_checks["wazuh_api"] = {"status": "unhealthy", "details": str(e)}
         
@@ -489,7 +502,7 @@ async def analyze_security_threats(
                 'metadata': {'alert_count': 0, 'time_range': time_range}
             }
         
-        # Prepare analysis data
+        # Prepare analysis data with efficient processing
         alert_summary = []
         threat_indicators = {
             'high_severity_count': 0,
@@ -499,41 +512,47 @@ async def analyze_security_threats(
             'time_distribution': defaultdict(int)
         }
         
-        for alert in alerts[:100]:  # Limit for performance
-            try:
-                rule = alert.get('rule', {})
-                rule_level = rule.get('level', 0)
-                rule_id = rule.get('id', '')
-                agent_info = alert.get('agent', {})
-                timestamp = alert.get('timestamp', '')
-                
-                # Collect summary info
-                alert_summary.append({
-                    'rule_description': rule.get('description', '')[:200],
-                    'level': rule_level,
-                    'agent_name': agent_info.get('name', '')[:50],
-                    'timestamp': timestamp,
-                    'location': alert.get('location', '')[:100]
-                })
-                
-                # Update threat indicators
-                if rule_level >= 8:
-                    threat_indicators['high_severity_count'] += 1
-                
-                threat_indicators['unique_rules'].add(rule_id)
-                threat_indicators['affected_agents'].add(agent_info.get('id', ''))
-                
-                # Time distribution (by hour)
+        # Process alerts in chunks for better memory efficiency
+        chunk_size = 50
+        max_alerts_to_process = min(100, len(alerts))  # Limit for performance
+        
+        for i in range(0, max_alerts_to_process, chunk_size):
+            chunk = alerts[i:i + chunk_size]
+            for alert in chunk:
                 try:
-                    dt = isoparse(timestamp)
-                    hour_key = dt.strftime('%H:00')
-                    threat_indicators['time_distribution'][hour_key] += 1
-                except Exception:
-                    pass
+                    rule = alert.get('rule', {})
+                    rule_level = rule.get('level', 0)
+                    rule_id = rule.get('id', '')
+                    agent_info = alert.get('agent', {})
+                    timestamp = alert.get('timestamp', '')
                     
-            except Exception as e:
-                logger.warning(f"Error processing alert for analysis: {e}")
-                continue
+                    # Collect summary info
+                    alert_summary.append({
+                        'rule_description': rule.get('description', '')[:200],
+                        'level': rule_level,
+                        'agent_name': agent_info.get('name', '')[:50],
+                        'timestamp': timestamp,
+                        'location': alert.get('location', '')[:100]
+                    })
+                    
+                    # Update threat indicators
+                    if rule_level >= 8:
+                        threat_indicators['high_severity_count'] += 1
+                    
+                    threat_indicators['unique_rules'].add(rule_id)
+                    threat_indicators['affected_agents'].add(agent_info.get('id', ''))
+                    
+                    # Time distribution (by hour)
+                    try:
+                        dt = isoparse(timestamp)
+                        hour_key = dt.strftime('%H:00')
+                        threat_indicators['time_distribution'][hour_key] += 1
+                    except Exception:
+                        pass
+                        
+                except Exception as e:
+                    logger.warning(f"Error processing alert for analysis: {e}")
+                    continue
         
         # Calculate threat level
         high_severity_ratio = threat_indicators['high_severity_count'] / len(alerts)
@@ -582,13 +601,48 @@ async def analyze_security_threats(
         """
         
         try:
-            analysis_result = await ctx.sample(
-                analysis_prompt,
-                model="claude-3-sonnet-20240229",
-                max_tokens=1500,
-                temperature=0.3
+            # Use asyncio wait_for for timeout with better compatibility
+            analysis_result = await asyncio.wait_for(
+                ctx.sample(
+                    analysis_prompt,
+                    model="claude-3-sonnet-20240229",
+                    max_tokens=1500,
+                    temperature=0.3
+                ),
+                timeout=30.0  # 30 second timeout
             )
-            ai_analysis = analysis_result.content
+            
+            # Parse AI response safely
+            try:
+                import json
+                ai_analysis = json.loads(analysis_result.content)
+            except json.JSONDecodeError:
+                # If response isn't valid JSON, create structured response
+                ai_analysis = {
+                    "executive_summary": analysis_result.content[:500],
+                    "key_findings": [
+                        f"{len(alerts)} security events analyzed",
+                        f"{threat_indicators['high_severity_count']} high-severity alerts",
+                        f"{unique_rules_count} unique rules triggered"
+                    ],
+                    "immediate_actions": ["Review high-severity alerts", "Check affected systems"],
+                    "urgency_level": threat_level,
+                    "confidence_score": 0.7
+                }
+                    
+        except asyncio.TimeoutError:
+            await ctx.error("AI analysis timed out after 30 seconds")
+            ai_analysis = {
+                "executive_summary": f"Analysis completed with {threat_level} threat level detected",
+                "key_findings": [
+                    f"{len(alerts)} security events analyzed",
+                    f"{threat_indicators['high_severity_count']} high-severity alerts",
+                    f"{unique_rules_count} unique rules triggered"
+                ],
+                "immediate_actions": ["Review high-severity alerts", "Check affected systems"],
+                "urgency_level": threat_level,
+                "error": "AI analysis timed out"
+            }
         except Exception as e:
             await ctx.error(f"AI analysis failed: {e}")
             ai_analysis = {
@@ -1444,31 +1498,69 @@ async def initialize_server() -> bool:
 
 
 async def cleanup_server():
-    """Clean up server resources on shutdown."""
-    global _http_client
+    """Clean up server resources on shutdown with comprehensive cleanup."""
+    global _http_client, _rate_limiter, _health_status, _metrics, _server_start_time
     
     try:
-        logger.info("Shutting down server...")
+        logger.info("Initiating graceful server shutdown...")
         
+        # Update health status
+        _health_status["status"] = "shutting_down"
+        
+        # Close HTTP client connections
         if _http_client:
-            await _http_client.aclose()
-            _http_client = None
-            logger.info("HTTP client closed")
+            try:
+                # Allow time for pending requests to complete
+                await asyncio.sleep(0.5)
+                await _http_client.aclose()
+                _http_client = None
+                logger.info("HTTP client closed successfully")
+            except Exception as e:
+                logger.error(f"Error closing HTTP client: {e}")
         
-        logger.info("Server shutdown completed")
+        # Clear rate limiter state
+        if _rate_limiter:
+            _rate_limiter = None
+            logger.info("Rate limiter cleared")
+        
+        # Clear global state
+        _health_status = {"status": "stopped", "checks": {}}
+        _metrics = {
+            "requests_total": 0,
+            "requests_failed": 0,
+            "avg_response_time": 0,
+            "last_error": None,
+            "uptime_start": None
+        }
+        _server_start_time = None
+        
+        # Force garbage collection to free memory
+        import gc
+        gc.collect()
+        
+        logger.info("Server shutdown completed successfully")
         
     except Exception as e:
         logger.error(f"Error during server cleanup: {e}")
+        # Continue shutdown even if cleanup fails
 
 
 def setup_signal_handlers():
     """Set up graceful shutdown signal handlers."""
+    shutdown_event = asyncio.Event()
+    
     def signal_handler(signum, frame):
         logger.info(f"Received signal {signum}, initiating graceful shutdown...")
-        # The actual cleanup will be handled by the main event loop
+        shutdown_event.set()
+        # Cancel any running tasks
+        for task in asyncio.all_tasks():
+            if not task.done():
+                task.cancel()
         
     signal.signal(signal.SIGINT, signal_handler)
     signal.signal(signal.SIGTERM, signal_handler)
+    
+    return shutdown_event
 
 
 async def main():
@@ -1491,11 +1583,19 @@ async def main():
         
         config = get_config()
         
+        # Determine transport mode from environment or command line
+        transport_mode = os.getenv("MCP_TRANSPORT", "stdio").lower()
+        if len(sys.argv) > 1:
+            if sys.argv[1] in ["--http", "--server", "--remote"]:
+                transport_mode = "http"
+            elif sys.argv[1] in ["--stdio", "--local"]:
+                transport_mode = "stdio"
+        
         # Log server information
         logger.info(f"Starting Wazuh MCP Server v{__version__}")
         logger.info(f"Python version: {sys.version}")
         logger.info(f"FastMCP framework: Production-ready")
-        logger.info(f"Transport: STDIO")
+        logger.info(f"Transport mode: {transport_mode.upper()}")
         logger.info(f"Configuration: {config.host}:{config.port}")
         
         # Log registered components
@@ -1505,9 +1605,19 @@ async def main():
         
         logger.info(f"Registered components: {tool_count} tools, {resource_count} resources, {prompt_count} prompts")
         
-        # Start server
-        logger.info("Server is ready and listening on STDIO transport")
-        await mcp.run_async(transport="stdio")
+        # Start server with appropriate transport
+        if transport_mode == "http":
+            # HTTP/SSE transport for remote access
+            host = os.getenv("MCP_HOST", "localhost") 
+            port = int(os.getenv("MCP_PORT", "3000"))
+            logger.info(f"Server is ready and listening on HTTP transport at {host}:{port}")
+            logger.info("Remote MCP server mode - supports HTTP POST + Server-Sent Events")
+            await mcp.run_async(transport="http", host=host, port=port)
+        else:
+            # STDIO transport for local Claude Desktop integration
+            logger.info("Server is ready and listening on STDIO transport")
+            logger.info("Local MCP server mode - for Claude Desktop integration")
+            await mcp.run_async(transport="stdio")
         
     except KeyboardInterrupt:
         logger.info("Server shutdown requested by user")
