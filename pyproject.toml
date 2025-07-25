@@ -23,24 +23,24 @@ classifiers = [
     "Topic :: System :: Monitoring",
     "License :: OSI Approved :: MIT License",
     "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.9",
     "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
     "Operating System :: OS Independent",
     "Framework :: AsyncIO",
 ]
-requires-python = ">=3.9"
+requires-python = ">=3.10"
 dependencies = [
+    "fastmcp>=2.10.6",
+    "httpx[http2]>=0.27.0",
     "mcp>=1.10.1",
-    "aiohttp>=3.8.0,<4.0.0",
-    "urllib3>=1.26.0,<3.0.0",
     "pyjwt>=2.8.0",
     "certifi>=2021.0.0",
     "python-dateutil>=2.8.2",
     "python-dotenv>=0.19.0,<2.0.0",
     "pydantic>=1.10.0,<3.0.0",
     "packaging>=21.0",
+    "psutil>=5.9.0",
 ]
 
 [project.optional-dependencies]
