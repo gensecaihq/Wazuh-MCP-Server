@@ -10,8 +10,10 @@ from .__version__ import __version__, __author__, __email__
 # Optional imports that may not be available
 try:
     from .config import WazuhConfig
-    from .main import WazuhMCPServer
+    # Import from server.py instead of main.py for v2.0.0
+    # The WazuhMCPServer class is not defined in main.py anymore
     _imports_available = True
+    WazuhMCPServer = None  # Not available in current structure
 except ImportError:
     # Dependencies not available
     WazuhConfig = None
