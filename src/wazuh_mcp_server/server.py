@@ -158,7 +158,12 @@ async def wazuh_api_request(
     rate_limiter = await get_rate_limiter()
     
     # Apply rate limiting
-    await rate_limiter.acquire()
+    if not await rate_limiter.acquire():
+        # Rate limit exceeded, wait for reset
+        reset_time = await rate_limiter.time_until_reset()
+        if ctx:
+            await ctx.warning(f"Rate limit exceeded, waiting {reset_time:.1f}s")
+        await asyncio.sleep(min(reset_time, 5.0))  # Cap wait time at 5 seconds
     
     url = f"{config.base_url}{endpoint}"
     auth = (config.username, config.password)
@@ -1424,7 +1429,7 @@ async def initialize_tool_factory():
                 tool_name = tool_def.name
                 
                 # Create a dynamic handler function for this tool
-                async def create_tool_handler(tool_name_capture):
+                def create_tool_handler(tool_name_capture):
                     async def tool_handler(arguments: Dict[str, Any]):
                         """Dynamic tool handler that routes to the tool factory."""
                         try:
@@ -1440,16 +1445,17 @@ async def initialize_tool_factory():
                     return tool_handler
                 
                 # Create the handler with captured tool name
-                handler = await create_tool_handler(tool_name)
+                handler = create_tool_handler(tool_name)
                 
-                # Create FunctionTool instance
+                # Create FunctionTool instance with proper schema
                 function_tool = FunctionTool.from_function(
                     fn=handler,
                     name=tool_def.name,
-                    description=tool_def.description
+                    description=tool_def.description,
+                    output_schema={"type": "object", "properties": {"result": {"type": "object"}}}
                 )
                 
-                # Override the parameters to match the original tool definition
+                # Set the parameters to match the original tool definition
                 function_tool.parameters = tool_def.inputSchema
                 
                 # Add tool to FastMCP's tool manager

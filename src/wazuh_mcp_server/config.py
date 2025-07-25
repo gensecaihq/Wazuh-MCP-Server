@@ -7,7 +7,14 @@ from enum import Enum
 from typing import Optional
 from pathlib import Path
 from .utils.pydantic_compat import BaseModel, Field, validator
-from dotenv import load_dotenv
+
+# Graceful dotenv import with fallback
+try:
+    from dotenv import load_dotenv
+except ImportError:
+    def load_dotenv(*args, **kwargs):
+        """Fallback load_dotenv when python-dotenv is not available."""
+        pass
 
 # Import cross-platform utilities
 try:
