@@ -1,4 +1,4 @@
-# Wazuh MCP Server - Production Ready
+# Wazuh MCP Server - Enhanced STDIO with FastMCP
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
@@ -6,16 +6,16 @@
 [![Wazuh Compatible](https://img.shields.io/badge/Wazuh-4.8%2B-orange.svg)](https://wazuh.com/)
 [![Production Ready](https://img.shields.io/badge/status-production%20ready-brightgreen.svg)](https://github.com/gensecaihq/Wazuh-MCP-Server)
 
-A **single, robust, production-ready MCP server** built with FastMCP framework that provides AI-powered security operations through Wazuh SIEM integration. This is a clean, unified implementation focused on production deployment.
+An **enhanced STDIO MCP server** built with FastMCP framework that provides AI-powered security operations through Wazuh SIEM integration. This version offers improved performance and modern architecture while maintaining full Claude Desktop compatibility via STDIO transport.
 
 ## ✨ Key Features
 
+- **📱 Claude Desktop Compatible**: Uses STDIO transport - same as main branch
+- **⚡ FastMCP Framework**: Built on FastMCP 2.10.6+ for enhanced performance  
 - **🔍 AI-Powered Security**: Advanced threat analysis using Claude models
-- **🛡️ Production-Ready**: Comprehensive error handling, logging, and monitoring
-- **⚡ FastMCP Framework**: Built on the latest FastMCP 2.10.6+ for enhanced performance
-- **🔐 Security-First**: Input validation, rate limiting, and security audit trails
-- **📊 Real-Time Monitoring**: Health checks, metrics collection, and alerting
-- **🎯 Comprehensive Tools**: Complete Wazuh SIEM integration suite
+- **🛡️ Enhanced Reliability**: Improved error handling and resource management
+- **🏗️ Modern Architecture**: Clean, async-first design patterns
+- **🎯 Drop-in Upgrade**: Enhanced version of main branch with same compatibility
 
 <img width="797" height="568" alt="claude0mcp-wazuh" src="https://github.com/user-attachments/assets/458d3c94-e1f9-4143-a1a4-85cb629287d4" />
 
@@ -61,8 +61,8 @@ Add to your Claude Desktop config:
 {
   "mcpServers": {
     "wazuh": {
-      "command": "python3",
-      "args": ["/full/path/to/Wazuh-MCP-Server/wazuh-mcp-server"]
+      "command": "python3", 
+      "args": ["/full/path/to/Wazuh-MCP-Server/wazuh-mcp-server", "--stdio"]
     }
   }
 }
@@ -74,21 +74,47 @@ Start asking Claude about your Wazuh security data with AI-powered insights!
 
 ---
 
-## 🏗️ **Production Architecture**
+## 🔀 **Branch Comparison**
+
+### vs. Main Branch (v2.0.0)
+| Feature | Main Branch | v2-fastmcp (This Branch) |
+|---------|-------------|---------------------------|
+| **Transport** | STDIO | STDIO (same) |
+| **Claude Desktop** | ✅ Compatible | ✅ Compatible |
+| **Python Version** | 3.9+ | 3.10+ |
+| **Framework** | Standard MCP | FastMCP 2.10.6+ |
+| **Performance** | Good | Enhanced |
+| **Architecture** | Traditional | Modern async |
+| **Error Handling** | Standard | Enhanced |
+
+### vs. v3-fastmcp-remote Branch
+| Feature | v2-fastmcp (This Branch) | v3-fastmcp-remote |
+|---------|---------------------------|-------------------|
+| **Transport** | STDIO | HTTP |
+| **Deployment** | Local process | Docker container |
+| **Claude Desktop** | ✅ Direct | 🌐 Remote connection |
+| **Multi-client** | ❌ Single | ✅ Multiple clients |
+| **Enterprise Security** | Basic | Advanced (JWT, etc.) |
+
+> **Use this branch if**: You want enhanced performance and modern architecture while keeping the same STDIO compatibility as the main branch for Claude Desktop.
+
+---
+
+## 🏗️ **Enhanced STDIO Architecture**
 
 ### ✅ **Core Features**
+- **STDIO Transport**: Same transport as main branch - full Claude Desktop compatibility
 - **FastMCP Framework**: Built on FastMCP 2.10.6+ for enhanced performance
-- **Production-Grade**: Comprehensive error handling, logging, and monitoring
-- **Security-First**: Input validation, rate limiting, and audit trails
-- **AI-Powered**: Advanced threat analysis using Claude models
-- **Real-Time Monitoring**: Health checks and performance metrics
+- **Enhanced Reliability**: Improved error handling and resource management
+- **Modern Patterns**: Clean async architecture with better memory management
+- **Drop-in Upgrade**: Enhanced version of main branch with same interface
 
 ### 🔧 **Technical Stack**
-- **Framework**: FastMCP 2.10.6+ with HTTP/2 support
-- **Transport**: STDIO (standard MCP protocol)
+- **Framework**: FastMCP 2.10.6+ for enhanced async operations
+- **Transport**: STDIO (identical to main branch)
 - **Platform**: Cross-platform Python 3.10+
-- **Dependencies**: Minimal, production-optimized
-- **Architecture**: Single unified server implementation
+- **Dependencies**: Optimized for FastMCP performance
+- **Architecture**: Modern async-first implementation
 
 ### 🛡️ **Security & Reliability**
 - **Error Handling**: Graceful degradation with retry logic
