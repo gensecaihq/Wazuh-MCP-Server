@@ -1,8 +1,9 @@
 # Production Wazuh MCP Server Dependencies
 # Optimized for Docker deployment and production use with pinned versions
+# FastMCP-compliant dependencies following official gofastmcp.com standards
 
-# FastMCP Framework - Core MCP capabilities
-fastmcp==2.11.0
+# FastMCP Framework - Core MCP capabilities (Latest stable version)
+fastmcp>=2.11.0
 
 # HTTP Client - Wazuh API communication with HTTP/2 support
 httpx[http2]==0.28.0

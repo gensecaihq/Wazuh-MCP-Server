@@ -55,20 +55,24 @@ if transport_mode:
 
 # Import and run the server
 try:
-    from wazuh_mcp_server.server import main
+    from wazuh_mcp_server.server import mcp, initialize_server
     import asyncio
+    import uvicorn
     
     if __name__ == "__main__":
-        # Display transport mode info
+        # Initialize server components
+        asyncio.run(initialize_server())
+        
+        # Display transport mode info and start server
         mode = os.getenv("MCP_TRANSPORT", "stdio").lower()
         if mode == "http":
-            host = os.getenv("MCP_HOST", "localhost")
-            port = os.getenv("MCP_PORT", "3000")
-            print(f"Starting Wazuh MCP Server in HTTP/SSE mode on {host}:{port}")
+            host = os.getenv("MCP_HOST", "0.0.0.0")
+            port = int(os.getenv("MCP_PORT", "3000"))
+            print(f"🌐 Starting Wazuh MCP Server in HTTP/SSE mode on {host}:{port}")
+            uvicorn.run(mcp.create_app(), host=host, port=port, log_level="info")
         else:
-            print("Starting Wazuh MCP Server in STDIO mode for Claude Desktop")
-        
-        asyncio.run(main())
+            print("📱 Starting Wazuh MCP Server in STDIO mode for Claude Desktop")
+            mcp.run()
         
 except ImportError as e:
     print(f"ERROR: Failed to import server module: {e}")
