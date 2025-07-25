@@ -1,10 +1,14 @@
 # Wazuh MCP Server - Enhanced STDIO with FastMCP
 
+> **⚠️ NOT STABLE - TESTING NEEDED** ⚠️
+> 
+> This branch uses FastMCP framework and requires extensive testing before production use. Use the `main` branch for stable deployments.
+
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
 [![FastMCP](https://img.shields.io/badge/FastMCP-2.10.6+-green.svg)](https://github.com/anthropics/fastmcp)
 [![Wazuh Compatible](https://img.shields.io/badge/Wazuh-4.8%2B-orange.svg)](https://wazuh.com/)
-[![Production Ready](https://img.shields.io/badge/status-production%20ready-brightgreen.svg)](https://github.com/gensecaihq/Wazuh-MCP-Server)
+[![Testing Needed](https://img.shields.io/badge/status-testing%20needed-orange.svg)](https://github.com/gensecaihq/Wazuh-MCP-Server)
 
 An **enhanced STDIO MCP server** built with FastMCP framework that provides AI-powered security operations through Wazuh SIEM integration. This version offers improved performance and modern architecture while maintaining full Claude Desktop compatibility via STDIO transport.
 
