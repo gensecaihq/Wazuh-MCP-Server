@@ -1,36 +1,44 @@
-# Production-Ready Wazuh MCP Server Dependencies
-# Requires Python >=3.10
-# Version pinned for production stability and security
+# Production Wazuh MCP Server Dependencies
+# Optimized for Docker deployment and production use with pinned versions
 
-# FastMCP framework for enhanced MCP capabilities (supports both stdio and HTTP/SSE)
-fastmcp==2.10.6
+# FastMCP Framework - Core MCP capabilities
+fastmcp==2.11.0
 
-# HTTP client for Wazuh API (production-grade with HTTP/2 support)
-httpx[http2]==0.28.1
+# HTTP Client - Wazuh API communication with HTTP/2 support
+httpx[http2]==0.28.0
+h2==4.1.0
+hypercorn==0.17.3
 
-# Core MCP dependencies (if needed separately)
-mcp==1.12.2
+# Data Validation and Parsing
+pydantic==2.10.3
+pydantic-core==2.27.1
 
-# Web server dependencies for HTTP/SSE transport
-fastapi==0.116.1  # For HTTP transport server
-uvicorn==0.35.0   # ASGI server for FastAPI
-starlette==0.47.2 # Core web framework
+# Security and Authentication
+pyjwt==2.8.0
+certifi==2024.8.30
+cryptography==43.0.3
 
-# Essential utilities
-python-dateutil==2.9.0.post0
-python-dotenv==1.1.1
+# Configuration and Environment
+python-dotenv==1.0.1
 
-# Data validation and parsing
-pydantic==2.11.7
+# Date/Time Utilities
+python-dateutil==2.8.2
 
-# Security and authentication
-pyjwt==2.10.1
-certifi==2025.7.14
+# System Information
+psutil==6.1.0
 
-# System utilities
-packaging==25.0
-psutil==7.0.0  # For system monitoring
+# Performance optimization for production
+uvloop==0.19.0; sys_platform != "win32"  # Better event loop for Linux/macOS
+orjson==3.10.12  # Faster JSON processing
 
-# Optional production enhancements
-# uvloop>=0.17.0  # For improved async performance on Linux/macOS
-# orjson>=3.8.0   # For faster JSON parsing
+# Additional production dependencies
+typing-extensions==4.12.2
+anyio==4.6.2.post1
+sniffio==1.3.1
+idna==3.10
+
+# Logging and monitoring
+structlog==24.4.0
+
+# Security hardening
+secure==0.3.0

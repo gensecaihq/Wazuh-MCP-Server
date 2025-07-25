@@ -57,7 +57,39 @@ A **production-grade FastMCP-powered server** that provides AI-enhanced security
 
 ---
 
-## 🚀 Installation
+## 🚀 Quick Start (Interactive Setup)
+
+### 🎯 One-Command Setup
+
+```bash
+# Clone and run interactive configuration
+git clone https://github.com/gensecaihq/Wazuh-MCP-Server.git
+cd Wazuh-MCP-Server
+python3 configure.py
+```
+
+The interactive configuration will guide you through:
+- 🖥️ Wazuh server connection details
+- 🔐 SSL/TLS security settings
+- 📡 Transport mode (Claude Desktop vs HTTP)
+- ⚡ Performance optimization
+- 🌐 External API integrations
+- 📊 Logging and monitoring
+
+### 🚀 Deploy After Configuration
+
+```bash
+# Build and start with Docker Compose (recommended)
+docker compose up -d
+
+# Check status
+docker compose ps
+docker compose logs -f wazuh-mcp-server
+```
+
+---
+
+## 📖 Manual Installation
 
 ### Method 1: Docker Deployment (Recommended)
 
@@ -67,37 +99,25 @@ git clone https://github.com/gensecaihq/Wazuh-MCP-Server.git
 cd Wazuh-MCP-Server
 ```
 
-#### Step 2: Choose Configuration Template
-
-**For Single Wazuh Server:**
+#### Step 2: Interactive Configuration (Recommended)
 ```bash
+python3 configure.py
+```
+
+**OR Manual Configuration:**
+
+Copy and customize configuration template:
+```bash
+# For basic setup
 cp .env.docker.template .env
+
+# For production with all features
+cp .env.production.template .env
 ```
 
-**For Distributed Setup (Server + Indexer):**
-```bash
-cp .env.production .env
-```
+Edit `.env` with your specific Wazuh configuration
 
-#### Step 3: Configure Environment
-Edit `.env` with your Wazuh details:
-
-```bash
-# Required: Wazuh Server Configuration
-WAZUH_HOST=your-wazuh-server.com
-WAZUH_USER=your-api-user  
-WAZUH_PASS=your-secure-password
-
-# Optional: Distributed Wazuh Indexer (if separate)
-WAZUH_INDEXER_HOST=your-indexer-server.com
-WAZUH_INDEXER_USER=indexer-user
-WAZUH_INDEXER_PASS=indexer-password
-
-# Transport Mode
-MCP_TRANSPORT=stdio  # or 'http' for remote access
-```
-
-#### Step 4: Build and Deploy
+#### Step 3: Build and Deploy
 ```bash
 # Build production image
 docker build -t wazuh-mcp-server:latest .
