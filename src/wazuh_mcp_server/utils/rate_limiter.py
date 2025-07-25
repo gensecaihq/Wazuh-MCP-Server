@@ -243,22 +243,6 @@ class RateLimiter:
 global_rate_limiter = GlobalRateLimiter()
 
 
-class RateLimiter:
-    """Simple rate limiter for backward compatibility."""
-    
-    def __init__(self, max_requests: int = 100, time_window: int = 60):
-        self.config = RateLimitConfig(max_requests, time_window)
-        self.limiter = SlidingWindowRateLimiter(self.config)
-    
-    async def acquire(self, identifier: str = "global") -> bool:
-        """Acquire a rate limit slot."""
-        return await self.limiter.is_allowed(identifier)
-    
-    async def time_until_reset(self, identifier: str = "global") -> float:
-        """Get time until rate limit resets."""
-        return await self.limiter.time_until_reset(identifier)
-
-
 def rate_limit(endpoint: str, identifier_func=None):
     """Decorator for rate limiting functions."""
     def decorator(func):
