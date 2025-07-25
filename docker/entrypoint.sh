@@ -31,6 +31,24 @@ if [[ -z "${WAZUH_PASS}" ]]; then
     exit 1
 fi
 
+# Validate WAZUH_HOST format (basic hostname/IP validation)
+if [[ ! "${WAZUH_HOST}" =~ ^[a-zA-Z0-9][a-zA-Z0-9.-]*[a-zA-Z0-9]$ ]] && [[ ! "${WAZUH_HOST}" =~ ^[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}$ ]]; then
+    echo "❌ ERROR: WAZUH_HOST format appears invalid: ${WAZUH_HOST}"
+    echo "   Use hostname like: wazuh.company.com or IP like: 192.168.1.100"
+    exit 1
+fi
+
+# Validate port numbers if provided
+if [[ -n "${WAZUH_PORT}" ]] && [[ ! "${WAZUH_PORT}" =~ ^[0-9]+$ ]] || [[ "${WAZUH_PORT}" -lt 1 ]] || [[ "${WAZUH_PORT}" -gt 65535 ]]; then
+    echo "❌ ERROR: WAZUH_PORT must be a valid port number (1-65535): ${WAZUH_PORT}"
+    exit 1
+fi
+
+if [[ -n "${MCP_PORT}" ]] && [[ ! "${MCP_PORT}" =~ ^[0-9]+$ ]] || [[ "${MCP_PORT}" -lt 1 ]] || [[ "${MCP_PORT}" -gt 65535 ]]; then
+    echo "❌ ERROR: MCP_PORT must be a valid port number (1-65535): ${MCP_PORT}"
+    exit 1
+fi
+
 echo "✅ Required Wazuh configuration found"
 echo "   Host: ${WAZUH_HOST}:${WAZUH_PORT:-55000}"
 echo "   User: ${WAZUH_USER}"

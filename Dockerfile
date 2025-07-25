@@ -3,7 +3,7 @@
 # Multi-stage build for minimal production image
 
 # Build stage
-FROM python:3.11-slim as builder
+FROM python:3.10-slim as builder
 
 # Set build arguments
 ARG BUILD_DATE
@@ -15,11 +15,14 @@ LABEL version="${VERSION}"
 LABEL description="FastMCP-powered Wazuh SIEM integration server with dual transport support"
 LABEL build-date="${BUILD_DATE}"
 
-# Install system dependencies for building
-RUN apt-get update && apt-get install -y --no-install-recommends \
+# Install system dependencies for building with security updates
+RUN apt-get update && \
+    apt-get upgrade -y && \
+    apt-get install -y --no-install-recommends \
     gcc \
     libc6-dev \
-    && rm -rf /var/lib/apt/lists/*
+    && rm -rf /var/lib/apt/lists/* \
+    && apt-get clean
 
 # Set working directory
 WORKDIR /build
@@ -31,11 +34,14 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir --user -r requirements.txt
 
 # Production stage
-FROM python:3.11-slim
+FROM python:3.10-slim
 
-# Install runtime dependencies
-RUN apt-get update && apt-get install -y --no-install-recommends \
+# Install runtime dependencies with security updates
+RUN apt-get update && \
+    apt-get upgrade -y && \
+    apt-get install -y --no-install-recommends \
     curl \
+    ca-certificates \
     && rm -rf /var/lib/apt/lists/* \
     && apt-get clean
 

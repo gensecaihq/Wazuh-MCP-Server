@@ -61,11 +61,7 @@ _server_start_time: Optional[datetime] = None
 _health_status: Dict[str, Any] = {"status": "starting", "checks": {}}
 
 # Create FastMCP server instance
-mcp = FastMCP(
-    name="Wazuh MCP Server",
-    version=__version__,
-    description="Production-ready AI-powered security operations with Wazuh SIEM"
-)
+mcp = FastMCP("Wazuh MCP Server")
 
 # Performance metrics
 _metrics = {

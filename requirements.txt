@@ -1,34 +1,35 @@
 # Production-Ready Wazuh MCP Server Dependencies
 # Requires Python >=3.10
+# Version pinned for production stability and security
 
 # FastMCP framework for enhanced MCP capabilities (supports both stdio and HTTP/SSE)
-fastmcp>=2.10.6
+fastmcp==2.10.6
 
 # HTTP client for Wazuh API (production-grade with HTTP/2 support)
-httpx[http2]>=0.27.0
+httpx[http2]==0.28.1
 
 # Core MCP dependencies (if needed separately)
-mcp>=1.10.1
+mcp==1.12.2
 
 # Web server dependencies for HTTP/SSE transport
-fastapi>=0.104.0  # For HTTP transport server
-uvicorn>=0.24.0   # ASGI server for FastAPI
-starlette>=0.27.0 # Core web framework
+fastapi==0.116.1  # For HTTP transport server
+uvicorn==0.35.0   # ASGI server for FastAPI
+starlette==0.47.2 # Core web framework
 
 # Essential utilities
-python-dateutil>=2.8.2
-python-dotenv>=0.19.0,<2.0.0
+python-dateutil==2.9.0.post0
+python-dotenv==1.1.1
 
 # Data validation and parsing
-pydantic>=1.10.0,<3.0.0
+pydantic==2.11.7
 
 # Security and authentication
-pyjwt>=2.8.0
-certifi>=2021.0.0
+pyjwt==2.10.1
+certifi==2025.7.14
 
 # System utilities
-packaging>=21.0
-psutil>=5.9.0  # For system monitoring
+packaging==25.0
+psutil==7.0.0  # For system monitoring
 
 # Optional production enhancements
 # uvloop>=0.17.0  # For improved async performance on Linux/macOS

@@ -122,7 +122,7 @@ class ProductionValidator:
                     import dotenv
                 elif import_name == "pydantic":
                     import pydantic
-                elif import_name == "jwt":
+                elif import_name == "pyjwt":
                     import jwt
                 elif import_name == "certifi":
                     import certifi
@@ -226,7 +226,18 @@ class ProductionValidator:
             
             missing_vars = []
             for var in required_vars:
-                if f"{var}=" not in env_content or f"{var}=your-" in env_content or f"{var}=" in env_content.replace(f"{var}=", f"{var}=").split('\n')[0].endswith('='):
+                # Check if variable exists and has a value
+                var_line = None
+                for line in env_content.split('\n'):
+                    if line.strip().startswith(f"{var}=") and not line.strip().startswith('#'):
+                        var_line = line.strip()
+                        break
+                
+                if var_line is None:
+                    # Variable not found
+                    missing_vars.append(var)
+                elif var_line == f"{var}=" or "your-" in var_line:
+                    # Variable found but has placeholder or empty value
                     missing_vars.append(var)
             
             if missing_vars:

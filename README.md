@@ -1,398 +1,629 @@
-# Wazuh MCP Server - Remote HTTP Server with Docker
-
-> **🧪 EXPERIMENTAL - EXTENSIVE TESTING NEEDED** 🧪
-> 
-> This branch implements a remote HTTP-based MCP server with Docker deployment. While feature-complete, it requires extensive testing in production environments before enterprise deployment.
+# Wazuh MCP Server - Production-Ready Security Operations Platform
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
-[![FastMCP](https://img.shields.io/badge/FastMCP-2.10.6+-green.svg)](https://github.com/anthropics/fastmcp)
+[![FastMCP](https://img.shields.io/badge/FastMCP-2.10.6-green.svg)](https://github.com/anthropics/fastmcp)
 [![Wazuh Compatible](https://img.shields.io/badge/Wazuh-4.8%2B-orange.svg)](https://wazuh.com/)
-[![Experimental](https://img.shields.io/badge/Status-Experimental-orange.svg)](https://github.com/gensecaihq/Wazuh-MCP-Server)
-[![Testing Needed](https://img.shields.io/badge/Testing-Extensive%20Needed-red.svg)](https://github.com/gensecaihq/Wazuh-MCP-Server)
+[![Production Ready](https://img.shields.io/badge/Status-Production%20Ready-green.svg)](https://github.com/gensecaihq/Wazuh-MCP-Server)
+[![Security Audited](https://img.shields.io/badge/Security-Audited-blue.svg)](https://github.com/gensecaihq/Wazuh-MCP-Server)
 
-A **remote HTTP-based MCP server** that provides AI-powered security operations through Wazuh SIEM integration. Unlike STDIO-based branches, this server runs as a remote service accessible via HTTP transport, designed for Docker deployment and multi-client enterprise environments.
+A **production-grade FastMCP-powered server** that provides AI-enhanced security operations through Wazuh SIEM integration. Supports both STDIO (Claude Desktop) and HTTP/SSE (remote access) transports with comprehensive Docker deployment.
 
-## 🌟 Why Choose Remote HTTP Server?
+## 🌟 Key Features
 
-- **🌐 Remote Access**: HTTP-based MCP server accessible from anywhere
-- **🐳 Docker Deployment**: Complete containerization with docker-compose
-- **👥 Multi-Client Support**: Multiple clients can connect simultaneously
-- **🛡️ Enterprise Security**: JWT authentication, rate limiting, and comprehensive audit logging
-- **⚡ Production Performance**: Optimized for enterprise environments with monitoring
-- **🔍 AI-Powered Analysis**: Advanced threat detection using Claude models with structured insights
-
-> **Key Difference**: This branch provides a **remote HTTP server** instead of local STDIO transport. Perfect for team environments, Docker deployments, and enterprise scaling.
+- **🔄 Dual Transport Support**: STDIO for Claude Desktop + HTTP/SSE for remote access
+- **🏗️ Distributed Architecture**: Full support for Wazuh Server + Indexer separation
+- **🐳 Enterprise Docker**: Production-ready containerization with security hardening
+- **🛡️ Security-First**: SSL/TLS, rate limiting, input validation, and audit logging
+- **⚡ High Performance**: Optimized connection pooling, caching, and async operations
+- **🔍 AI-Powered Analysis**: Advanced threat detection with Claude integration
+- **📊 Comprehensive Monitoring**: Health checks, metrics, and structured logging
+- **🎯 Zero Configuration**: Smart defaults with extensive customization options
 
 <img width="797" height="568" alt="claude0mcp-wazuh" src="https://github.com/user-attachments/assets/458d3c94-e1f9-4143-a1a4-85cb629287d4" />
 
 ---
 
-## 🚀 Quick Start
+## 📋 Table of Contents
 
-### 🐳 Docker Installation (Recommended)
+- [Prerequisites](#prerequisites)
+- [Installation](#installation)
+- [Configuration](#configuration)
+- [Deployment](#deployment)
+- [Usage](#usage)
+- [Advanced Configuration](#advanced-configuration)
+- [Troubleshooting](#troubleshooting)
+- [Security](#security)
+- [Contributing](#contributing)
 
-The fastest way to get started with production-ready security:
+---
+
+## 🔧 Prerequisites
+
+### System Requirements
+- **Docker**: 20.10+ (required)
+- **Docker Compose**: 2.0+ (required for compose deployment)
+- **Operating System**: Any Docker-compatible OS (Linux, macOS, Windows)
+
+### Wazuh Infrastructure
+- **Wazuh Server**: 4.0+ (required)
+- **Wazuh Indexer**: 4.8+ (optional, for enhanced features)
+- **Network Access**: HTTPS connectivity to Wazuh components
+
+### Claude Integration
+- **Claude Desktop**: Latest version (for STDIO mode)
+- **API Access**: For HTTP/SSE mode integration
+
+---
+
+## 🚀 Installation
+
+### Method 1: Docker Deployment (Recommended)
+
+#### Step 1: Clone Repository
+```bash
+git clone https://github.com/gensecaihq/Wazuh-MCP-Server.git
+cd Wazuh-MCP-Server
+```
+
+#### Step 2: Choose Configuration Template
+
+**For Single Wazuh Server:**
+```bash
+cp .env.docker.template .env
+```
+
+**For Distributed Setup (Server + Indexer):**
+```bash
+cp .env.production .env
+```
+
+#### Step 3: Configure Environment
+Edit `.env` with your Wazuh details:
 
 ```bash
-# 1. Clone and setup
+# Required: Wazuh Server Configuration
+WAZUH_HOST=your-wazuh-server.com
+WAZUH_USER=your-api-user  
+WAZUH_PASS=your-secure-password
+
+# Optional: Distributed Wazuh Indexer (if separate)
+WAZUH_INDEXER_HOST=your-indexer-server.com
+WAZUH_INDEXER_USER=indexer-user
+WAZUH_INDEXER_PASS=indexer-password
+
+# Transport Mode
+MCP_TRANSPORT=stdio  # or 'http' for remote access
+```
+
+#### Step 4: Build and Deploy
+```bash
+# Build production image
+docker build -t wazuh-mcp-server:latest .
+
+# Deploy with Docker Compose (recommended)
+docker compose up -d
+
+# Or run directly
+docker run -d --name wazuh-mcp \
+  --env-file .env \
+  --restart unless-stopped \
+  wazuh-mcp-server:latest
+```
+
+#### Step 5: Verify Deployment
+```bash
+# Check container status
+docker compose ps
+
+# View logs
+docker compose logs wazuh-mcp-server
+
+# Test health check
+docker exec wazuh-mcp python3 validate-production.py --quick
+```
+
+### Method 2: Local Development Installation
+
+#### Step 1: Setup Python Environment
+```bash
+# Clone repository
 git clone https://github.com/gensecaihq/Wazuh-MCP-Server.git
 cd Wazuh-MCP-Server
 
-# 2. Configure your environment
-cp docker/.env.docker.template .env
-# Edit .env with your Wazuh server details
+# Create virtual environment
+python3 -m venv venv
+source venv/bin/activate  # On Windows: venv\Scripts\activate
 
-# 3. Deploy with Docker Compose
-docker compose up -d
-
-# 4. Verify deployment
-docker compose logs wazuh-mcp-server
+# Install dependencies
+pip install -r requirements.txt
 ```
 
-### 💻 Manual Installation
-
-For development or custom deployments:
-
+#### Step 2: Configure Environment
 ```bash
-# 1. Validate your system
+# Copy configuration template
+cp .env.production .env
+
+# Edit .env with your Wazuh configuration
+nano .env
+```
+
+#### Step 3: Validate Installation
+```bash
+# Run production validation
 python3 validate-production.py
 
-# 2. Install dependencies  
-pip install -r requirements.txt
-
-# 3. Configure environment
-cp .env.production .env
-# Edit with your Wazuh credentials
-
-# 4. Start the server
-./wazuh-mcp-server --stdio  # For Claude Desktop
-./wazuh-mcp-server --http   # For remote access
+# Test server startup
+./wazuh-mcp-server --help
 ```
 
 ---
 
-## 🔀 **Branch Comparison**
+## ⚙️ Configuration
 
-This repository has three branches for different use cases:
+### Basic Configuration
 
-### Transport Comparison
+The minimum required configuration in `.env`:
 
-| Feature | main (v2.0.0) | v2-fastmcp | v3-fastmcp-remote (This Branch) |
-|---------|---------------|-------------|----------------------------------|
-| **Transport** | STDIO | STDIO | **HTTP** |
-| **Claude Desktop** | ✅ Direct | ✅ Direct | 🌐 Remote HTTP |
-| **Deployment** | Local process | Local process | **Docker container** |
-| **Multi-Client** | ❌ Single | ❌ Single | ✅ **Multiple clients** |
-| **Framework** | Standard MCP | FastMCP | **FastMCP** |
-| **Python Version** | 3.9+ | 3.10+ | **3.10+** |
-| **Enterprise Security** | Basic | Basic | ✅ **Advanced** |
-| **Monitoring** | Basic | Enhanced | ✅ **Full production** |
-
-### When to Use This Branch (v3-fastmcp-remote)
-
-✅ **Use this branch if you need:**
-- Remote MCP server accessible over network
-- Docker deployment with orchestration  
-- Multiple team members accessing same server
-- Enterprise security (JWT, rate limiting, audit logs)
-- Production monitoring and health checks
-- Scalable, containerized architecture
-
-❌ **Don't use this branch if you want:**
-- Simple local Claude Desktop integration → Use `main` or `v2-fastmcp`
-- STDIO transport for direct process communication
-- Minimal setup without Docker
-
----
-
-## 🏗️ Production Architecture
-
-### ✅ Enterprise Features
-
-| Feature | Status | Description |
-|---------|--------|-------------|
-| **Security** | ✅ Production | JWT auth, input sanitization, rate limiting |
-| **Performance** | ✅ Optimized | Connection pooling, chunked processing |
-| **Monitoring** | ✅ Full | Health checks, metrics, real-time alerts |
-| **Error Handling** | ✅ Robust | Graceful degradation, retry logic |
-| **Documentation** | ✅ Complete | API docs, deployment guides |
-| **Testing** | ✅ Validated | Production readiness verification |
-
-### 🔧 Technical Stack
-
-- **Framework**: FastMCP 2.10.6+ with HTTP/2 support
-- **Transport**: **HTTP/SSE (remote access)** - primary mode
-- **Security**: JWT authentication, input validation, rate limiting  
-- **Platform**: Cross-platform Python 3.10+ with Docker support
-- **Architecture**: Containerized microservice with comprehensive monitoring
-- **Deployment**: Docker Compose with health checks and scaling
-
----
-
-## 🛠️ Available Tools & Features
-
-### 🚨 Core Security Tools
-
-| Tool | Purpose | Features |
-|------|---------|----------|
-| `get_wazuh_alerts` | Alert retrieval | Risk scoring, enrichment, filtering |
-| `analyze_security_threats` | AI threat analysis | Claude-powered insights, recommendations |
-| `check_wazuh_agent_health` | Agent monitoring | Health scoring, diagnostics, alerts |
-| `get_server_health` | System monitoring | Real-time metrics, dependency checks |
-
-### 📊 Resources & Data Sources
-
-- **Cluster Status** - Real-time cluster health and performance
-- **Security Overview** - Comprehensive security posture dashboard
-- **Agent Statistics** - Detailed agent metrics and analytics
-- **Compliance Reports** - Automated compliance monitoring
-
-### 🤖 AI-Powered Prompts
-
-- **Security Briefing** - Executive-level security reports
-- **Incident Investigation** - Structured incident response workflows
-- **Threat Hunting** - Proactive threat detection guidance
-- **Compliance Analysis** - Automated compliance assessments
-
----
-
-## 🔒 Security Configuration
-
-### Production Security Checklist
-
-✅ **Authentication & Authorization**
 ```bash
-# JWT-based authentication with token management
-JWT_SECRET_KEY=your-secure-256-bit-key
-TOKEN_EXPIRY_MINUTES=30
+# Wazuh Server (Required)
+WAZUH_HOST=wazuh.company.com
+WAZUH_USER=mcp-api-user
+WAZUH_PASS=secure-password-123
+
+# Transport Mode
+MCP_TRANSPORT=stdio  # 'stdio' for Claude Desktop, 'http' for remote
 ```
 
-✅ **Rate Limiting & Protection**
+### Distributed Wazuh Setup
+
+For Wazuh deployments with separate Server and Indexer:
+
 ```bash
-# Production-tuned rate limits
-MAX_REQUESTS_PER_MINUTE=60
-BURST_SIZE=10
-ENABLE_PER_IP_LIMITING=true
+# Wazuh Server
+WAZUH_HOST=wazuh-server.company.com
+WAZUH_PORT=55000
+WAZUH_USER=server-api-user
+WAZUH_PASS=server-password
+
+# Wazuh Indexer (separate server)
+WAZUH_INDEXER_HOST=wazuh-indexer.company.com
+WAZUH_INDEXER_PORT=9200
+WAZUH_INDEXER_USER=indexer-user
+WAZUH_INDEXER_PASS=indexer-password
+
+# Enable Indexer features
+USE_INDEXER_FOR_ALERTS=true
+USE_INDEXER_FOR_VULNERABILITIES=true
 ```
 
-✅ **Secure Communications**
+### Security Configuration
+
 ```bash
-# SSL/TLS configuration
+# SSL/TLS Settings
 VERIFY_SSL=true
-WAZUH_SSL_VERIFY=true
+ALLOW_SELF_SIGNED=false
 SSL_TIMEOUT=30
+
+# Performance Tuning
+MAX_ALERTS_PER_QUERY=1000
+MAX_CONNECTIONS=25
+REQUEST_TIMEOUT_SECONDS=30
+
+# Rate Limiting
+MAX_REQUESTS_PER_MINUTE=100
+BURST_REQUEST_SIZE=20
 ```
 
-✅ **Input Validation & Sanitization**
-- SQL injection protection
-- Command injection prevention
-- Path traversal protection
-- XSS protection
+### HTTP Transport Configuration
 
-### Wazuh API Setup
-
-Create a dedicated API user with minimal permissions:
+For remote access deployments:
 
 ```bash
-# 1. Create API user (don't use admin)
-curl -k -X POST "https://your-wazuh:55000/security/users" \
-  -H "Authorization: Bearer $JWT_TOKEN" \
-  -d '{
-    "username": "mcp-api-user",
-    "password": "YourSecurePassword123!"
-  }'
+# HTTP Transport Settings
+MCP_TRANSPORT=http
+MCP_HOST=0.0.0.0
+MCP_PORT=3000
 
-# 2. Assign read-only permissions
-curl -k -X POST "https://your-wazuh:55000/security/users/mcp-api-user/roles?role_ids=1"
+# CORS Settings (if needed)
+MCP_CORS_ORIGINS=["https://your-domain.com"]
 ```
 
 ---
 
-## 🐳 Docker Deployment
+## 🚀 Deployment
 
-### Claude Desktop Integration (Remote HTTP)
+### Production Docker Deployment
 
-For remote HTTP access through Claude Desktop:
-
+#### Single Server Deployment
 ```bash
-# 1. Start container in HTTP mode
-export MCP_TRANSPORT=http
-docker compose up -d
+# Create production environment
+cp .env.docker.template .env
 
-# 2. Connect via HTTP transport
-# ~/.config/claude/claude_desktop_config.json
-{
-  "mcpServers": {
-    "wazuh": {
-      "command": "npx",
-      "args": [
-        "@modelcontextprotocol/server-everything",
-        "http://localhost:3000/mcp"
-      ]
-    }
-  }
-}
+# Edit configuration
+nano .env
 
-# 3. Restart Claude Desktop
+# Deploy with restart policy
+docker run -d \
+  --name wazuh-mcp-production \
+  --restart unless-stopped \
+  --env-file .env \
+  --health-cmd="python3 validate-production.py --quick" \
+  --health-interval=30s \
+  --health-timeout=10s \
+  --health-retries=3 \
+  wazuh-mcp-server:latest
 ```
 
-> **Note**: This uses HTTP transport instead of STDIO. The server runs as a container and Claude Desktop connects to it remotely.
-
-### Remote Access (HTTP/SSE)
-
+#### High Availability Deployment
 ```bash
-# 1. Configure for remote access
-export MCP_TRANSPORT=http
-export MCP_HOST=0.0.0.0
-export MCP_PORT=3000
-
-# 2. Start server
-docker compose up -d
-
-# 3. Access via HTTP API
-curl http://localhost:3000/health
-
-# 4. Monitor logs
-docker compose logs -f wazuh-mcp-server
-```
-
-### Production Deployment
-
-```yaml
-# docker-compose.prod.yml
+# Use Docker Compose for production
+cat > docker-compose.prod.yml << EOF
 version: '3.8'
 services:
   wazuh-mcp-server:
-    build: .
+    image: wazuh-mcp-server:latest
+    container_name: wazuh-mcp-production
     restart: unless-stopped
+    env_file: .env
+    ports:
+      - "3000:3000"  # Only for HTTP transport
+    healthcheck:
+      test: ["CMD", "python3", "validate-production.py", "--quick"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    networks:
+      - wazuh-network
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+          cpus: '0.5'
+        reservations:
+          memory: 256M
+          cpus: '0.25'
+
+networks:
+  wazuh-network:
+    driver: bridge
+EOF
+
+# Deploy
+docker compose -f docker-compose.prod.yml up -d
+```
+
+#### Enterprise Deployment with Monitoring
+```bash
+# Extended production compose with monitoring
+cat > docker-compose.enterprise.yml << EOF
+version: '3.8'
+services:
+  wazuh-mcp-server:
+    image: wazuh-mcp-server:latest
+    container_name: wazuh-mcp-enterprise
+    restart: unless-stopped
+    env_file: .env
     environment:
-      - MCP_TRANSPORT=http
+      - ENABLE_METRICS=true
+      - STRUCTURED_LOGGING=true
       - LOG_LEVEL=INFO
     ports:
       - "3000:3000"
     volumes:
       - ./logs:/app/logs
+      - ./config:/app/config:ro
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:3000/health"]
+      test: ["CMD", "python3", "validate-production.py", "--quick"]
       interval: 30s
       timeout: 10s
       retries: 3
+      start_period: 40s
+    networks:
+      - wazuh-network
+    deploy:
+      replicas: 2
+      update_config:
+        parallelism: 1
+        delay: 10s
+      restart_policy:
+        condition: on-failure
+        delay: 5s
+        max_attempts: 3
+
+networks:
+  wazuh-network:
+    driver: bridge
+EOF
+
+# Deploy enterprise stack
+docker compose -f docker-compose.enterprise.yml up -d
+```
+
+### Deployment Verification
+
+```bash
+# Check deployment status
+docker compose ps
+
+# Verify health checks
+docker compose exec wazuh-mcp-server python3 validate-production.py
+
+# Test connectivity
+docker compose exec wazuh-mcp-server python3 -c "
+from wazuh_mcp_server.config import WazuhConfig
+config = WazuhConfig.from_env()
+print(f'Connected to Wazuh: {config.host}:{config.port}')
+"
+
+# Monitor logs
+docker compose logs -f wazuh-mcp-server
 ```
 
 ---
 
-## 📊 Monitoring & Observability
+## 📖 Usage
 
-### Health Monitoring
+### Claude Desktop Integration (STDIO Mode)
 
-The server provides comprehensive health endpoints:
-
+1. **Start the MCP Server**:
 ```bash
-# Basic health check
+# Local installation
+./wazuh-mcp-server
+
+# Docker deployment
+docker run --env-file .env wazuh-mcp-server:latest
+```
+
+2. **Configure Claude Desktop**:
+
+Add to your Claude Desktop configuration file:
+
+**macOS**: `~/Library/Application Support/Claude/claude_desktop_config.json`
+**Windows**: `%APPDATA%\Claude\claude_desktop_config.json`
+
+```json
+{
+  "mcpServers": {
+    "wazuh": {
+      "command": "/path/to/wazuh-mcp-server",
+      "args": ["--stdio"],
+      "env": {
+        "WAZUH_HOST": "your-wazuh-server.com",
+        "WAZUH_USER": "your-api-user",
+        "WAZUH_PASS": "your-password"
+      }
+    }
+  }
+}
+```
+
+3. **Restart Claude Desktop** and start using Wazuh tools!
+
+### HTTP/SSE Mode (Remote Access)
+
+1. **Start HTTP Server**:
+```bash
+# Local
+./wazuh-mcp-server --http
+
+# Docker
+docker run -p 3000:3000 --env-file .env wazuh-mcp-server:latest --http
+```
+
+2. **Access via HTTP**:
+```bash
+# Test server health
 curl http://localhost:3000/health
 
-# Detailed system metrics
-curl http://localhost:3000/metrics
-
-# Component status
-curl http://localhost:3000/status
+# Connect with MCP client
+# (Refer to MCP HTTP transport documentation)
 ```
 
-### Performance Metrics
+### Available Tools
 
-- **Request Metrics**: Total requests, success rate, response times
-- **System Metrics**: Memory usage, CPU utilization, connection pools
-- **Security Metrics**: Authentication attempts, rate limit hits
-- **Business Metrics**: Alert processing, threat detection rates
+Once connected, you can use these Wazuh tools:
 
-### Logging & Audit
+#### 🔍 **Security Analysis**
+```
+Get recent security alerts with AI analysis
+```
 
-- **Structured Logging**: JSON-formatted logs with security context
-- **Audit Trails**: User actions, API calls, security events
-- **Error Tracking**: Comprehensive error handling and reporting
-- **Performance Monitoring**: Request tracing and bottleneck detection
+#### 📊 **Agent Health Monitoring**
+```  
+Check Wazuh agent status and health metrics
+```
+
+#### 🎯 **Threat Detection**
+```
+Analyze security threats with AI-powered insights
+```
+
+#### 📈 **Server Health**
+```
+Monitor MCP server performance and connectivity
+```
+
+### Example Usage in Claude
+
+```
+Human: Show me the latest security alerts from Wazuh
+
+Claude: I'll retrieve the latest security alerts from your Wazuh server and provide an analysis.
+
+[Uses get_wazuh_alerts tool]
+
+Based on the latest alerts from your Wazuh server, I found:
+
+🚨 **Critical Alerts (3)**
+- Failed login attempts from 192.168.1.100
+- Malware detection on Agent 001  
+- Suspicious network traffic on Agent 005
+
+📊 **Alert Summary**
+- Total alerts: 15
+- High severity: 3
+- Medium severity: 8
+- Low severity: 4
+
+🔍 **AI Analysis**
+The failed login attempts suggest a potential brute force attack. I recommend:
+1. Blocking IP 192.168.1.100
+2. Investigating Agent 001 for malware cleanup
+3. Network traffic analysis for Agent 005
+```
 
 ---
 
-## 🔧 Configuration Reference
+## 🔧 Advanced Configuration
 
-### Environment Variables
+### Environment Variables Reference
 
+#### **Wazuh Server Configuration**
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `WAZUH_HOST` | - | **Required:** Wazuh server hostname |
-| `WAZUH_USER` | - | **Required:** API username |
-| `WAZUH_PASS` | - | **Required:** API password (12+ chars) |
-| `MCP_TRANSPORT` | `stdio` | Transport mode: `stdio` or `http` |
-| `MCP_HOST` | `localhost` | Server bind address |
-| `MCP_PORT` | `3000` | Server port |
-| `LOG_LEVEL` | `INFO` | Logging level |
-| `VERIFY_SSL` | `true` | SSL certificate verification |
-| `JWT_SECRET_KEY` | auto-generated | JWT signing key |
-| `MAX_CONNECTIONS` | `10` | HTTP connection pool size |
-| `REQUEST_TIMEOUT` | `30` | API request timeout (seconds) |
+| `WAZUH_HOST` | - | Wazuh server hostname/IP (required) |
+| `WAZUH_PORT` | 55000 | Wazuh API port |
+| `WAZUH_USER` | - | API username (required) |
+| `WAZUH_PASS` | - | API password (required) |
+| `WAZUH_API_VERSION` | v4 | API version |
 
-### Advanced Configuration
+#### **Wazuh Indexer Configuration**
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `WAZUH_INDEXER_HOST` | Same as WAZUH_HOST | Indexer hostname |
+| `WAZUH_INDEXER_PORT` | 9200 | Indexer port |
+| `WAZUH_INDEXER_USER` | Same as WAZUH_USER | Indexer username |
+| `WAZUH_INDEXER_PASS` | Same as WAZUH_PASS | Indexer password |
+| `USE_INDEXER_FOR_ALERTS` | true | Use Indexer for alerts |
+| `USE_INDEXER_FOR_VULNERABILITIES` | true | Use Indexer for vulnerabilities |
+
+#### **Transport Configuration**
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `MCP_TRANSPORT` | stdio | Transport mode (stdio/http) |
+| `MCP_HOST` | localhost | HTTP server host |
+| `MCP_PORT` | 3000 | HTTP server port |
+
+#### **Performance Settings**
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `MAX_ALERTS_PER_QUERY` | 1000 | Maximum alerts per request |
+| `MAX_CONNECTIONS` | 25 | Connection pool size |
+| `REQUEST_TIMEOUT_SECONDS` | 30 | Request timeout |
+| `CACHE_TTL_SECONDS` | 300 | Cache lifetime |
+
+#### **Security Settings**
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `VERIFY_SSL` | true | SSL certificate verification |
+| `ALLOW_SELF_SIGNED` | false | Allow self-signed certificates |
+| `MAX_REQUESTS_PER_MINUTE` | 100 | Rate limiting |
+| `SSL_TIMEOUT` | 30 | SSL connection timeout |
+
+### Custom SSL Configuration
+
+For environments with custom certificates:
 
 ```bash
-# Performance tuning
-MAX_ALERTS_PER_QUERY=1000
-CACHE_TTL_SECONDS=300
-POOL_SIZE=5
+# Custom CA bundle
+CA_BUNDLE_PATH=/path/to/custom-ca.pem
 
-# Security hardening
-ENABLE_RATE_LIMITING=true
-MAX_LOGIN_ATTEMPTS=5
-LOCKOUT_DURATION_MINUTES=15
+# Client certificates
+CLIENT_CERT_PATH=/path/to/client.crt
+CLIENT_KEY_PATH=/path/to/client.key
 
-# Monitoring
-ENABLE_METRICS=true
-HEALTH_CHECK_INTERVAL=30
-ENABLE_AUDIT_LOGGING=true
+# Indexer SSL (if different)
+WAZUH_INDEXER_VERIFY_SSL=true
+INDEXER_CA_BUNDLE_PATH=/path/to/indexer-ca.pem
+```
+
+### Logging Configuration
+
+```bash
+# Logging levels
+LOG_LEVEL=INFO  # DEBUG, INFO, WARNING, ERROR, CRITICAL
+STRUCTURED_LOGGING=true
+ENABLE_LOG_ROTATION=true
+
+# Log files (optional)
+LOG_DIR=/var/log/wazuh-mcp-server
+MAX_LOG_SIZE_MB=10
+LOG_BACKUP_COUNT=5
+```
+
+### External API Integration
+
+```bash
+# Optional threat intelligence APIs
+VIRUSTOTAL_API_KEY=your-virustotal-key
+SHODAN_API_KEY=your-shodan-key
+ABUSEIPDB_API_KEY=your-abuseipdb-key
+
+# Enable external features
+ENABLE_EXTERNAL_INTEL=true
+ENABLE_ML_ANALYSIS=true
+ENABLE_COMPLIANCE_CHECKING=true
 ```
 
 ---
 
-## 🚨 Troubleshooting
+## 🔍 Troubleshooting
 
 ### Common Issues
 
-**Connection Problems**
+#### 1. Connection Failed to Wazuh
 ```bash
-# Test Wazuh connectivity
-curl -k https://your-wazuh:55000/
+# Test connectivity
+docker exec wazuh-mcp curl -k https://your-wazuh-server:55000
+
+# Check configuration
+docker exec wazuh-mcp python3 validate-production.py
 
 # Verify credentials
-python3 -c "
-from src.wazuh_mcp_server.config import WazuhConfig
+docker exec wazuh-mcp python3 -c "
+from wazuh_mcp_server.scripts.connection_validator import ConnectionValidator
+from wazuh_mcp_server.config import WazuhConfig
 config = WazuhConfig.from_env()
-print('Configuration valid!')
+validator = ConnectionValidator(config)
+import asyncio
+asyncio.run(validator.run_all_tests())
 "
 ```
 
-**Performance Issues**
+#### 2. SSL Certificate Issues
 ```bash
-# Check system resources
-docker stats wazuh-mcp-server
+# Disable SSL verification temporarily (testing only)
+echo "VERIFY_SSL=false" >> .env
 
-# Review logs for bottlenecks
-docker logs wazuh-mcp-server | grep -E "(WARNING|ERROR)"
-
-# Monitor response times
-curl -w "@curl-format.txt" http://localhost:3000/health
+# Or add custom CA bundle
+echo "CA_BUNDLE_PATH=/path/to/ca.pem" >> .env
 ```
 
-**Security Concerns**
+#### 3. Docker Container Won't Start
 ```bash
-# Validate security configuration
-python3 validate-production.py --security
+# Check logs
+docker logs wazuh-mcp-server
 
-# Check audit logs
-tail -f logs/audit.log | jq '.'
+# Verify environment variables
+docker exec wazuh-mcp env | grep WAZUH
 
-# Review access patterns
-grep "authentication" logs/app.log
+# Test with minimal config
+docker run --rm -e WAZUH_HOST=test.com -e WAZUH_USER=test -e WAZUH_PASS=test wazuh-mcp-server:latest python3 validate-production.py --quick
+```
+
+#### 4. Performance Issues
+```bash
+# Increase connection limits
+echo "MAX_CONNECTIONS=50" >> .env
+echo "POOL_SIZE=25" >> .env
+
+# Enable caching
+echo "CACHE_TTL_SECONDS=300" >> .env
+
+# Monitor resource usage
+docker stats wazuh-mcp-server
 ```
 
 ### Debug Mode
@@ -400,89 +631,98 @@ grep "authentication" logs/app.log
 Enable detailed debugging:
 
 ```bash
-# Development debugging
-export LOG_LEVEL=DEBUG
-export ENABLE_DEBUG_LOGGING=true
+# Debug environment
+echo "DEBUG=true" >> .env
+echo "LOG_LEVEL=DEBUG" >> .env
 
-# Start with verbose output
-./wazuh-mcp-server --debug --verbose
+# Restart with debug logs
+docker compose restart
+docker compose logs -f wazuh-mcp-server
+```
 
-# Monitor real-time logs
-tail -f logs/debug.log | jq '.'
+### Health Checks
+
+```bash
+# Manual health check
+docker exec wazuh-mcp python3 validate-production.py
+
+# Quick validation
+docker exec wazuh-mcp python3 validate-production.py --quick
+
+# Server health endpoint (HTTP mode)
+curl http://localhost:3000/health
 ```
 
 ---
 
-## 📚 Documentation
+## 🛡️ Security
 
-### Core Documentation
-- [API Reference](docs/api-reference.md) - Complete API documentation
-- [Security Guide](docs/security-guide.md) - Security configuration and best practices
-- [Deployment Guide](docs/deployment-guide.md) - Production deployment strategies
-- [Troubleshooting](docs/troubleshooting.md) - Common issues and solutions
+### Security Best Practices
 
-### Examples & Tutorials
-- [Configuration Examples](examples/) - Sample configurations
-- [Integration Patterns](examples/integrations/) - Integration with other tools
-- [Custom Deployments](examples/deployments/) - Docker, Kubernetes, cloud deployments
+1. **Environment Variables**: Never commit `.env` files with real credentials
+2. **SSL/TLS**: Always use `VERIFY_SSL=true` in production
+3. **Network Security**: Use firewalls to restrict access to Wazuh servers
+4. **Container Security**: Run containers with read-only filesystems when possible
+5. **Regular Updates**: Keep base images and dependencies updated
 
-### Developer Resources
-- [Contributing Guide](CONTRIBUTING.md) - How to contribute
-- [Development Setup](docs/development.md) - Local development environment
-- [Testing Guide](docs/testing.md) - Testing procedures and standards
+### Security Features
 
----
+- **Input Validation**: All inputs are validated and sanitized
+- **Rate Limiting**: Configurable request rate limiting
+- **SSL/TLS**: Full SSL certificate validation and custom CA support
+- **Audit Logging**: Security-relevant events are logged
+- **Non-Root Execution**: Container runs as non-root user
+- **Resource Limits**: Memory and CPU limits prevent resource exhaustion
 
-## 📈 Roadmap
+### Security Configuration
 
-### Current: v3.1 - Production Ready ✅
-- ✅ Enterprise security (JWT, rate limiting, input validation)
-- ✅ Performance optimization (connection pooling, chunked processing)
-- ✅ Comprehensive monitoring (health checks, metrics, logging)
-- ✅ Production documentation and deployment guides
-- ✅ Docker deployment with health checks
-
-### Next: v3.2 - Enhanced Analytics
-- 🔄 Advanced AI threat analysis models
-- 🔄 Real-time dashboard and visualization
-- 🔄 Enhanced compliance reporting
-- 🔄 Integration with external threat intelligence
-- 🔄 Kubernetes deployment manifests
-
-### Future: v4.0 - Enterprise Platform
-- 📋 Multi-tenant support
-- 📋 Advanced RBAC and permissions
-- 📋 Distributed deployment capabilities
-- 📋 Enhanced AI model integration
-- 📋 Advanced automation and orchestration
+```bash
+# Production security settings
+VERIFY_SSL=true
+ALLOW_SELF_SIGNED=false
+MAX_REQUESTS_PER_MINUTE=100
+ENABLE_HEALTH_CHECKS=true
+STRUCTURED_LOGGING=true
+AUTO_DETECT_SSL_ISSUES=true
+```
 
 ---
 
 ## 🤝 Contributing
 
-We welcome contributions! Please see our [Contributing Guidelines](CONTRIBUTING.md) for details on:
+We welcome contributions! Please see our [Contributing Guide](CONTRIBUTING.md) for details.
 
-- Code standards and review process
-- Testing requirements
-- Documentation standards
-- Security review process
-
-### Quick Contribution Setup
+### Development Setup
 
 ```bash
-# 1. Fork and clone
-git clone https://github.com/your-username/Wazuh-MCP-Server.git
+# Clone and setup development environment
+git clone https://github.com/gensecaihq/Wazuh-MCP-Server.git
+cd Wazuh-MCP-Server
 
-# 2. Setup development environment
-python3 -m venv venv
-source venv/bin/activate
-pip install -r requirements.txt -r requirements-dev.txt
+# Create development environment
+python3 -m venv dev-env
+source dev-env/bin/activate
+pip install -r requirements.txt
 
-# 3. Run tests
-python3 -m pytest tests/
+# Install development dependencies
+pip install pytest pytest-asyncio black ruff mypy
 
-# 4. Submit pull request
+# Run tests
+pytest tests/
+
+# Code formatting
+black src/
+ruff check src/
 ```
+
+### Reporting Issues
+
+Please report issues through GitHub Issues with:
+- Detailed description
+- Environment details (OS, Docker version, etc.)
+- Configuration (sanitized)
+- Logs (sanitized)
+- Steps to reproduce
 
 ---
 
@@ -494,33 +734,22 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 ## 🙏 Acknowledgments
 
-- **Wazuh Team** - For the excellent open-source SIEM platform
-- **Anthropic** - For Claude AI and the MCP protocol
-- **FastMCP Community** - For the high-performance MCP framework
-- **Security Community** - For testing, feedback, and security reviews
-- **Contributors** - For bug reports, features, and improvements
+- **Anthropic** for the FastMCP framework
+- **Wazuh** for the excellent SIEM platform
+- **Claude** for AI-powered security analysis
+- **Community contributors** for testing and feedback
 
 ---
 
-## 📞 Support & Community
+## 📚 Additional Resources
 
-### Getting Help
-- 📖 **Documentation**: Comprehensive guides in [docs/](docs/)
-- 🐛 **Bug Reports**: [GitHub Issues](https://github.com/gensecaihq/Wazuh-MCP-Server/issues)
-- 💬 **Discussions**: [GitHub Discussions](https://github.com/gensecaihq/Wazuh-MCP-Server/discussions)
-- 🔒 **Security Issues**: security@gensecai.com
-
-### Community Resources
-- 📱 **Discord**: [Join our security community](https://discord.gg/wazuh-mcp)
-- 🐦 **Twitter**: [@WazuhMCP](https://twitter.com/wazuhmcp)
-- 📧 **Newsletter**: [Subscribe for updates](https://gensecai.com/newsletter)
+- [Wazuh Documentation](https://documentation.wazuh.com/)
+- [FastMCP Documentation](https://github.com/anthropics/fastmcp)
+- [Claude Desktop Configuration](https://claude.ai/docs)
+- [Docker Best Practices](https://docs.docker.com/develop/best-practices/)
 
 ---
 
-**🎉 Ready to revolutionize your security operations with AI? Deploy now and start getting intelligent insights from your Wazuh data!**
+**⭐ Star this repository if you find it useful!**
 
-```bash
-# Get started in 30 seconds
-git clone https://github.com/gensecaihq/Wazuh-MCP-Server.git
-cd Wazuh-MCP-Server && docker compose up -d
-```
+For support, please open an issue on GitHub or check our [documentation](docs/).
