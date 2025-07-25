@@ -1,4 +1,4 @@
-"""Simplified Wazuh API client for core functionality."""
+"""Wazuh API client optimized for Wazuh 4.8+ to 4.12+ compatibility with latest features."""
 
 import asyncio
 import json
@@ -63,8 +63,10 @@ class WazuhClient:
         return await self._request("GET", "/agents", params=params)
     
     async def get_vulnerabilities(self, **params) -> Dict[str, Any]:
-        """Get vulnerabilities from Wazuh."""
-        return await self._request("GET", "/vulnerability", params=params)
+        """Get vulnerabilities from Wazuh Indexer (4.8+ uses centralized vulnerability detection, 4.12+ includes package conditions and CTI data)."""
+        # Note: /vulnerability endpoint was deprecated in 4.7.0 and removed in 4.8.0
+        # 4.12+ includes package condition fields and CTI references
+        return await self._request("GET", "/vulnerability/agents", params=params)
     
     async def get_cluster_status(self) -> Dict[str, Any]:
         """Get cluster status."""
@@ -99,7 +101,11 @@ class WazuhClient:
         return await self._request("GET", "/decoders", params=params)
     
     async def execute_active_response(self, data: Dict[str, Any]) -> Dict[str, Any]:
-        """Execute active response command on agents."""
+        """Execute active response command on agents (4.8+ removed 'custom' parameter)."""
+        # Note: 'custom' parameter was removed in Wazuh 4.8.0
+        # Ensure data dict doesn't contain deprecated 'custom' parameter
+        if 'custom' in data:
+            data = {k: v for k, v in data.items() if k != 'custom'}
         return await self._request("PUT", "/active-response", json=data)
     
     async def get_active_response_commands(self, **params) -> Dict[str, Any]:
@@ -125,6 +131,18 @@ class WazuhClient:
     async def get_manager_stats(self, **params) -> Dict[str, Any]:
         """Get manager statistics."""
         return await self._request("GET", "/manager/stats", params=params)
+    
+    async def get_manager_version_check(self) -> Dict[str, Any]:
+        """Check for new Wazuh releases (4.8+ feature)."""
+        return await self._request("GET", "/manager/version/check")
+    
+    async def get_cti_data(self, cve_id: str) -> Dict[str, Any]:
+        """Get Cyber Threat Intelligence data for CVE (4.12+ feature)."""
+        return await self._request("GET", f"/vulnerability/cti/{cve_id}")
+    
+    async def get_vulnerability_details(self, vuln_id: str, **params) -> Dict[str, Any]:
+        """Get detailed vulnerability information including CTI references (4.12+ enhanced)."""
+        return await self._request("GET", f"/vulnerability/{vuln_id}", params=params)
     
     async def get_agent_stats(self, agent_id: str, component: str = "logcollector") -> Dict[str, Any]:
         """Get agent component statistics."""

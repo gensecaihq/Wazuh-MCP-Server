@@ -118,7 +118,7 @@ async def get_vulnerability_summary(
     agent_id: Annotated[Optional[str], Field(description="Agent ID")] = None,
     ctx: Context = None
 ) -> dict:
-    """Get vulnerability information from Wazuh."""
+    """Get vulnerability information from Wazuh (4.8+ centralized detection, 4.12+ includes CTI data and package conditions)."""
     try:
         client = await get_wazuh_client()
         
@@ -2026,9 +2026,10 @@ def _calculate_overall_risk(alerts: list, vulnerabilities: list) -> str:
 async def analyze_security_threats(
     time_range_hours: Annotated[int, Field(description="Analysis time range in hours", ge=1, le=168)] = 24,
     severity_threshold: Annotated[int, Field(description="Minimum severity level", ge=1, le=15)] = 5,
+    include_cti_data: Annotated[bool, Field(description="Include CTI threat intelligence data (4.12+ feature)")] = False,
     ctx: Context = None
 ) -> dict:
-    """Analyze security threats with AI-powered insights."""
+    """Analyze security threats with AI-powered insights and optional CTI data (4.12+ enhanced).""
     try:
         client = await get_wazuh_client()
         
@@ -2037,7 +2038,8 @@ async def analyze_security_threats(
         start_time = end_time - timedelta(hours=time_range_hours)
         
         if ctx:
-            await ctx.info(f"Analyzing threats from last {time_range_hours} hours with severity >= {severity_threshold}")
+            cti_status = "with CTI data" if include_cti_data else "without CTI data"
+            await ctx.info(f"Analyzing threats from last {time_range_hours} hours with severity >= {severity_threshold} {cti_status}")
         
         response = await client.get_alerts(
             limit=500,
