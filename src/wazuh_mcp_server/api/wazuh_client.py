@@ -2,6 +2,7 @@
 
 import asyncio
 import json
+import time
 from typing import Dict, Any, Optional
 import httpx
 
@@ -9,12 +10,16 @@ from wazuh_mcp_server.config import WazuhConfig
 
 
 class WazuhClient:
-    """Simplified Wazuh API client."""
+    """Simplified Wazuh API client with rate limiting."""
     
     def __init__(self, config: WazuhConfig):
         self.config = config
         self.token: Optional[str] = None
         self.client: Optional[httpx.AsyncClient] = None
+        # Rate limiting
+        self._rate_limiter = asyncio.Semaphore(config.max_connections)
+        self._request_times = []
+        self._max_requests_per_minute = 100  # Default rate limit
     
     async def initialize(self):
         """Initialize the HTTP client and authenticate."""
@@ -148,42 +153,61 @@ class WazuhClient:
         """Get agent component statistics."""
         return await self._request("GET", f"/agents/{agent_id}/stats/{component}")
     
+    async def _rate_limit_check(self):
+        """Check and enforce rate limiting."""
+        current_time = time.time()
+        # Remove requests older than 1 minute
+        self._request_times = [t for t in self._request_times if current_time - t < 60]
+        
+        # Check if we're hitting the rate limit
+        if len(self._request_times) >= self._max_requests_per_minute:
+            sleep_time = 60 - (current_time - self._request_times[0])
+            if sleep_time > 0:
+                await asyncio.sleep(sleep_time)
+        
+        # Record this request time
+        self._request_times.append(current_time)
+
     async def _request(self, method: str, endpoint: str, **kwargs) -> Dict[str, Any]:
-        """Make authenticated request to Wazuh API."""
-        if not self.token:
-            await self._authenticate()
-        
-        url = f"{self.config.base_url}{endpoint}"
-        headers = {"Authorization": f"Bearer {self.token}"}
-        
-        try:
-            response = await self.client.request(method, url, headers=headers, **kwargs)
-            response.raise_for_status()
+        """Make authenticated request to Wazuh API with rate limiting."""
+        # Apply rate limiting
+        async with self._rate_limiter:
+            await self._rate_limit_check()
             
-            data = response.json()
-            
-            # Validate response structure
-            if "data" not in data:
-                raise ValueError(f"Invalid response structure from Wazuh API: {endpoint}")
-            
-            return data
-            
-        except httpx.HTTPStatusError as e:
-            if e.response.status_code == 401:
-                # Token might be expired, try to re-authenticate
-                self.token = None
+            if not self.token:
                 await self._authenticate()
-                # Retry the request once
-                headers = {"Authorization": f"Bearer {self.token}"}
+            
+            url = f"{self.config.base_url}{endpoint}"
+            headers = {"Authorization": f"Bearer {self.token}"}
+            
+            try:
                 response = await self.client.request(method, url, headers=headers, **kwargs)
                 response.raise_for_status()
-                return response.json()
-            else:
-                raise ValueError(f"Wazuh API request failed: {e.response.status_code} - {e.response.text}")
-        except httpx.ConnectError:
-            raise ConnectionError(f"Lost connection to Wazuh server at {self.config.wazuh_host}")
-        except httpx.TimeoutException:
-            raise ConnectionError(f"Request timeout to Wazuh server")
+                
+                data = response.json()
+                
+                # Validate response structure
+                if "data" not in data:
+                    raise ValueError(f"Invalid response structure from Wazuh API: {endpoint}")
+                
+                return data
+                
+            except httpx.HTTPStatusError as e:
+                if e.response.status_code == 401:
+                    # Token might be expired, try to re-authenticate
+                    self.token = None
+                    await self._authenticate()
+                    # Retry the request once
+                    headers = {"Authorization": f"Bearer {self.token}"}
+                    response = await self.client.request(method, url, headers=headers, **kwargs)
+                    response.raise_for_status()
+                    return response.json()
+                else:
+                    raise ValueError(f"Wazuh API request failed: {e.response.status_code} - {e.response.text}")
+            except httpx.ConnectError:
+                raise ConnectionError(f"Lost connection to Wazuh server at {self.config.wazuh_host}")
+            except httpx.TimeoutException:
+                raise ConnectionError(f"Request timeout to Wazuh server")
     
     async def close(self):
         """Close the HTTP client."""

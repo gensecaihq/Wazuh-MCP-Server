@@ -4,7 +4,7 @@
 import os
 import sys
 from typing import Dict, Any, Optional, Annotated, Literal
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 import uuid
 
 # Check Python version
@@ -75,9 +75,9 @@ async def get_wazuh_alerts(
         return {
             "alerts": alerts,
             "total": len(alerts),
-            "query_time": datetime.utcnow().isoformat()
+            "query_time": datetime.now(timezone.utc).isoformat()
         }
-    except Exception as e:
+    except (ConnectionError, ValueError, KeyError, AttributeError) as e:
         raise ValueError(f"Failed to retrieve alerts: {e}")
 
 
@@ -107,9 +107,9 @@ async def get_agent_status(
             "agents": agents,
             "total_agents": len(agents),
             "status_summary": status_counts,
-            "query_time": datetime.utcnow().isoformat()
+            "query_time": datetime.now(timezone.utc).isoformat()
         }
-    except Exception as e:
+    except (ConnectionError, ValueError, KeyError, AttributeError) as e:
         raise ValueError(f"Failed to retrieve agent status: {e}")
 
 
@@ -139,9 +139,9 @@ async def get_vulnerability_summary(
             "vulnerabilities": vulnerabilities,
             "total_vulnerabilities": len(vulnerabilities),
             "severity_breakdown": severity_counts,
-            "query_time": datetime.utcnow().isoformat()
+            "query_time": datetime.now(timezone.utc).isoformat()
         }
-    except Exception as e:
+    except (ConnectionError, ValueError, KeyError, AttributeError) as e:
         raise ValueError(f"Failed to retrieve vulnerabilities: {e}")
 
 
@@ -154,9 +154,9 @@ async def get_cluster_status(ctx: Context = None) -> dict:
         
         return {
             "cluster_data": response.get("data", {}),
-            "query_time": datetime.utcnow().isoformat()
+            "query_time": datetime.now(timezone.utc).isoformat()
         }
-    except Exception as e:
+    except (ConnectionError, ValueError, KeyError, AttributeError) as e:
         raise ValueError(f"Failed to retrieve cluster status: {e}")
 
 
@@ -184,7 +184,7 @@ async def search_wazuh_logs(
             params["level"] = level
             
         # Calculate time range
-        end_time = datetime.utcnow()
+        end_time = datetime.now(timezone.utc)
         start_time = end_time - timedelta(hours=time_range_hours)
         params["newer_than"] = start_time.strftime("%Y-%m-%dT%H:%M:%S")
         params["older_than"] = end_time.strftime("%Y-%m-%dT%H:%M:%S")
@@ -224,7 +224,7 @@ async def search_wazuh_logs(
                     "end": end_time.isoformat()
                 }
             },
-            "query_time": datetime.utcnow().isoformat()
+            "query_time": datetime.now(timezone.utc).isoformat()
         }
         
         if ctx:
@@ -305,7 +305,7 @@ async def get_security_incidents(
                 "severity": severity,
                 "limit": limit
             },
-            "query_time": datetime.utcnow().isoformat()
+            "query_time": datetime.now(timezone.utc).isoformat()
         }
         
     except Exception as e:
@@ -329,7 +329,7 @@ async def create_security_incident(
             await ctx.info(f"Creating incident: {title} (severity: {severity})")
         
         # Generate unique incident ID
-        incident_id = f"INC-{datetime.utcnow().strftime('%Y%m%d')}-{str(uuid.uuid4())[:8].upper()}"
+        incident_id = f"INC-{datetime.now(timezone.utc).strftime('%Y%m%d')}-{str(uuid.uuid4())[:8].upper()}"
         
         incident_data = {
             "id": incident_id,
@@ -339,8 +339,8 @@ async def create_security_incident(
             "status": "open",
             "created_by": "mcp-server",
             "assigned_to": assigned_to,
-            "created_at": datetime.utcnow().isoformat(),
-            "updated_at": datetime.utcnow().isoformat(),
+            "created_at": datetime.now(timezone.utc).isoformat(),
+            "updated_at": datetime.now(timezone.utc).isoformat(),
             "alert_ids": alert_ids or [],
             "tags": _generate_incident_tags(title, description),
             "workflow_stage": "triage"
@@ -385,7 +385,7 @@ async def update_security_incident(
         # Simulate incident update (in real implementation, would update database)
         update_data = {
             "incident_id": incident_id,
-            "updated_at": datetime.utcnow().isoformat(),
+            "updated_at": datetime.now(timezone.utc).isoformat(),
             "updated_by": "mcp-server"
         }
         
@@ -454,13 +454,13 @@ def _group_alerts_into_incidents(alerts: list) -> list:
         severity = "critical" if max_level >= 12 else "high" if max_level >= 8 else "medium" if max_level >= 5 else "low"
         
         incident = {
-            "id": f"INC-AUTO-{group_key}-{datetime.utcnow().strftime('%Y%m%d')}",
+            "id": f"INC-AUTO-{group_key}-{datetime.now(timezone.utc).strftime('%Y%m%d')}",
             "title": f"Multiple {rule_desc} events on {agent_name}",
             "description": f"Detected {len(group_alerts)} related security events",
             "severity": severity,
             "status": "open",
             "created_at": min(alert.get("timestamp", "") for alert in group_alerts),
-            "updated_at": datetime.utcnow().isoformat(),
+            "updated_at": datetime.now(timezone.utc).isoformat(),
             "alert_count": len(group_alerts),
             "affected_agent": agent_name,
             "rule_description": rule_desc,
@@ -524,7 +524,7 @@ async def get_wazuh_rules(
                 "rules": rule_data,
                 "total_rules": len(rule_data),
                 "query_parameters": {"rule_id": rule_id},
-                "query_time": datetime.utcnow().isoformat()
+                "query_time": datetime.now(timezone.utc).isoformat()
             }
         
         # Build search parameters
@@ -563,7 +563,7 @@ async def get_wazuh_rules(
                 "group": group,
                 "limit": limit
             },
-            "query_time": datetime.utcnow().isoformat()
+            "query_time": datetime.now(timezone.utc).isoformat()
         }
         
     except Exception as e:
@@ -639,7 +639,7 @@ async def analyze_rule_coverage(
                 "unused_critical_rules": unused_critical_rules[:10]
             },
             "recommendations": _generate_rule_recommendations(triggered_rules, unused_critical_rules, coverage_percentage),
-            "query_time": datetime.utcnow().isoformat()
+            "query_time": datetime.now(timezone.utc).isoformat()
         }
         
         if ctx:
@@ -693,7 +693,7 @@ async def get_rule_decoders(
                 "search": search,
                 "limit": limit
             },
-            "query_time": datetime.utcnow().isoformat()
+            "query_time": datetime.now(timezone.utc).isoformat()
         }
         
     except Exception as e:
@@ -781,7 +781,7 @@ async def advanced_wazuh_query(
             "applied_filters": filters,
             "insights": insights,
             "query_parameters": params,
-            "query_time": datetime.utcnow().isoformat()
+            "query_time": datetime.now(timezone.utc).isoformat()
         }
         
     except Exception as e:
@@ -811,7 +811,7 @@ async def multi_field_search(
         total_matches = 0
         
         # Build time range for applicable sources
-        end_time = datetime.utcnow()
+        end_time = datetime.now(timezone.utc)
         start_time = end_time - timedelta(hours=time_range_hours)
         
         for source in data_sources:
@@ -845,7 +845,7 @@ async def multi_field_search(
                 "match_type": match_type,
                 "time_range_hours": time_range_hours
             },
-            "query_time": datetime.utcnow().isoformat()
+            "query_time": datetime.now(timezone.utc).isoformat()
         }
         
     except Exception as e:
@@ -1099,7 +1099,7 @@ async def get_realtime_alerts(
         if ctx:
             await ctx.info(f"Starting real-time monitoring for {monitoring_duration_minutes} minutes")
         
-        monitoring_start = datetime.utcnow() 
+        monitoring_start = datetime.now(timezone.utc) 
         monitoring_cycles = []
         total_new_alerts = 0
         
@@ -1108,7 +1108,7 @@ async def get_realtime_alerts(
         total_cycles = (monitoring_duration_minutes * 60) // refresh_interval
         
         for cycle in range(min(total_cycles, 10)):  # Limit to 10 cycles for safety
-            cycle_start = datetime.utcnow()
+            cycle_start = datetime.now(timezone.utc)
             
             # Get recent alerts from the last refresh interval
             response = await client.get_alerts(
@@ -1182,7 +1182,7 @@ async def get_live_dashboard_data(
             await ctx.info(f"Collecting live dashboard data (refresh: {refresh_interval_seconds}s)")
         
         dashboard_data = {
-            "timestamp": datetime.utcnow().isoformat(),
+            "timestamp": datetime.now(timezone.utc).isoformat(),
             "refresh_interval": refresh_interval_seconds,
             "metrics": {}
         }
@@ -1312,7 +1312,7 @@ async def _get_live_alert_metrics(client) -> dict:
     """Get live alert metrics for dashboard."""
     try:
         # Get recent alerts (last hour)
-        end_time = datetime.utcnow()
+        end_time = datetime.now(timezone.utc)
         start_time = end_time - timedelta(hours=1)
         
         response = await client.get_alerts(
@@ -1332,8 +1332,8 @@ async def _get_live_alert_metrics(client) -> dict:
             "high_severity_last_hour": high_alerts,
             "alert_rate_per_minute": round(total_alerts / 60, 2)
         }
-    except:
-        return {"error": "Unable to fetch alert metrics"}
+    except (AttributeError, KeyError, ZeroDivisionError) as e:
+        return {"error": f"Unable to fetch alert metrics: {e}"}
 
 
 async def _get_live_agent_metrics(client) -> dict:
@@ -1353,8 +1353,8 @@ async def _get_live_agent_metrics(client) -> dict:
             "disconnected_agents": status_counts.get("disconnected", 0),
             "status_breakdown": status_counts
         }
-    except:
-        return {"error": "Unable to fetch agent metrics"}
+    except (AttributeError, KeyError) as e:
+        return {"error": f"Unable to fetch agent metrics: {e}"}
 
 
 async def _get_live_vulnerability_metrics(client) -> dict:
@@ -1374,8 +1374,8 @@ async def _get_live_vulnerability_metrics(client) -> dict:
             "high_vulnerabilities": severity_counts.get("High", 0),
             "severity_breakdown": severity_counts
         }
-    except:
-        return {"error": "Unable to fetch vulnerability metrics"}
+    except (AttributeError, KeyError) as e:
+        return {"error": f"Unable to fetch vulnerability metrics: {e}"}
 
 
 async def _get_system_health_indicators(client) -> dict:
@@ -1387,20 +1387,21 @@ async def _get_system_health_indicators(client) -> dict:
         return {
             "cluster_status": "healthy" if cluster_data.get("enabled") else "standalone",
             "api_responsive": True,
-            "last_check": datetime.utcnow().isoformat()
+            "last_check": datetime.now(timezone.utc).isoformat()
         }
-    except:
+    except (AttributeError, KeyError, ConnectionError) as e:
         return {
             "cluster_status": "unknown",
             "api_responsive": False,
-            "last_check": datetime.utcnow().isoformat()
+            "last_check": datetime.now(timezone.utc).isoformat(),
+            "error": str(e)
         }
 
 
 async def _get_alert_trends(client) -> dict:
     """Get alert trends for the last 24 hours."""
     try:
-        end_time = datetime.utcnow()
+        end_time = datetime.now(timezone.utc)
         start_time = end_time - timedelta(hours=24)
         
         response = await client.get_alerts(
@@ -1424,7 +1425,8 @@ async def _get_alert_trends(client) -> dict:
                     hour_key = alert_time.strftime("%H:00")
                     if hour_key in hourly_counts:
                         hourly_counts[hour_key] += 1
-                except:
+                except (ValueError, AttributeError, KeyError):
+                    # Skip malformed timestamps
                     pass
         
         return {
@@ -1432,8 +1434,8 @@ async def _get_alert_trends(client) -> dict:
             "hourly_counts": hourly_counts,
             "total_alerts": len(alerts)
         }
-    except:
-        return {"error": "Unable to fetch alert trends"}
+    except (AttributeError, KeyError) as e:
+        return {"error": f"Unable to fetch alert trends: {e}"}
 
 
 @mcp.tool
@@ -1455,7 +1457,7 @@ async def execute_active_response(
             "command": command,
             "arguments": custom_parameters or {},
             "alert": {
-                "timestamp": datetime.utcnow().isoformat(),
+                "timestamp": datetime.now(timezone.utc).isoformat(),
                 "source": "mcp-server"
             }
         }
@@ -1473,7 +1475,7 @@ async def execute_active_response(
                     "agent_id": agent_id,
                     "status": "success",
                     "response": response.get("data", {}),
-                    "execution_time": datetime.utcnow().isoformat()
+                    "execution_time": datetime.now(timezone.utc).isoformat()
                 }
                 execution_results.append(result)
                 successful_executions += 1
@@ -1486,7 +1488,7 @@ async def execute_active_response(
                     "agent_id": agent_id,
                     "status": "failed",
                     "error": str(e),
-                    "execution_time": datetime.utcnow().isoformat()
+                    "execution_time": datetime.now(timezone.utc).isoformat()
                 }
                 execution_results.append(result)
                 failed_executions += 1
@@ -1504,7 +1506,7 @@ async def execute_active_response(
             },
             "execution_results": execution_results,
             "custom_parameters": custom_parameters,
-            "execution_timestamp": datetime.utcnow().isoformat()
+            "execution_timestamp": datetime.now(timezone.utc).isoformat()
         }
         
     except Exception as e:
@@ -1551,7 +1553,7 @@ async def get_cdb_lists(
                     "total_entries": len(parsed_entries),
                     "entries": parsed_entries,
                     "raw_content": list_content.get("content", ""),
-                    "query_time": datetime.utcnow().isoformat()
+                    "query_time": datetime.now(timezone.utc).isoformat()
                 }
         else:
             # Get all CDB lists
@@ -1580,7 +1582,7 @@ async def get_cdb_lists(
                     "search": search,
                     "limit": limit
                 },
-                "query_time": datetime.utcnow().isoformat()
+                "query_time": datetime.now(timezone.utc).isoformat()
             }
         
     except Exception as e:
@@ -1615,7 +1617,7 @@ async def get_fim_events(
             params["event"] = event_type
             
         # Add time range
-        end_time = datetime.utcnow()
+        end_time = datetime.now(timezone.utc)
         start_time = end_time - timedelta(hours=time_range_hours)
         params["newer_than"] = start_time.strftime("%Y-%m-%dT%H:%M:%S")
         
@@ -1661,7 +1663,7 @@ async def get_fim_events(
                 "event_type": event_type,
                 "time_range_hours": time_range_hours
             },
-            "query_time": datetime.utcnow().isoformat()
+            "query_time": datetime.now(timezone.utc).isoformat()
         }
         
     except Exception as e:
@@ -1701,7 +1703,7 @@ async def get_enhanced_analytics(
         analytics_result.update({
             "analysis_type": analysis_type,
             "time_range_hours": time_range_hours,
-            "generation_time": datetime.utcnow().isoformat(),
+            "generation_time": datetime.now(timezone.utc).isoformat(),
             "data_freshness": "real-time"
         })
         
@@ -1787,7 +1789,8 @@ async def _generate_performance_analytics(client, time_range_hours: int) -> dict
                         "agent_name": agent.get("name"),
                         "stats": stats.get("data", {})
                     })
-            except:
+            except (AttributeError, KeyError, ConnectionError):
+                # Skip agents with missing data
                 continue
         
         return {
@@ -1807,7 +1810,7 @@ async def _generate_security_trends_analytics(client, time_range_hours: int) -> 
     """Generate security trends analytics."""
     try:
         # Get recent alerts for trend analysis
-        end_time = datetime.utcnow()
+        end_time = datetime.now(timezone.utc)
         start_time = end_time - timedelta(hours=time_range_hours)
         
         alerts_response = await client.get_alerts(
@@ -1829,7 +1832,8 @@ async def _generate_security_trends_analytics(client, time_range_hours: int) -> 
                     alert_time = datetime.fromisoformat(timestamp.replace('Z', '+00:00'))
                     hour_key = alert_time.strftime("%Y-%m-%d %H:00")
                     hourly_distribution[hour_key] = hourly_distribution.get(hour_key, 0) + 1
-                except:
+                except (ValueError, AttributeError):
+                    # Skip malformed timestamps
                     pass
             
             # Severity trends
@@ -2034,7 +2038,7 @@ async def analyze_security_threats(
         client = await get_wazuh_client()
         
         # Get recent alerts for analysis
-        end_time = datetime.utcnow()
+        end_time = datetime.now(timezone.utc)
         start_time = end_time - timedelta(hours=time_range_hours)
         
         if ctx:
@@ -2081,7 +2085,7 @@ async def analyze_security_threats(
             "threat_categories": threat_categories,
             "top_rules": sorted(rule_frequency.items(), key=lambda x: x[1], reverse=True)[:10],
             "risk_score": _calculate_risk_score(alerts),
-            "query_time": datetime.utcnow().isoformat()
+            "query_time": datetime.now(timezone.utc).isoformat()
         }
         
         if ctx:
@@ -2169,16 +2173,16 @@ async def get_server_status() -> str:
             "wazuh_host": config.wazuh_host,
             "wazuh_port": config.wazuh_port,
             "connection": "active",
-            "last_check": datetime.utcnow().isoformat(),
+            "last_check": datetime.now(timezone.utc).isoformat(),
             "cluster_enabled": response.get("data", {}).get("enabled", False)
         }
         
         return f"""# Wazuh MCP Server Status
 
-**Server Status**: ✅ Online  
+**Server Status**: Online  
 **Wazuh Host**: {status_info['wazuh_host']}:{status_info['wazuh_port']}  
-**Connection**: ✅ Active  
-**Cluster**: {'✅ Enabled' if status_info['cluster_enabled'] else '❌ Disabled'}  
+**Connection**: Active  
+**Cluster**: {'Enabled' if status_info['cluster_enabled'] else 'Disabled'}  
 **Last Check**: {status_info['last_check']}
 
 The MCP server is successfully connected to Wazuh and ready to process security queries.
@@ -2186,10 +2190,10 @@ The MCP server is successfully connected to Wazuh and ready to process security 
     except Exception as e:
         return f"""# Wazuh MCP Server Status
 
-**Server Status**: ❌ Error  
-**Connection**: ❌ Failed  
+**Server Status**: Error  
+**Connection**: Failed  
 **Error**: {str(e)}  
-**Last Check**: {datetime.utcnow().isoformat()}
+**Last Check**: {datetime.now(timezone.utc).isoformat()}
 
 Please check your Wazuh configuration and network connectivity.
 """
@@ -2230,7 +2234,7 @@ async def get_dashboard_summary() -> str:
 
 ## 🖥️ Infrastructure Status
 - **Active Agents**: {active_agents}/{total_agents}
-- **Connection Health**: ✅ Good
+- **Connection Health**: Good
 
 ## 🚨 Recent Alerts (Last 100)
 - **Critical**: {severity_counts['critical']} alerts
@@ -2238,20 +2242,20 @@ async def get_dashboard_summary() -> str:
 - **Medium**: {severity_counts['medium']} alerts
 - **Low**: {severity_counts['low']} alerts
 
-## 📊 Summary
+## Summary
 Total alerts in recent activity: **{len(alerts)}**
 
-*Updated: {datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S')} UTC*
+*Updated: {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S')} UTC*
 """
     except Exception as e:
         return f"""# Wazuh Security Dashboard
 
-## ❌ Dashboard Error
+## Dashboard Error
 Unable to retrieve dashboard data: {str(e)}
 
 Please check your Wazuh connection and try again.
 
-*Updated: {datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S')} UTC*
+*Updated: {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S')} UTC*
 """
 
 
@@ -2260,17 +2264,17 @@ async def initialize_server():
     try:
         # Test configuration
         config = await get_config()
-        print(f"✅ Configuration loaded for {config.wazuh_host}")
+        print(f" Configuration loaded for {config.wazuh_host}")
         
         # Test Wazuh connection
         client = await get_wazuh_client()
-        print("✅ Wazuh connection established")
+        print(" Wazuh connection established")
         
         # Verify FastMCP tools are registered
-        print(f"✅ FastMCP server initialized with {len(mcp._tools)} tools and {len(mcp._resources)} resources")
+        print(f" FastMCP server initialized with {len(mcp._tools)} tools and {len(mcp._resources)} resources")
         
     except Exception as e:
-        print(f"❌ Server initialization failed: {e}")
+        print(f" Server initialization failed: {e}")
         sys.exit(1)
 
 
@@ -2286,9 +2290,15 @@ if __name__ == "__main__":
     
     if transport == "http":
         host = os.getenv("MCP_HOST", "0.0.0.0")
-        port = int(os.getenv("MCP_PORT", "3000"))
-        print(f"🌐 Starting HTTP server on {host}:{port}")
+        try:
+            port = int(os.getenv("MCP_PORT", "3000"))
+            if port < 1 or port > 65535:
+                raise ValueError("Port must be between 1 and 65535")
+        except ValueError as e:
+            print(f"ERROR: Invalid MCP_PORT value '{os.getenv('MCP_PORT')}': {e}")
+            sys.exit(1)
+        print(f" Starting HTTP server on {host}:{port}")
         uvicorn.run(mcp.create_app(), host=host, port=port)
     else:
-        print("📱 Starting STDIO server for Claude Desktop")
+        print(" Starting STDIO server for Claude Desktop")
         mcp.run()

@@ -44,19 +44,31 @@ class WazuhConfig:
         if not all([host, user, password]):
             raise ConfigurationError("Missing required environment variables: WAZUH_HOST, WAZUH_USER, WAZUH_PASS")
         
+        # Helper function for safe integer conversion
+        def safe_int_env(key: str, default: str, min_val: int = 1, max_val: int = None) -> int:
+            try:
+                value = int(os.getenv(key, default))
+                if value < min_val:
+                    raise ValueError(f"{key} must be >= {min_val}")
+                if max_val and value > max_val:
+                    raise ValueError(f"{key} must be <= {max_val}")
+                return value
+            except ValueError as e:
+                raise ConfigurationError(f"Invalid {key} value '{os.getenv(key)}': {e}")
+        
         return cls(
             wazuh_host=host,
-            wazuh_port=int(os.getenv("WAZUH_PORT", "55000")),
+            wazuh_port=safe_int_env("WAZUH_PORT", "55000", 1, 65535),
             wazuh_user=user,
             wazuh_pass=password,
             wazuh_indexer_host=os.getenv("WAZUH_INDEXER_HOST"),
-            wazuh_indexer_port=int(os.getenv("WAZUH_INDEXER_PORT", "9200")),
+            wazuh_indexer_port=safe_int_env("WAZUH_INDEXER_PORT", "9200", 1, 65535),
             wazuh_indexer_user=os.getenv("WAZUH_INDEXER_USER"),
             wazuh_indexer_pass=os.getenv("WAZUH_INDEXER_PASS"),
             verify_ssl=os.getenv("VERIFY_SSL", "true").lower() == "true",
-            request_timeout_seconds=int(os.getenv("REQUEST_TIMEOUT_SECONDS", "30")),
-            max_alerts_per_query=int(os.getenv("MAX_ALERTS_PER_QUERY", "1000")),
-            max_connections=int(os.getenv("MAX_CONNECTIONS", "10"))
+            request_timeout_seconds=safe_int_env("REQUEST_TIMEOUT_SECONDS", "30", 1, 300),
+            max_alerts_per_query=safe_int_env("MAX_ALERTS_PER_QUERY", "1000", 1, 10000),
+            max_connections=safe_int_env("MAX_CONNECTIONS", "10", 1, 100)
         )
     
     @property
