@@ -687,7 +687,7 @@ docker exec wazuh-mcp-server python3 validate-production.py
 
 ## Support
 
-- Documentation: See README.md and WAZUH_CONFIGURATION_GUIDE.md
+- Documentation: See README.md and PRODUCTION_DEPLOYMENT.md
 - Issues: https://github.com/gensecaihq/Wazuh-MCP-Server/issues
 """
     
@@ -746,7 +746,10 @@ def main():
         print("3. Run: python3 validate-production.py --quick")
         print("4. Start your deployment: docker compose up -d")
         print()
-        print("For detailed configuration help, see WAZUH_CONFIGURATION_GUIDE.md")
+        print("📖 For detailed configuration help, see:")
+        print("   - README.md (Quick setup)")
+        print("   - PRODUCTION_DEPLOYMENT.md (Production deployment)")
+        print("   - DOCKER_INSTALLATION_GUIDE.md (Docker installation)")
         print("=" * 80)
         
     except KeyboardInterrupt:

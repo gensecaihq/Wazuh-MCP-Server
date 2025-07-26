@@ -23,36 +23,58 @@ Production-grade FastMCP server for Wazuh SIEM integration with comprehensive se
 - CTI (Cyber Threat Intelligence) integration support (4.12+)
 
 ### System Requirements
-- Docker 20.10+ and Docker Compose 2.0+
-- 512MB RAM minimum, 1GB recommended
+
+**Docker Requirements:**
+- **Linux**: Docker 20.10+ and Docker Compose 2.0+, 2GB RAM, 5GB disk space
+- **macOS**: Docker Desktop 4.0+, macOS 10.15+, 4GB RAM, 10GB disk space
+- **Windows**: Docker Desktop 4.0+, Windows 10 Pro/Enterprise/Education or Windows 11, 4GB RAM, 20GB disk space
+
+**Wazuh MCP Server:**
+- 512MB RAM minimum, 1GB recommended (additional to Docker requirements)
 - Network access to Wazuh infrastructure
 - MCP client (Claude Desktop, Continue, etc.)
 
 ## 🚀 Quick Deploy
 
-### Step 1: Install Docker (OS-Specific)
+### Step 1: Install Docker (Automated - Recommended)
 
-**🐧 Linux (Debian/Ubuntu):**
+Our automated scripts install Docker, Docker Compose, and set up the complete Wazuh MCP Server environment:
+
+**🐧 Linux (Debian/Ubuntu/Mint/Pop!_OS):**
 ```bash
 curl -fsSL https://raw.githubusercontent.com/gensecaihq/Wazuh-MCP-Server/main/scripts/install-docker-debian.sh | bash
 ```
+*Supports: Debian 11+, Ubuntu 20.04+, Linux Mint, Pop!_OS, Elementary OS*
 
-**🐧 Linux (RHEL/CentOS/Fedora):**
+**🐧 Linux (RHEL/CentOS/Fedora/Rocky/AlmaLinux):**
 ```bash
 curl -fsSL https://raw.githubusercontent.com/gensecaihq/Wazuh-MCP-Server/main/scripts/install-docker-redhat.sh | bash
 ```
+*Supports: RHEL 8+, CentOS 8+, Fedora 36+, Rocky Linux, AlmaLinux*
 
-**🍎 macOS:**
+**🍎 macOS (Intel & Apple Silicon):**
 ```bash
 curl -fsSL https://raw.githubusercontent.com/gensecaihq/Wazuh-MCP-Server/main/scripts/install-docker-macos.sh | bash
 ```
+*Supports: macOS 10.15+ (Catalina), includes Claude Desktop integration helper*
 
 **🪟 Windows (PowerShell as Administrator):**
 ```powershell
+Set-ExecutionPolicy Bypass -Scope Process -Force
 iwr -useb https://raw.githubusercontent.com/gensecaihq/Wazuh-MCP-Server/main/scripts/install-docker-windows.ps1 | iex
 ```
+*Supports: Windows 10 Pro/Enterprise/Education, Windows 11, includes WSL2 setup*
 
-**Or install Docker manually and then clone:**
+#### What the Scripts Install:
+- ✅ **Docker Engine** (latest stable version)
+- ✅ **Docker Compose** (V2 plugin)
+- ✅ **Wazuh MCP Server** (complete project setup)
+- ✅ **System Configuration** (optimized settings, user permissions)
+- ✅ **Deployment Scripts** (ready-to-use helpers)
+- ✅ **Claude Desktop Integration** (configuration helpers)
+
+#### Manual Installation Alternative:
+If you prefer manual installation or need custom Docker setup, see [DOCKER_INSTALLATION_GUIDE.md](DOCKER_INSTALLATION_GUIDE.md) for detailed instructions.
 
 ### Step 2: Clone Repository (if not done by installation script)
 ```bash
@@ -144,9 +166,19 @@ docker compose up -d
 - Perfect for Claude Desktop integration out-of-the-box
 
 ### Step 5: Verify Installation & Deployment
+
+**Complete Installation Verification:**
 ```bash
-# Verify complete installation
+# Run comprehensive verification (checks Docker, project, configuration)
 ./scripts/verify-installation.sh
+```
+
+**Manual Verification Steps:**
+```bash
+# Check Docker installation
+docker --version
+docker compose version
+docker run hello-world
 
 # Check container status
 docker compose ps
@@ -156,7 +188,13 @@ docker compose logs wazuh-mcp-server
 
 # Test functionality
 python3 test-functionality.py
+
+# Production readiness check
+python3 validate-production.py --quick
 ```
+
+**Troubleshooting:**
+If verification fails, see [DOCKER_INSTALLATION_GUIDE.md](DOCKER_INSTALLATION_GUIDE.md#troubleshooting) for platform-specific troubleshooting.
 
 ## 📊 Capabilities
 
@@ -436,7 +474,37 @@ docker compose logs wazuh-mcp-server -f
 
 ## 🚨 Troubleshooting
 
-### Common Issues
+### Docker Installation Issues
+
+**Docker Not Installed/Working:**
+- Run the appropriate installation script for your OS (see Step 1 above)
+- For detailed troubleshooting, see [DOCKER_INSTALLATION_GUIDE.md](DOCKER_INSTALLATION_GUIDE.md#troubleshooting)
+- Verify installation: `./scripts/verify-installation.sh`
+
+**Platform-Specific Docker Issues:**
+
+**Linux:**
+```bash
+# Permission denied errors
+sudo usermod -aG docker $USER
+newgrp docker
+
+# Docker daemon not running
+sudo systemctl start docker
+sudo systemctl enable docker
+```
+
+**macOS:**
+- Ensure Docker Desktop is running
+- Check system requirements (macOS 10.15+, 4GB RAM)
+- Restart Docker Desktop if needed
+
+**Windows:**
+- Run PowerShell as Administrator
+- Ensure WSL2 is properly configured
+- Check Windows edition compatibility
+
+### Wazuh MCP Server Issues
 
 **Connection Errors:**
 - Verify Wazuh Manager is accessible on specified port
@@ -450,6 +518,9 @@ docker compose logs wazuh-mcp-server -f
 
 **Container Issues:**
 ```bash
+# Full diagnostic
+./scripts/verify-installation.sh
+
 # Rebuild container
 docker compose build --no-cache
 docker compose up -d
@@ -459,6 +530,10 @@ docker stats wazuh-mcp-server
 
 # View detailed logs
 docker compose logs wazuh-mcp-server --tail=100
+
+# Check container health
+docker compose ps
+docker inspect wazuh-mcp-server
 ```
 
 ## 💡 Usage Examples
@@ -482,9 +557,17 @@ Once connected to your MCP client, try these commands:
 
 ## 📚 Documentation
 
-- [PRODUCTION_DEPLOYMENT.md](PRODUCTION_DEPLOYMENT.md) - Complete deployment guide
-- [LICENSE](LICENSE) - MIT License
-- [Contributing Guidelines](.github/CONTRIBUTING.md) - Development setup
+- **[DOCKER_INSTALLATION_GUIDE.md](DOCKER_INSTALLATION_GUIDE.md)** - Complete Docker installation guide for all platforms
+- **[PRODUCTION_DEPLOYMENT.md](PRODUCTION_DEPLOYMENT.md)** - Production deployment and configuration guide
+- **[LICENSE](LICENSE)** - MIT License
+- **[Contributing Guidelines](.github/CONTRIBUTING.md)** - Development setup and contribution guide
+
+### Installation Scripts
+- `scripts/install-docker-debian.sh` - Automated Docker installation for Debian/Ubuntu systems
+- `scripts/install-docker-redhat.sh` - Automated Docker installation for RHEL/CentOS/Fedora systems  
+- `scripts/install-docker-macos.sh` - Automated Docker installation for macOS systems
+- `scripts/install-docker-windows.ps1` - Automated Docker installation for Windows systems
+- `scripts/verify-installation.sh` - Cross-platform installation verification script
 
 ## 🤝 Support
 
