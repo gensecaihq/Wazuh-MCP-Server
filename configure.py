@@ -159,19 +159,24 @@ def configure_mcp_transport() -> Dict[str, Any]:
     
     config = {}
     
-    print("\nTransport modes:")
-    print("  • stdio: For desktop integration (recommended)")
+    print("\nTransport modes (you can change this later using three methods):")
+    print("  • stdio: For desktop integration (recommended for Claude Desktop)")
     print("  • http:  For remote access and web interfaces")
+    print("\nMethod 1 (Highest Priority): Command-line arguments")
+    print("  ./wazuh-mcp-server --stdio   or   ./wazuh-mcp-server --http")
+    print("Method 2 (Recommended): Environment variables")
+    print("  export MCP_TRANSPORT=stdio   or   export MCP_TRANSPORT=http")
+    print("Method 3 (Default): Defaults to stdio if nothing specified")
     
     transport_mode = get_user_input(
-        "Choose transport mode (stdio/http)",
+        "Choose default transport mode (stdio/http)",
         default="stdio"
     ).lower()
     
     while transport_mode not in ['stdio', 'http']:
         print("❌ Please choose either 'stdio' or 'http'")
         transport_mode = get_user_input(
-            "Choose transport mode (stdio/http)",
+            "Choose default transport mode (stdio/http)",
             default="stdio"
         ).lower()
     

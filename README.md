@@ -30,27 +30,53 @@ Production-grade FastMCP server for Wazuh SIEM integration with comprehensive se
 
 ## 🚀 Quick Deploy
 
-### Step 1: Clone Repository
+### Step 1: Install Docker (OS-Specific)
+
+**🐧 Linux (Debian/Ubuntu):**
 ```bash
-git clone https://github.com/your-org/Wazuh-MCP-Server.git
+curl -fsSL https://raw.githubusercontent.com/gensecaihq/Wazuh-MCP-Server/main/scripts/install-docker-debian.sh | bash
+```
+
+**🐧 Linux (RHEL/CentOS/Fedora):**
+```bash
+curl -fsSL https://raw.githubusercontent.com/gensecaihq/Wazuh-MCP-Server/main/scripts/install-docker-redhat.sh | bash
+```
+
+**🍎 macOS:**
+```bash
+curl -fsSL https://raw.githubusercontent.com/gensecaihq/Wazuh-MCP-Server/main/scripts/install-docker-macos.sh | bash
+```
+
+**🪟 Windows (PowerShell as Administrator):**
+```powershell
+iwr -useb https://raw.githubusercontent.com/gensecaihq/Wazuh-MCP-Server/main/scripts/install-docker-windows.ps1 | iex
+```
+
+**Or install Docker manually and then clone:**
+
+### Step 2: Clone Repository (if not done by installation script)
+```bash
+git clone https://github.com/gensecaihq/Wazuh-MCP-Server.git
 cd Wazuh-MCP-Server
 ```
 
-### Step 2: Configure Wazuh Connection
+### Step 3: Configure Wazuh Connection
+
+**Option A: Environment Variables (Recommended for Docker)**
 ```bash
 # Required: Wazuh Manager settings
-export WAZUH_HOST=your-wazuh-manager.com
-export WAZUH_USER=your-api-user
-export WAZUH_PASS=your-secure-password
+export WAZUH_HOST=wazuh-manager.local
+export WAZUH_USER=wazuh-api
+export WAZUH_PASS=SecureApiPassword123
 
 # Optional: Wazuh Manager port (default: 55000)
 export WAZUH_PORT=55000
 
 # Recommended: Wazuh Indexer for 4.8+ enhanced capabilities
-export WAZUH_INDEXER_HOST=your-wazuh-indexer.com
+export WAZUH_INDEXER_HOST=wazuh-indexer.local
 export WAZUH_INDEXER_PORT=9200
-export WAZUH_INDEXER_USER=indexer-user
-export WAZUH_INDEXER_PASS=indexer-password
+export WAZUH_INDEXER_USER=admin
+export WAZUH_INDEXER_PASS=SecureIndexerPass123
 
 # Enable 4.8+ specific features
 export USE_INDEXER_FOR_VULNERABILITIES=true
@@ -62,23 +88,66 @@ export ENABLE_PACKAGE_CONDITION_FIELDS=true
 export USE_UTC_TIMESTAMPS=true
 ```
 
-### Step 3: Choose Transport Mode
-
-**STDIO Mode (Recommended for Claude Desktop):**
+**Option B: Create .env File (Alternative)**
 ```bash
-export MCP_TRANSPORT=stdio
-docker compose up -d
+# Create .env file in project root
+cat > .env << EOF
+WAZUH_HOST=wazuh-manager.local
+WAZUH_USER=wazuh-api
+WAZUH_PASS=SecureApiPassword123
+WAZUH_PORT=55000
+WAZUH_INDEXER_HOST=wazuh-indexer.local
+WAZUH_INDEXER_PORT=9200
+WAZUH_INDEXER_USER=admin
+WAZUH_INDEXER_PASS=SecureIndexerPass123
+USE_INDEXER_FOR_VULNERABILITIES=true
+ENABLE_CENTRALIZED_VULNERABILITY_DETECTION=true
+ENABLE_CTI_INTEGRATION=true
+ENABLE_PACKAGE_CONDITION_FIELDS=true
+USE_UTC_TIMESTAMPS=true
+EOF
 ```
 
-**HTTP/SSE Mode (For Remote Access):**
+**Option C: Docker Compose Environment (Production)**
 ```bash
+# Edit compose.yml environment section or create .env file
+# The compose.yml will automatically use .env file if present
+```
+
+### Step 4: Choose Transport Mode
+
+You can select transport mode using **three methods** (in order of precedence):
+
+**Method 1: Command-Line Arguments (Highest Priority)**
+```bash
+# STDIO mode (for Claude Desktop integration)
+docker compose run --rm wazuh-mcp-server ./wazuh-mcp-server --stdio
+
+# HTTP/SSE mode (for remote access)
+docker compose run --rm wazuh-mcp-server ./wazuh-mcp-server --http
+```
+
+**Method 2: Environment Variables (Recommended for Docker)**
+```bash
+# STDIO mode (default, recommended for Claude Desktop)
+export MCP_TRANSPORT=stdio
+docker compose up -d
+
+# HTTP/SSE mode (for remote clients)
 export MCP_TRANSPORT=http
 export MCP_PORT=3000
 docker compose up -d
 ```
 
-### Step 4: Verify Deployment
+**Method 3: Default Behavior**
+- Defaults to STDIO mode if no arguments or environment variables are set
+- Perfect for Claude Desktop integration out-of-the-box
+
+### Step 5: Verify Installation & Deployment
 ```bash
+# Verify complete installation
+./scripts/verify-installation.sh
+
 # Check container status
 docker compose ps
 
@@ -144,13 +213,25 @@ MCP Client → FastMCP Server → Wazuh Manager API → Security Data
 
 ## ⚙️ Configuration
 
+### Where to Configure Settings
+
+**For Docker Deployment (Recommended):**
+1. **Create `.env` file** in project root directory
+2. **Set environment variables** before running `docker compose up -d`
+3. **Edit `compose.yml`** environment section (advanced users)
+
+**For Local Development:**
+1. **Create `.env` file** in project root directory
+2. **Set environment variables** in your shell
+3. **Pass via MCP client configuration** (Claude Desktop)
+
 ### Required Environment Variables
 
 **Wazuh Manager Connection:**
 ```bash
-WAZUH_HOST=wazuh-manager.company.com    # Wazuh Manager hostname/IP
-WAZUH_USER=mcp-api-user                 # API username with read permissions
-WAZUH_PASS=secure-api-password          # API user password
+WAZUH_HOST=wazuh-manager.local          # Wazuh Manager hostname/IP
+WAZUH_USER=wazuh-api                    # API username with read permissions
+WAZUH_PASS=SecureApiPassword123         # API user password
 ```
 
 ### Optional Environment Variables
@@ -163,7 +244,7 @@ VERIFY_SSL=true                        # SSL certificate verification (default: 
 
 **Wazuh Indexer Settings (Required for 4.8+ Full Features):**
 ```bash
-WAZUH_INDEXER_HOST=wazuh-indexer.company.com         # Indexer hostname/IP
+WAZUH_INDEXER_HOST=wazuh-indexer.local               # Indexer hostname/IP
 WAZUH_INDEXER_PORT=9200                              # Indexer port (default: 9200)
 WAZUH_INDEXER_USER=indexer-user                      # Indexer username
 WAZUH_INDEXER_PASS=indexer-password                  # Indexer password
@@ -191,15 +272,42 @@ MAX_CONNECTIONS=10                      # Connection pool size
 
 ### Transport Mode Selection
 
+You can select between STDIO and HTTP/SSE transport using **three methods**:
+
+#### 1. Command-Line Arguments (Highest Priority)
+```bash
+# Available command-line options:
+./wazuh-mcp-server --stdio     # STDIO mode (explicit)
+./wazuh-mcp-server --local     # STDIO mode (alias)
+./wazuh-mcp-server --http      # HTTP/SSE mode
+./wazuh-mcp-server --remote    # HTTP/SSE mode (alias)
+./wazuh-mcp-server --server    # HTTP/SSE mode (alias)
+./wazuh-mcp-server             # Uses environment variable or defaults to STDIO
+```
+
+#### 2. Environment Variables (Recommended)
+```bash
+export MCP_TRANSPORT=stdio     # STDIO mode
+export MCP_TRANSPORT=http      # HTTP/SSE mode
+```
+
+#### 3. Default Behavior
+- If no arguments or environment variables are set, defaults to **STDIO mode**
+- Perfect for Claude Desktop integration without additional configuration
+
+#### Mode Comparison
+
 **STDIO Mode (Recommended for Desktop):**
-- Direct integration with Claude Desktop
-- Low latency, secure local communication
-- Ideal for single-user scenarios
+- ✅ Direct integration with Claude Desktop
+- ✅ Low latency, secure local communication
+- ✅ Ideal for single-user scenarios
+- ✅ Zero network configuration required
 
 **HTTP/SSE Mode (For Remote Access):**
-- Web-based access for remote clients
-- Supports multiple concurrent connections
-- Ideal for team/server deployments
+- ✅ Web-based access for remote clients
+- ✅ Supports multiple concurrent connections
+- ✅ Ideal for team/server deployments
+- ✅ RESTful API access available
 
 ## 💡 Usage Examples
 
@@ -236,9 +344,9 @@ MAX_CONNECTIONS=10                      # Connection pool size
       "command": "/path/to/wazuh-mcp-server",
       "args": ["--stdio"],
       "env": {
-        "WAZUH_HOST": "your-wazuh-server.com",
-        "WAZUH_USER": "your-api-user",
-        "WAZUH_PASS": "your-password"
+        "WAZUH_HOST": "wazuh-manager.local",
+        "WAZUH_USER": "wazuh-api",
+        "WAZUH_PASS": "SecureApiPassword123"
       }
     }
   }
@@ -260,6 +368,8 @@ MAX_CONNECTIONS=10                      # Connection pool size
 ```
 
 ### Remote HTTP Access
+
+**Method 1: Environment Variables**
 ```bash
 # Start in HTTP mode
 export MCP_TRANSPORT=http
@@ -268,7 +378,33 @@ export MCP_PORT=3000
 docker compose up -d
 
 # Access from remote client
-curl http://your-server:3000/health
+curl http://localhost:3000/health
+```
+
+**Method 2: Command-Line Arguments**
+```bash
+# Start with command-line arguments
+docker compose run --rm -p 3000:3000 wazuh-mcp-server ./wazuh-mcp-server --http
+
+# Test connection
+curl http://localhost:3000/health
+```
+
+**Method 3: Docker Compose Override**
+```bash
+# Create docker-compose.override.yml
+cat > docker-compose.override.yml << EOF
+services:
+  wazuh-mcp-server:
+    environment:
+      - MCP_TRANSPORT=http
+      - MCP_PORT=3000
+    ports:
+      - "3000:3000"
+    command: ["./wazuh-mcp-server", "--http"]
+EOF
+
+docker compose up -d
 ```
 
 ## 🔍 Testing & Validation
@@ -352,6 +488,6 @@ Once connected to your MCP client, try these commands:
 
 ## 🤝 Support
 
-- **Issues**: [GitHub Issues](https://github.com/your-org/Wazuh-MCP-Server/issues)
-- **Documentation**: [Full Documentation](https://docs.your-org.com/wazuh-mcp-server)
-- **Community**: [Discussions](https://github.com/your-org/Wazuh-MCP-Server/discussions)
+- **Issues**: [GitHub Issues](https://github.com/gensecaihq/Wazuh-MCP-Server/issues)
+- **Documentation**: [Project Wiki](https://github.com/gensecaihq/Wazuh-MCP-Server/wiki)
+- **Community**: [Discussions](https://github.com/gensecaihq/Wazuh-MCP-Server/discussions)
