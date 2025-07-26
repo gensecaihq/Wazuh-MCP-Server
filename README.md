@@ -42,26 +42,26 @@ Our automated scripts install Docker, Docker Compose, and set up the complete Wa
 
 **🐧 Linux (Debian/Ubuntu/Mint/Pop!_OS):**
 ```bash
-curl -fsSL https://raw.githubusercontent.com/gensecaihq/Wazuh-MCP-Server/main/scripts/install-docker-debian.sh | bash
+curl -fsSL https://raw.githubusercontent.com/gensecaihq/Wazuh-MCP-Server/main/install/install-docker-debian.sh | bash
 ```
 *Supports: Debian 11+, Ubuntu 20.04+, Linux Mint, Pop!_OS, Elementary OS*
 
 **🐧 Linux (RHEL/CentOS/Fedora/Rocky/AlmaLinux):**
 ```bash
-curl -fsSL https://raw.githubusercontent.com/gensecaihq/Wazuh-MCP-Server/main/scripts/install-docker-redhat.sh | bash
+curl -fsSL https://raw.githubusercontent.com/gensecaihq/Wazuh-MCP-Server/main/install/install-docker-redhat.sh | bash
 ```
 *Supports: RHEL 8+, CentOS 8+, Fedora 36+, Rocky Linux, AlmaLinux*
 
 **🍎 macOS (Intel & Apple Silicon):**
 ```bash
-curl -fsSL https://raw.githubusercontent.com/gensecaihq/Wazuh-MCP-Server/main/scripts/install-docker-macos.sh | bash
+curl -fsSL https://raw.githubusercontent.com/gensecaihq/Wazuh-MCP-Server/main/install/install-docker-macos.sh | bash
 ```
 *Supports: macOS 10.15+ (Catalina), includes Claude Desktop integration helper*
 
 **🪟 Windows (PowerShell as Administrator):**
 ```powershell
 Set-ExecutionPolicy Bypass -Scope Process -Force
-iwr -useb https://raw.githubusercontent.com/gensecaihq/Wazuh-MCP-Server/main/scripts/install-docker-windows.ps1 | iex
+iwr -useb https://raw.githubusercontent.com/gensecaihq/Wazuh-MCP-Server/main/install/install-docker-windows.ps1 | iex
 ```
 *Supports: Windows 10 Pro/Enterprise/Education, Windows 11, includes WSL2 setup*
 
@@ -74,7 +74,7 @@ iwr -useb https://raw.githubusercontent.com/gensecaihq/Wazuh-MCP-Server/main/scr
 - ✅ **Claude Desktop Integration** (configuration helpers)
 
 #### Manual Installation Alternative:
-If you prefer manual installation or need custom Docker setup, see [DOCKER_INSTALLATION_GUIDE.md](DOCKER_INSTALLATION_GUIDE.md) for detailed instructions.
+If you prefer manual installation or need custom Docker setup, see [DOCKER_INSTALLATION_GUIDE.md](docs/guides/DOCKER_INSTALLATION_GUIDE.md) for detailed instructions.
 
 ### Step 2: Clone Repository (if not done by installation script)
 ```bash
@@ -170,7 +170,7 @@ docker compose up -d
 **Complete Installation Verification:**
 ```bash
 # Run comprehensive verification (checks Docker, project, configuration)
-./scripts/verify-installation.sh
+./install/verify-installation.sh
 ```
 
 **Manual Verification Steps:**
@@ -187,14 +187,14 @@ docker compose ps
 docker compose logs wazuh-mcp-server
 
 # Test functionality
-python3 test-functionality.py
+python3 tools/test-functionality.py
 
 # Production readiness check
-python3 validate-production.py --quick
+python3 tools/validate-production.py --quick
 ```
 
 **Troubleshooting:**
-If verification fails, see [DOCKER_INSTALLATION_GUIDE.md](DOCKER_INSTALLATION_GUIDE.md#troubleshooting) for platform-specific troubleshooting.
+If verification fails, see [DOCKER_INSTALLATION_GUIDE.md](docs/guides/DOCKER_INSTALLATION_GUIDE.md#troubleshooting) for platform-specific troubleshooting.
 
 ## 📊 Capabilities
 
@@ -450,13 +450,13 @@ docker compose up -d
 ### Quick Deployment Test
 ```bash
 # Basic functionality test
-python3 test-functionality.py
+python3 tools/test-functionality.py
 
 # Production readiness validation
-python3 validate-production.py --quick
+python3 tools/validate-production.py --quick
 
 # Full production audit
-python3 validate-production.py --full
+python3 tools/validate-production.py --full
 ```
 
 ### Manual Testing
@@ -478,8 +478,8 @@ docker compose logs wazuh-mcp-server -f
 
 **Docker Not Installed/Working:**
 - Run the appropriate installation script for your OS (see Step 1 above)
-- For detailed troubleshooting, see [DOCKER_INSTALLATION_GUIDE.md](DOCKER_INSTALLATION_GUIDE.md#troubleshooting)
-- Verify installation: `./scripts/verify-installation.sh`
+- For detailed troubleshooting, see [DOCKER_INSTALLATION_GUIDE.md](docs/guides/DOCKER_INSTALLATION_GUIDE.md#troubleshooting)
+- Verify installation: `./install/verify-installation.sh`
 
 **Platform-Specific Docker Issues:**
 
@@ -519,7 +519,7 @@ sudo systemctl enable docker
 **Container Issues:**
 ```bash
 # Full diagnostic
-./scripts/verify-installation.sh
+./install/verify-installation.sh
 
 # Rebuild container
 docker compose build --no-cache
@@ -557,17 +557,17 @@ Once connected to your MCP client, try these commands:
 
 ## 📚 Documentation
 
-- **[DOCKER_INSTALLATION_GUIDE.md](DOCKER_INSTALLATION_GUIDE.md)** - Complete Docker installation guide for all platforms
-- **[PRODUCTION_DEPLOYMENT.md](PRODUCTION_DEPLOYMENT.md)** - Production deployment and configuration guide
+- **[DOCKER_INSTALLATION_GUIDE.md](docs/guides/DOCKER_INSTALLATION_GUIDE.md)** - Complete Docker installation guide for all platforms
+- **[PRODUCTION_DEPLOYMENT.md](docs/guides/PRODUCTION_DEPLOYMENT.md)** - Production deployment and configuration guide
 - **[LICENSE](LICENSE)** - MIT License
 - **[Contributing Guidelines](.github/CONTRIBUTING.md)** - Development setup and contribution guide
 
 ### Installation Scripts
-- `scripts/install-docker-debian.sh` - Automated Docker installation for Debian/Ubuntu systems
-- `scripts/install-docker-redhat.sh` - Automated Docker installation for RHEL/CentOS/Fedora systems  
-- `scripts/install-docker-macos.sh` - Automated Docker installation for macOS systems
-- `scripts/install-docker-windows.ps1` - Automated Docker installation for Windows systems
-- `scripts/verify-installation.sh` - Cross-platform installation verification script
+- `install/install-docker-debian.sh` - Automated Docker installation for Debian/Ubuntu systems
+- `install/install-docker-redhat.sh` - Automated Docker installation for RHEL/CentOS/Fedora systems  
+- `install/install-docker-macos.sh` - Automated Docker installation for macOS systems
+- `install/install-docker-windows.ps1` - Automated Docker installation for Windows systems
+- `install/verify-installation.sh` - Cross-platform installation verification script
 
 ## 🤝 Support
 

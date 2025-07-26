@@ -2033,7 +2033,7 @@ async def analyze_security_threats(
     include_cti_data: Annotated[bool, Field(description="Include CTI threat intelligence data (4.12+ feature)")] = False,
     ctx: Context = None
 ) -> dict:
-    """Analyze security threats with AI-powered insights and optional CTI data (4.12+ enhanced).""
+    """Analyze security threats with AI-powered insights and optional CTI data (4.12+ enhanced)."""
     try:
         client = await get_wazuh_client()
         
