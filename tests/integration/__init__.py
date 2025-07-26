@@ -1,1 +1,0 @@
-"""Integration tests for Wazuh MCP Server."""

@@ -1,0 +1,36 @@
+name: wazuh-mcp-server
+
+services:
+  wazuh-mcp-server:
+    build: .
+    container_name: wazuh-mcp-server
+    restart: unless-stopped
+    init: true
+    
+    environment:
+      WAZUH_HOST: ${WAZUH_HOST:?Required}
+      WAZUH_PORT: ${WAZUH_PORT:-55000}
+      WAZUH_USER: ${WAZUH_USER:?Required}
+      WAZUH_PASS: ${WAZUH_PASS:?Required}
+      
+      MCP_TRANSPORT: ${MCP_TRANSPORT:-stdio}
+      MCP_HOST: ${MCP_HOST:-0.0.0.0}
+      MCP_PORT: ${MCP_PORT:-3000}
+      
+      VERIFY_SSL: ${VERIFY_SSL:-true}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+    
+    ports:
+      - "${MCP_PORT:-3000}:3000"
+    
+    healthcheck:
+      test: ["CMD", "python3", "-c", "from src.wazuh_mcp_server.config import WazuhConfig; WazuhConfig.from_env()"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+          cpus: '0.5'
