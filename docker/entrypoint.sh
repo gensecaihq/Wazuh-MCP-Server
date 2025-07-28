@@ -9,7 +9,7 @@ echo "=================================="
 
 # Show environment info
 echo "Python version: $(python3 --version)"
-echo "Transport mode: ${MCP_TRANSPORT:-stdio}"
+echo "Transport mode: ${MCP_TRANSPORT:-http}"
 echo "Working directory: $(pwd)"
 
 # Validate critical environment variables
@@ -87,13 +87,13 @@ case "$1" in
         exit 0
         ;;
     "")
-        # No arguments, use environment variable or default to stdio
-        if [[ "${MCP_TRANSPORT}" == "http" ]]; then
-            echo "🚀 Starting HTTP/SSE server (from MCP_TRANSPORT env)..."
-            exec ./wazuh-mcp-server --http
-        else
-            echo "🚀 Starting STDIO server (default)..."
+        # No arguments, use environment variable or default to http
+        if [[ "${MCP_TRANSPORT:-http}" == "stdio" ]]; then
+            echo "🚀 Starting STDIO server (from MCP_TRANSPORT env)..."
             exec ./wazuh-mcp-server --stdio
+        else
+            echo "🚀 Starting HTTP/SSE server (default)..."
+            exec ./wazuh-mcp-server --http
         fi
         ;;
     *)

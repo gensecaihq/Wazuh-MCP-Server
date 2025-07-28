@@ -51,8 +51,7 @@ async def get_wazuh_client() -> WazuhClient:
 # Create FastMCP server with comprehensive metadata
 mcp = FastMCP(
     name="Wazuh MCP Server",
-    version="2.0.0",
-    description="Production-grade FastMCP server for Wazuh SIEM integration with comprehensive security analysis capabilities"
+    version="2.0.0"
 )
 
 
@@ -2344,7 +2343,9 @@ async def initialize_server():
         print(" Wazuh connection established")
         
         # Verify FastMCP tools are registered
-        print(f" FastMCP server initialized with {len(mcp._tools)} tools and {len(mcp._resources)} resources")
+        tools = await mcp.get_tools()
+        resources = await mcp.get_resources()
+        print(f" FastMCP server initialized with {len(tools)} tools and {len(resources)} resources")
         
     except (ConnectionError, httpx.RequestError, ValueError) as e:
         print(f" Server initialization failed - Connection/Config error: {e}")

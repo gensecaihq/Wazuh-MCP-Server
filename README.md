@@ -1,155 +1,63 @@
 # 🛡️ Wazuh MCP Server
 
-Production-grade FastMCP server for Wazuh SIEM integration with comprehensive security analysis. Connects to Wazuh Manager and Indexer for complete SIEM capabilities.
+**Production-grade Docker-only FastMCP server for Wazuh SIEM integration with comprehensive security analysis capabilities.**
+
+> 🐳 **Docker-Only Deployment** - Eliminates all local OS environment challenges by running everything in a container.
 
 ## 📋 Prerequisites
 
-### Wazuh Infrastructure Requirements
+**Only Docker Required:**
+- 🐳 **Docker 20.10+** and **Docker Compose 2.0+** 
+- 🌐 Network access to your Wazuh Manager
+- 💾 500MB RAM and 1GB disk space
 
-**Wazuh Manager (Required)**
-- Wazuh Manager 4.8.0+ with API enabled (tested up to 4.12.0+)
-- API authentication credentials (username/password)
-- Network connectivity on port 55000 (default)
-- Valid SSL certificate (recommended for production)
-- REST API v4.8+ features enabled
-- Auto SSL negotiation support (4.8+)
-
-**Wazuh Indexer (Recommended for Enhanced Features)**
-- Wazuh Indexer 4.8.0+ for advanced search and analytics (4.12+ recommended)
-- Network connectivity on port 9200 (default)  
-- Authentication credentials if security is enabled
-- Enables enhanced analytics, vulnerability data, and performance improvements
-- Required for full compliance reporting and advanced threat analysis
-- CTI (Cyber Threat Intelligence) integration support (4.12+)
-
-### System Requirements
-
-**Docker Requirements:**
-- **Linux**: Docker 20.10+ and Docker Compose 2.0+, 2GB RAM, 5GB disk space
-- **macOS**: Docker Desktop 4.0+, macOS 10.15+, 4GB RAM, 10GB disk space
-- **Windows**: Docker Desktop 4.0+, Windows 10 Pro/Enterprise/Education or Windows 11, 4GB RAM, 20GB disk space
-
-**Wazuh MCP Server:**
-- 512MB RAM minimum, 1GB recommended (additional to Docker requirements)
-- Network access to Wazuh infrastructure
-- MCP client (Claude Desktop, Continue, etc.)
+**Wazuh Infrastructure:**
+- **Wazuh Manager 4.8.0+** with API enabled (tested up to 4.12.0+)
+- **Wazuh Indexer 4.8.0+** (recommended for enhanced features)
+- Valid Wazuh API credentials (username/password)
 
 ## 🚀 Quick Deploy
 
-### Step 1: Install Docker (Automated - Recommended)
+### 🏆 Option 1: Pre-Built Image (Fastest - No Build Required)
 
-Our automated scripts install Docker, Docker Compose, and set up the complete Wazuh MCP Server environment:
-
-**🐧 Linux (Debian/Ubuntu/Mint/Pop!_OS):**
+**⚡ One Command Deploy:**
 ```bash
-curl -fsSL https://raw.githubusercontent.com/gensecaihq/Wazuh-MCP-Server/main/install/install-docker-debian.sh | bash
+curl -fsSL https://raw.githubusercontent.com/gensecaihq/Wazuh-MCP-Server/main/deploy-prebuilt.sh | bash -s -- your-wazuh-host.com api-username api-password
 ```
-*Supports: Debian 11+, Ubuntu 20.04+, Linux Mint, Pop!_OS, Elementary OS*
 
-**🐧 Linux (RHEL/CentOS/Fedora/Rocky/AlmaLinux):**
+**🔧 Or Download and Run:**
 ```bash
-curl -fsSL https://raw.githubusercontent.com/gensecaihq/Wazuh-MCP-Server/main/install/install-docker-redhat.sh | bash
+curl -O https://raw.githubusercontent.com/gensecaihq/Wazuh-MCP-Server/main/deploy-prebuilt.sh
+chmod +x deploy-prebuilt.sh
+./deploy-prebuilt.sh your-wazuh-host.com api-username api-password
 ```
-*Supports: RHEL 8+, CentOS 8+, Fedora 36+, Rocky Linux, AlmaLinux*
 
-**🍎 macOS (Intel & Apple Silicon):**
-```bash
-curl -fsSL https://raw.githubusercontent.com/gensecaihq/Wazuh-MCP-Server/main/install/install-docker-macos.sh | bash
-```
-*Supports: macOS 10.15+ (Catalina), includes Claude Desktop integration helper*
+**📖 See [PREBUILT_IMAGE.md](PREBUILT_IMAGE.md) for complete pre-built image documentation.**
 
-**🪟 Windows (PowerShell as Administrator):**
-```powershell
-Set-ExecutionPolicy Bypass -Scope Process -Force
-iwr -useb https://raw.githubusercontent.com/gensecaihq/Wazuh-MCP-Server/main/install/install-docker-windows.ps1 | iex
-```
-*Supports: Windows 10 Pro/Enterprise/Education, Windows 11, includes WSL2 setup*
+---
 
-#### What the Scripts Install:
-- ✅ **Docker Engine** (latest stable version)
-- ✅ **Docker Compose** (V2 plugin)
-- ✅ **Wazuh MCP Server** (complete project setup)
-- ✅ **System Configuration** (optimized settings, user permissions)
-- ✅ **Deployment Scripts** (ready-to-use helpers)
-- ✅ **Claude Desktop Integration** (configuration helpers)
+### 🛠️ Option 2: Build from Source
 
-#### Manual Installation Alternative:
-If you prefer manual installation or need custom Docker setup, see [DOCKER_INSTALLATION_GUIDE.md](docs/guides/DOCKER_INSTALLATION_GUIDE.md) for detailed instructions.
-
-### Step 2: Clone Repository (if not done by installation script)
+**Step 1: Get the Project**
 ```bash
 git clone https://github.com/gensecaihq/Wazuh-MCP-Server.git
 cd Wazuh-MCP-Server
 ```
 
-### Step 3: Configure Wazuh Connection
-
-**Automated Configuration (Recommended):**
+**Step 2: Configure and Deploy**
 ```bash
-# Run the configuration wizard
-./scripts/configure.sh
+# Interactive setup
+./configure-wazuh.sh
+
+# Or one-liner
+./quick-deploy.sh your-wazuh-host.com api-username api-password
 ```
 
-This will guide you through setting up:
-- Wazuh Manager connection (required)
-- Optional Wazuh Indexer settings
-- Advanced settings if needed
-
-**Quick Start Alternative:**
-```bash
-# Run quick start script (includes configuration)
-./scripts/quick-start.sh
+**Step 3: Access Your Server**
 ```
-
-**Manual Configuration (if preferred):**
-```bash
-# Copy and edit the configuration template
-cp config/wazuh.env.example config/wazuh.env
-nano config/wazuh.env  # Edit with your settings
+🌐 Server URL: http://localhost:3000
+🏥 Health Check: http://localhost:3000/health
 ```
-
-### Step 4: Start the Server
-
-```bash
-# Start with Docker Compose
-docker compose up -d
-
-# Or use the quick start script
-./scripts/quick-start.sh
-```
-
-The server defaults to HTTP/SSE mode and is accessible at `http://localhost:3000`. For Claude Desktop integration, see [STDIO Mode Setup](#claude-desktop-stdio-mode).
-
-### Step 5: Verify Installation & Deployment
-
-**Complete Installation Verification:**
-```bash
-# Run comprehensive verification (checks Docker, project, configuration)
-./install/verify-installation.sh
-```
-
-**Manual Verification Steps:**
-```bash
-# Check Docker installation
-docker --version
-docker compose version
-docker run hello-world
-
-# Check container status
-docker compose ps
-
-# View logs
-docker compose logs wazuh-mcp-server
-
-# Test functionality
-python3 tools/test-functionality.py
-
-# Production readiness check
-python3 tools/validate-production.py --quick
-```
-
-**Troubleshooting:**
-If verification fails, see [DOCKER_INSTALLATION_GUIDE.md](docs/guides/DOCKER_INSTALLATION_GUIDE.md#troubleshooting) for platform-specific troubleshooting.
 
 ## 📊 Capabilities
 
@@ -190,243 +98,171 @@ If verification fails, see [DOCKER_INSTALLATION_GUIDE.md](docs/guides/DOCKER_INS
 ## 🏗️ Architecture
 
 ```
-MCP Client → FastMCP Server → Wazuh Manager API → Security Data
-(Claude)         ↓              ↓                    ↓
-            Docker Container → Wazuh Indexer → Enhanced Analytics
+MCP Client → Docker Container → Wazuh Manager API → Security Data
+(Claude)         ↓                    ↓                    ↓
+            FastMCP Server → Wazuh Indexer → Enhanced Analytics
                                (Optional)
 ```
 
-**Production Architecture:**
-- 🐳 **Containerized Deployment** - Zero host dependencies
-- 🌍 **OS Agnostic** - Linux, macOS, Windows via Docker
-- 🔒 **Security Hardened** - Non-root execution, SSL verification
-- ⚡ **High Performance** - Async operations, connection pooling
-- 📈 **Scalable Design** - Resource limits, health monitoring
-- 🔄 **Dual Transport** - STDIO for desktop, HTTP/SSE for remote
+**Container Architecture:**
+- 🐳 **Base**: Python 3.12 slim
+- 🔒 **Security**: Non-root user, minimal attack surface
+- 📦 **Dependencies**: All included (FastMCP, httpx, pydantic, uvicorn)
+- 🛡️ **Monitoring**: Built-in health checks and validation tools
+- ⚡ **Performance**: Optimized for production workloads
 
-## ⚙️ Configuration
+## 🔧 Configuration
 
-### Quick Configuration
-
-Run the configuration wizard:
+### Required Settings (Only 3)
 ```bash
-./scripts/configure.sh
+WAZUH_HOST=your-wazuh-manager.domain.com  # Wazuh Manager hostname/IP
+WAZUH_USER=your-api-username              # Wazuh API username  
+WAZUH_PASS=your-api-password              # Wazuh API password
 ```
 
-This will create `config/wazuh.env` with your settings.
-
-### Configuration File Structure
-
-All settings are stored in `config/wazuh.env`:
-
-```env
-# Required Settings
-WAZUH_HOST=your-wazuh-manager.com
-WAZUH_USER=your-api-username
-WAZUH_PASS=your-api-password
-
-# Optional Settings (with defaults)
-WAZUH_PORT=55000
-VERIFY_SSL=true
-
-# Wazuh Indexer (if available)
-WAZUH_INDEXER_HOST=your-wazuh-indexer.com
-WAZUH_INDEXER_USER=admin
-WAZUH_INDEXER_PASS=your-indexer-password
-```
-
-### Advanced Configuration
-
-For advanced users who need to customize further:
-
-1. **Transport Mode**: Default is STDIO for Claude Desktop
-   - Set `MCP_TRANSPORT=http` in config for remote access
-   
-2. **Performance Tuning**: Rarely needed
-   - `MAX_ALERTS_PER_QUERY` (default: 1000)
-   - `REQUEST_TIMEOUT_SECONDS` (default: 30)
-   - `MAX_CONNECTIONS` (default: 10)
-
-3. **Manual Configuration**: Edit `config/wazuh.env` directly
-
-See [Full Configuration Guide](docs/guides/CONFIGURATION.md) for all options.
-
-## 💡 Usage Examples
-
-```
-"Show me recent critical alerts"
-"Create incident for brute force attack on server-01" 
-"Execute firewall-block on agent 001"
-"Search logs for authentication failures"
-"Generate security trends with predictions"
-"What's my agent health status?"
-```
-
-## 🎯 MCP Client Integration
-
-### HTTP/SSE Mode (Default)
-
-The server runs in HTTP/SSE mode by default at `http://localhost:3000`.
-
-**For Continue.dev, Cursor, or custom MCP clients:**
-
-```json
-{
-  "mcpServers": {
-    "wazuh": {
-      "url": "http://localhost:3000",
-      "transport": "http"
-    }
-  }
-}
-```
-
-**Test the connection:**
+### Optional Settings (Smart Defaults)
 ```bash
+WAZUH_PORT=55000          # Wazuh API port
+MCP_PORT=3000            # Server port (HTTP/SSE mode)
+MCP_TRANSPORT=http       # Transport mode (http/stdio)
+VERIFY_SSL=true          # SSL certificate verification
+```
+
+## 🛠️ Container Management
+
+### Essential Commands
+```bash
+# View real-time logs
+docker compose logs -f
+
+# Check container status  
+docker compose ps
+
+# Stop the server
+docker compose down
+
+# Restart the server
+docker compose restart
+
+# Update to latest version
+git pull && docker compose up -d --build
+```
+
+### Health & Testing
+```bash
+# Health check
 curl http://localhost:3000/health
+
+# Run functionality tests
+docker compose exec wazuh-mcp-server python3 test-functionality.py
+
+# Run production validation
+docker compose exec wazuh-mcp-server python3 validate-production.py --full
+
+# Container shell access
+docker compose exec wazuh-mcp-server bash
 ```
 
-### Claude Desktop (STDIO Mode)
+## 🔄 Transport Modes
 
-For direct Claude Desktop integration, switch to STDIO mode:
-
-1. **Configure STDIO mode:**
-   ```bash
-   echo "MCP_TRANSPORT=stdio" >> config/wazuh.env
-   docker compose restart
-   ```
-
-2. **Add to Claude Desktop settings:**
-   ```json
-   {
-     "mcpServers": {
-       "wazuh": {
-         "command": "docker",
-         "args": ["exec", "-i", "wazuh-mcp-server", "./wazuh-mcp-server", "--stdio"]
-       }
-     }
-   }
-   ```
-
-## 🔍 Testing & Validation
-
-### Quick Deployment Test
+### HTTP/SSE Mode (Default - Recommended)
+**Best for web clients, remote access, and production deployments.**
 ```bash
-# Basic functionality test
-./scripts/test-server.sh
-
-# Production readiness validation
-./scripts/validate-production.sh
+# Default mode - no changes needed
+docker compose up -d
+# Access at: http://localhost:3000
 ```
 
-##### Manual Testing
+### STDIO Mode
+**For Claude Desktop direct integration.**
 ```bash
-# Test Wazuh connectivity
-curl -k "https://${WAZUH_HOST}:${WAZUH_PORT}/security/user/authenticate" \
-  -u "${WAZUH_USER}:${WAZUH_PASS}"
-
-# Check container logs
-docker compose logs wazuh-mcp-server -f
+# Enable STDIO mode
+echo "MCP_TRANSPORT=stdio" >> .env.wazuh
+docker compose up -d
 ```
+
+## 🌍 Cross-Platform Deployment
+
+### Any OS with Docker
+```bash
+# Linux, macOS, Windows - same commands
+git clone https://github.com/gensecaihq/Wazuh-MCP-Server.git
+cd Wazuh-MCP-Server
+./configure-wazuh.sh
+```
+
+### Cloud Deployment
+```bash
+# Works on any cloud VM (AWS, Azure, GCP, etc.)
+curl -fsSL https://get.docker.com | sh
+git clone https://github.com/gensecaihq/Wazuh-MCP-Server.git
+cd Wazuh-MCP-Server
+./configure-wazuh.sh
+# Configure cloud firewall for port 3000 if needed
+```
+
+## 🔒 Security Features
+
+- 🛡️ **Container Security**: Non-root user, minimal base image
+- 🔐 **SSL/TLS**: Certificate verification enabled by default
+- 📊 **Monitoring**: Built-in health checks and metrics
+- 🚨 **Validation**: Production readiness verification tools
+- 🔍 **Audit**: Comprehensive security analysis capabilities
 
 ## 🚨 Troubleshooting
 
-### Docker Installation Issues
-
-**Docker Not Installed/Working:**
-- Run the appropriate installation script for your OS (see Step 1 above)
-- For detailed troubleshooting, see [DOCKER_INSTALLATION_GUIDE.md](docs/guides/DOCKER_INSTALLATION_GUIDE.md#troubleshooting)
-- Verify installation: `./install/verify-installation.sh`
-
-**Platform-Specific Docker Issues:**
-
-**Linux:**
+### Container Issues
 ```bash
-# Permission denied errors
-sudo usermod -aG docker $USER
-newgrp docker
+# Check container logs
+docker compose logs -f
 
-# Docker daemon not running
-sudo systemctl start docker
-sudo systemctl enable docker
+# Verify configuration
+docker compose config
+
+# Test Wazuh connectivity
+docker compose exec wazuh-mcp-server curl -k https://YOUR_WAZUH_HOST:55000
 ```
 
-**macOS:**
-- Ensure Docker Desktop is running
-- Check system requirements (macOS 10.15+, 4GB RAM)
-- Restart Docker Desktop if needed
-
-**Windows:**
-- Run PowerShell as Administrator
-- Ensure WSL2 is properly configured
-- Check Windows edition compatibility
-
-### Wazuh MCP Server Issues
-
-**Connection Errors:**
-- Verify Wazuh Manager is accessible on specified port
-- Check firewall rules and network connectivity
-- Validate SSL certificates if VERIFY_SSL=true
-
-**Authentication Failures:**
-- Confirm API user exists in Wazuh Manager
-- Verify user has sufficient read permissions
-- Check password special characters are properly escaped
-
-**Container Issues:**
+### Network Issues
 ```bash
-# Full diagnostic
-./install/verify-installation.sh
+# Test network connectivity
+docker compose exec wazuh-mcp-server ping your-wazuh-host
 
-# Rebuild container
-docker compose build --no-cache
-docker compose up -d
-
-# Check resource usage
-docker stats wazuh-mcp-server
-
-# View detailed logs
-docker compose logs wazuh-mcp-server --tail=100
-
-# Check container health
+# Check port availability
 docker compose ps
-docker inspect wazuh-mcp-server
 ```
 
-## 💡 Usage Examples
+### Configuration Issues
+```bash
+# Reconfigure
+./configure-wazuh.sh
 
-Once connected to your MCP client, try these commands:
-
-```
-"Show me recent critical alerts"
-"What's the status of agent 001?"
-"Create incident for brute force attack on server-01"
-"Execute firewall-block on compromised agent"
-"Search logs for authentication failures in last 24 hours"
-"Generate security analytics with trend predictions"
-"What vulnerabilities exist in my environment?" (uses 4.8+ centralized detection)
-"Show me CTI threat intelligence for this CVE" (4.12+ feature)
-"Analyze threat landscape with CTI data" (4.12+ enhanced)
-"Show me file integrity violations"
-"Check for new Wazuh version updates" (4.8+ feature)
-"Get detailed vulnerability info with package conditions" (4.12+ feature)
+# Or edit directly
+nano .env.wazuh
+docker compose restart
 ```
 
 ## 📚 Documentation
 
-- **[DOCKER_INSTALLATION_GUIDE.md](docs/guides/DOCKER_INSTALLATION_GUIDE.md)** - Complete Docker installation guide for all platforms
-- **[PRODUCTION_DEPLOYMENT.md](docs/guides/PRODUCTION_DEPLOYMENT.md)** - Production deployment and configuration guide
-- **[LICENSE](LICENSE)** - MIT License
-- **[Contributing Guidelines](.github/CONTRIBUTING.md)** - Development setup and contribution guide
-
-### Quick Links
-- [Quick Start Guide](docs/QUICK_START.md) - Get started in 3 steps
-- [Configuration Guide](docs/guides/CONFIGURATION.md) - All configuration options
-- [Production Deployment](docs/guides/PRODUCTION_DEPLOYMENT.md) - Enterprise setup
-- [Docker Installation](docs/guides/DOCKER_INSTALLATION_GUIDE.md) - Platform-specific Docker setup
+- 🏆 **[Pre-Built Image Guide](PREBUILT_IMAGE.md)** - Use ready-to-deploy Docker image (fastest)
+- 📖 **[Complete Docker Guide](DOCKER_DEPLOY.md)** - Build from source instructions
+- 🎯 **[Deployment Summary](DEPLOYMENT_SUMMARY.md)** - Technical overview and achievements
+- 🔧 **[Configuration Examples](config/wazuh.env.example)** - Configuration templates
 
 ## 🤝 Support
 
-- **Issues**: [GitHub Issues](https://github.com/gensecaihq/Wazuh-MCP-Server/issues)
-- **Documentation**: [Project Wiki](https://github.com/gensecaihq/Wazuh-MCP-Server/wiki)
-- **Community**: [Discussions](https://github.com/gensecaihq/Wazuh-MCP-Server/discussions)
+**If you encounter issues:**
+1. Check logs: `docker compose logs -f`
+2. Verify Wazuh connectivity
+3. Run health checks: `curl http://localhost:3000/health`
+4. Review troubleshooting section above
+
+## 📄 License
+
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+
+---
+
+**🐳 Docker-Only Deployment - Zero OS Dependencies!**
+
+*Everything runs in a container. Just install Docker and deploy anywhere.*

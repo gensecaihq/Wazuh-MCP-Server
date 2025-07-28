@@ -11,9 +11,10 @@ services:
     restart: unless-stopped
     init: true
     
-    # Load configuration from file
+    # Load configuration from file (created by configure-wazuh.sh)
+    # If file doesn't exist, use environment variables or defaults
     env_file:
-      - ./config/wazuh.env
+      - .env.wazuh
     
     # Transport mode - defaults to HTTP/SSE
     environment:

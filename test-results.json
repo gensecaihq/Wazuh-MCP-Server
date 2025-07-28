@@ -1,0 +1,186 @@
+{
+  "summary": {
+    "passed": 25,
+    "failed": 0,
+    "warnings": 0,
+    "success": true
+  },
+  "tests": [
+    {
+      "name": "FastMCP Import",
+      "status": "PASS",
+      "message": "FastMCP imported successfully",
+      "duration": 1.6605091094970703,
+      "timestamp": "2025-07-28T17:12:34.186198"
+    },
+    {
+      "name": "Server Import",
+      "status": "PASS",
+      "message": "Server module imported successfully",
+      "duration": 0.11242008209228516,
+      "timestamp": "2025-07-28T17:12:34.298642"
+    },
+    {
+      "name": "Config Import",
+      "status": "PASS",
+      "message": "Config module imported successfully",
+      "duration": 2.1457672119140625e-06,
+      "timestamp": "2025-07-28T17:12:34.298659"
+    },
+    {
+      "name": "Client Import",
+      "status": "PASS",
+      "message": "Client module imported successfully",
+      "duration": 3.0994415283203125e-06,
+      "timestamp": "2025-07-28T17:12:34.298666"
+    },
+    {
+      "name": "Config Creation",
+      "status": "PASS",
+      "message": "Configuration created successfully",
+      "duration": 0.0032629966735839844,
+      "timestamp": "2025-07-28T17:12:34.301956"
+    },
+    {
+      "name": "HTTP Default",
+      "status": "PASS",
+      "message": "Transport defaults to HTTP correctly",
+      "duration": 1.1920928955078125e-06,
+      "timestamp": "2025-07-28T17:12:34.301978"
+    },
+    {
+      "name": "FastMCP Server",
+      "status": "PASS",
+      "message": "FastMCP server instance created",
+      "duration": 7.867813110351562e-06,
+      "timestamp": "2025-07-28T17:12:34.302014"
+    },
+    {
+      "name": "Tools Registration",
+      "status": "PASS",
+      "message": "20 tools registered",
+      "duration": 1.0967254638671875e-05,
+      "timestamp": "2025-07-28T17:12:34.302031"
+    },
+    {
+      "name": "Resources Registration",
+      "status": "PASS",
+      "message": "2 resources registered",
+      "duration": 7.152557373046875e-06,
+      "timestamp": "2025-07-28T17:12:34.302042"
+    },
+    {
+      "name": "File: wazuh-mcp-server",
+      "status": "PASS",
+      "message": "File exists",
+      "duration": 8.797645568847656e-05,
+      "timestamp": "2025-07-28T17:12:34.302143"
+    },
+    {
+      "name": "File: src/wazuh_mcp_server/server.py",
+      "status": "PASS",
+      "message": "File exists",
+      "duration": 3.933906555175781e-05,
+      "timestamp": "2025-07-28T17:12:34.302190"
+    },
+    {
+      "name": "File: src/wazuh_mcp_server/config.py",
+      "status": "PASS",
+      "message": "File exists",
+      "duration": 2.6226043701171875e-05,
+      "timestamp": "2025-07-28T17:12:34.302222"
+    },
+    {
+      "name": "File: src/wazuh_mcp_server/api/wazuh_client.py",
+      "status": "PASS",
+      "message": "File exists",
+      "duration": 2.4080276489257812e-05,
+      "timestamp": "2025-07-28T17:12:34.302252"
+    },
+    {
+      "name": "File: config/wazuh.env.example",
+      "status": "PASS",
+      "message": "File exists",
+      "duration": 2.3126602172851562e-05,
+      "timestamp": "2025-07-28T17:12:34.302280"
+    },
+    {
+      "name": "File: docker/entrypoint.sh",
+      "status": "PASS",
+      "message": "File exists",
+      "duration": 2.2172927856445312e-05,
+      "timestamp": "2025-07-28T17:12:34.302307"
+    },
+    {
+      "name": "File: compose.yml",
+      "status": "PASS",
+      "message": "File exists",
+      "duration": 2.193450927734375e-05,
+      "timestamp": "2025-07-28T17:12:34.302333"
+    },
+    {
+      "name": "File: requirements.txt",
+      "status": "PASS",
+      "message": "File exists",
+      "duration": 1.9073486328125e-05,
+      "timestamp": "2025-07-28T17:12:34.302357"
+    },
+    {
+      "name": "Executable: wazuh-mcp-server",
+      "status": "PASS",
+      "message": "Script is executable",
+      "duration": 5.1975250244140625e-05,
+      "timestamp": "2025-07-28T17:12:34.302429"
+    },
+    {
+      "name": "Executable: configure-wazuh.sh",
+      "status": "PASS",
+      "message": "Script is executable",
+      "duration": 4.482269287109375e-05,
+      "timestamp": "2025-07-28T17:12:34.302482"
+    },
+    {
+      "name": "Executable: quick-deploy.sh",
+      "status": "PASS",
+      "message": "Script is executable",
+      "duration": 4.100799560546875e-05,
+      "timestamp": "2025-07-28T17:12:34.302528"
+    },
+    {
+      "name": "Executable: deploy-prebuilt.sh",
+      "status": "PASS",
+      "message": "Script is executable",
+      "duration": 4.124641418457031e-05,
+      "timestamp": "2025-07-28T17:12:34.302575"
+    },
+    {
+      "name": "Executable: build-image.sh",
+      "status": "PASS",
+      "message": "Script is executable",
+      "duration": 3.910064697265625e-05,
+      "timestamp": "2025-07-28T17:12:34.302620"
+    },
+    {
+      "name": "Executable: verify-container.sh",
+      "status": "PASS",
+      "message": "Script is executable",
+      "duration": 3.790855407714844e-05,
+      "timestamp": "2025-07-28T17:12:34.302664"
+    },
+    {
+      "name": "Executable: docker/entrypoint.sh",
+      "status": "PASS",
+      "message": "Script is executable",
+      "duration": 3.790855407714844e-05,
+      "timestamp": "2025-07-28T17:12:34.302707"
+    },
+    {
+      "name": "Docker Compose Syntax",
+      "status": "PASS",
+      "message": "compose.yml syntax valid",
+      "duration": 0.5664749145507812,
+      "timestamp": "2025-07-28T17:12:34.869215"
+    }
+  ],
+  "timestamp": "2025-07-28T17:12:34.870390"
+}

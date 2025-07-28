@@ -138,7 +138,7 @@ For direct Claude Desktop integration:
 docker compose config
 
 # Test Wazuh connection
-python3 tools/test-functionality.py
+python3 test-functionality.py
 ```
 
 ### Check Logs
