@@ -29,6 +29,11 @@ class WazuhConfig:
     wazuh_indexer_user: Optional[str] = None
     wazuh_indexer_pass: Optional[str] = None
     
+    # Transport settings
+    mcp_transport: str = "http"  # Default to HTTP/SSE mode
+    mcp_host: str = "0.0.0.0"
+    mcp_port: int = 3000
+    
     # Advanced settings (rarely need to change)
     request_timeout_seconds: int = 30
     max_alerts_per_query: int = 1000
@@ -83,6 +88,9 @@ class WazuhConfig:
             wazuh_indexer_port=int(os.getenv("WAZUH_INDEXER_PORT", "9200")),
             wazuh_indexer_user=os.getenv("WAZUH_INDEXER_USER"),
             wazuh_indexer_pass=os.getenv("WAZUH_INDEXER_PASS"),
+            mcp_transport=os.getenv("MCP_TRANSPORT", "http"),  # Default to HTTP/SSE
+            mcp_host=os.getenv("MCP_HOST", "0.0.0.0"),
+            mcp_port=int(os.getenv("MCP_PORT", "3000")),
             request_timeout_seconds=int(os.getenv("REQUEST_TIMEOUT_SECONDS", "30")),
             max_alerts_per_query=int(os.getenv("MAX_ALERTS_PER_QUERY", "1000")),
             max_connections=int(os.getenv("MAX_CONNECTIONS", "10"))

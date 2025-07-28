@@ -54,12 +54,12 @@ WAZUH_INDEXER_PORT=9200
 #### Transport Mode
 
 ```env
-# MCP Transport Mode (default: stdio)
-# - stdio: For Claude Desktop integration
-# - http: For remote/web access
-MCP_TRANSPORT=stdio
+# MCP Transport Mode (default: http)
+# - http: For web/remote access (default)
+# - stdio: For direct Claude Desktop integration
+MCP_TRANSPORT=http
 
-# HTTP Mode Settings (only used when MCP_TRANSPORT=http)
+# HTTP/SSE Mode Settings (default mode)
 MCP_HOST=0.0.0.0
 MCP_PORT=3000
 ```
@@ -106,19 +106,20 @@ docker compose up -d
 
 ## Transport Modes
 
-### STDIO Mode (Default)
+### HTTP/SSE Mode (Default)
 
-Best for Claude Desktop integration:
-- Direct communication
-- No network configuration
-- Lowest latency
+Best for web clients and remote access:
+- Web-based interface at `http://localhost:3000`
+- RESTful API access
+- Supports multiple concurrent connections
+- Server-Sent Events for real-time updates
 
-### HTTP Mode
+### STDIO Mode (Optional)
 
-For remote access or web clients:
+For direct Claude Desktop integration:
 1. Set in configuration:
    ```bash
-   echo "MCP_TRANSPORT=http" >> config/wazuh.env
+   echo "MCP_TRANSPORT=stdio" >> config/wazuh.env
    ```
 
 2. Restart server:
@@ -126,7 +127,7 @@ For remote access or web clients:
    docker compose restart
    ```
 
-3. Access at `http://localhost:3000`
+3. Configure Claude Desktop with container exec command
 
 ## Validation
 

@@ -110,5 +110,6 @@ fi
 
 echo -e "${GREEN}Next steps:${NC}"
 echo -e "1. Start the server: ${BLUE}docker compose up -d${NC}"
-echo -e "2. Check logs: ${BLUE}docker compose logs -f${NC}"
-echo -e "3. Configure Claude Desktop with the settings from the README\n"
+echo -e "2. Access at: ${BLUE}http://localhost:3000${NC}"
+echo -e "3. Check logs: ${BLUE}docker compose logs -f${NC}"
+echo -e "4. For Claude Desktop integration, see README for STDIO mode setup\n"

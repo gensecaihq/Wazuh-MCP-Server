@@ -118,7 +118,7 @@ docker compose up -d
 ./scripts/quick-start.sh
 ```
 
-The server defaults to STDIO mode for Claude Desktop. For HTTP/remote access, see [Advanced Configuration](#advanced-configuration).
+The server defaults to HTTP/SSE mode and is accessible at `http://localhost:3000`. For Claude Desktop integration, see [STDIO Mode Setup](#claude-desktop-stdio-mode).
 
 ### Step 5: Verify Installation & Deployment
 
@@ -264,38 +264,45 @@ See [Full Configuration Guide](docs/guides/CONFIGURATION.md) for all options.
 
 ## 🎯 MCP Client Integration
 
-### Claude Desktop Configuration
+### HTTP/SSE Mode (Default)
 
-After starting the server, add this to your Claude Desktop settings:
+The server runs in HTTP/SSE mode by default at `http://localhost:3000`.
+
+**For Continue.dev, Cursor, or custom MCP clients:**
 
 ```json
 {
   "mcpServers": {
     "wazuh": {
-      "command": "docker",
-      "args": ["exec", "-i", "wazuh-mcp-server", "./wazuh-mcp-server", "--stdio"]
+      "url": "http://localhost:3000",
+      "transport": "http"
     }
   }
 }
 ```
 
-### Other MCP Clients
+**Test the connection:**
+```bash
+curl http://localhost:3000/health
+```
 
-For Continue.dev, Cursor, or custom clients using HTTP mode:
+### Claude Desktop (STDIO Mode)
 
-1. Configure for HTTP mode:
+For direct Claude Desktop integration, switch to STDIO mode:
+
+1. **Configure STDIO mode:**
    ```bash
-   echo "MCP_TRANSPORT=http" >> config/wazuh.env
-   docker compose up -d
+   echo "MCP_TRANSPORT=stdio" >> config/wazuh.env
+   docker compose restart
    ```
 
-2. Add to client configuration:
+2. **Add to Claude Desktop settings:**
    ```json
    {
      "mcpServers": {
        "wazuh": {
-         "url": "http://localhost:3000",
-         "transport": "http"
+         "command": "docker",
+         "args": ["exec", "-i", "wazuh-mcp-server", "./wazuh-mcp-server", "--stdio"]
        }
      }
    }

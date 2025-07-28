@@ -2361,8 +2361,8 @@ if __name__ == "__main__":
     # Initialize server
     asyncio.run(initialize_server())
     
-    # Start based on transport mode
-    transport = os.getenv("MCP_TRANSPORT", "stdio").lower()
+    # Start based on transport mode - Default to HTTP/SSE
+    transport = os.getenv("MCP_TRANSPORT", "http").lower()
     
     if transport == "http":
         host = os.getenv("MCP_HOST", "0.0.0.0")
@@ -2373,8 +2373,11 @@ if __name__ == "__main__":
         except ValueError as e:
             print(f"ERROR: Invalid MCP_PORT value '{os.getenv('MCP_PORT')}': {e}")
             sys.exit(1)
-        print(f" Starting HTTP server on {host}:{port}")
+        print(f" Starting HTTP/SSE server on {host}:{port}")
         uvicorn.run(mcp.create_app(), host=host, port=port)
-    else:
+    elif transport == "stdio":
         print(" Starting STDIO server for Claude Desktop")
         mcp.run()
+    else:
+        print(f"ERROR: Invalid transport mode '{transport}'. Use 'http' or 'stdio'")
+        sys.exit(1)

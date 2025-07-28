@@ -15,11 +15,13 @@ services:
     env_file:
       - ./config/wazuh.env
     
-    # Transport mode can be overridden
+    # Transport mode - defaults to HTTP/SSE
     environment:
-      MCP_TRANSPORT: ${MCP_TRANSPORT:-stdio}
+      MCP_TRANSPORT: ${MCP_TRANSPORT:-http}
+      MCP_HOST: ${MCP_HOST:-0.0.0.0}
+      MCP_PORT: ${MCP_PORT:-3000}
     
-    # Conditional port mapping for HTTP mode
+    # Port mapping for HTTP/SSE mode (default)
     ports:
       - "${MCP_PORT:-3000}:3000"
     
@@ -37,6 +39,6 @@ services:
           memory: 512M
           cpus: '0.5'
     
-    # Required for STDIO mode
+    # For STDIO mode (when MCP_TRANSPORT=stdio)
     stdin_open: true
     tty: true

@@ -1,5 +1,17 @@
 # Changelog
 
+## [2.1.0] - HTTP/SSE Default Mode
+
+### Changed
+- **HTTP/SSE Default**: Server now defaults to HTTP/SSE mode instead of STDIO
+- **Web Interface**: Accessible at `http://localhost:3000` by default
+- **STDIO Optional**: Claude Desktop integration now requires explicit STDIO mode configuration
+
+### Added
+- `scripts/test-http-mode.sh` - HTTP mode functionality testing
+- HTTP/SSE health endpoint at `/health`
+- Better web client support out of the box
+
 ## [2.0.0] - Repository Optimization
 
 ### Changed

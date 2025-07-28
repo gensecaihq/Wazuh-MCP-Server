@@ -57,10 +57,18 @@ done
 
 echo -e "\n${GREEN}Wazuh MCP Server is running!${NC}\n"
 
-# Show Claude Desktop configuration
-echo -e "${BLUE}Claude Desktop Configuration:${NC}"
-echo -e "Add this to your Claude Desktop settings:\n"
+# Show access information
+echo -e "${BLUE}Server Access:${NC}"
+echo -e "Web Interface: ${YELLOW}http://localhost:3000${NC}"
+echo -e "Health Check:  ${YELLOW}http://localhost:3000/health${NC}\n"
+
+echo -e "${BLUE}Claude Desktop Configuration (STDIO mode):${NC}"
+echo -e "For direct Claude Desktop integration, use STDIO mode:"
+echo -e "1. Set ${YELLOW}MCP_TRANSPORT=stdio${NC} in config/wazuh.env"
+echo -e "2. Restart: ${YELLOW}docker compose restart${NC}"
+echo -e "3. Add to Claude Desktop settings:"
 cat << EOF
+
 {
   "mcpServers": {
     "wazuh": {

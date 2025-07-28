@@ -32,25 +32,38 @@ The configuration wizard will ask for:
 docker compose up -d
 ```
 
-### 3️⃣ Configure Claude Desktop
-Add to your Claude Desktop settings:
+### 3️⃣ Access the Server
+The server runs at `http://localhost:3000` by default.
 
-```json
-{
-  "mcpServers": {
-    "wazuh": {
-      "command": "docker",
-      "args": ["exec", "-i", "wazuh-mcp-server", "./wazuh-mcp-server", "--stdio"]
-    }
-  }
-}
+**Test the connection:**
+```bash
+curl http://localhost:3000/health
 ```
 
+**For Claude Desktop integration (optional):**
+1. Switch to STDIO mode:
+   ```bash
+   echo "MCP_TRANSPORT=stdio" >> config/wazuh.env
+   docker compose restart
+   ```
+
+2. Add to Claude Desktop settings:
+   ```json
+   {
+     "mcpServers": {
+       "wazuh": {
+         "command": "docker",
+         "args": ["exec", "-i", "wazuh-mcp-server", "./wazuh-mcp-server", "--stdio"]
+       }
+     }
+   }
+   ```
+
 ## ✅ That's It!
-You can now use Wazuh commands in Claude:
-- "Show me recent critical alerts"
-- "What's the status of my agents?"
-- "Search for authentication failures"
+You can now access Wazuh MCP Server at `http://localhost:3000` or use it with MCP clients:
+- Continue.dev, Cursor: Use HTTP transport
+- Claude Desktop: Switch to STDIO mode (see above)
+- Custom clients: Connect to HTTP endpoint
 
 ## 📋 Common Commands
 
