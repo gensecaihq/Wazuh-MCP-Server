@@ -19,7 +19,8 @@ class WazuhClient:
         # Rate limiting
         self._rate_limiter = asyncio.Semaphore(config.max_connections)
         self._request_times = []
-        self._max_requests_per_minute = 100  # Default rate limit
+        self._max_requests_per_minute = getattr(config, 'max_requests_per_minute', 100)
+        self._rate_limit_enabled = True
     
     async def initialize(self):
         """Initialize the HTTP client and authenticate."""
@@ -156,14 +157,23 @@ class WazuhClient:
     async def _rate_limit_check(self):
         """Check and enforce rate limiting."""
         current_time = time.time()
+        
         # Remove requests older than 1 minute
         self._request_times = [t for t in self._request_times if current_time - t < 60]
         
         # Check if we're hitting the rate limit
         if len(self._request_times) >= self._max_requests_per_minute:
-            sleep_time = 60 - (current_time - self._request_times[0])
+            # Calculate how long to wait before the oldest request expires
+            oldest_request_time = self._request_times[0]
+            sleep_time = 60 - (current_time - oldest_request_time)
+            
             if sleep_time > 0:
+                print(f"⚠️ Rate limit reached ({self._max_requests_per_minute}/min). Waiting {sleep_time:.1f}s...")
                 await asyncio.sleep(sleep_time)
+                
+                # Clean up expired requests after waiting
+                current_time = time.time()
+                self._request_times = [t for t in self._request_times if current_time - t < 60]
         
         # Record this request time
         self._request_times.append(current_time)

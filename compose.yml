@@ -1,3 +1,7 @@
+# Modern Docker Compose V2+ configuration
+# Uses compose.yml as per current Docker standards
+# Run with: docker compose up -d
+
 name: wazuh-mcp-server
 
 services:
@@ -7,30 +11,32 @@ services:
     restart: unless-stopped
     init: true
     
-    environment:
-      WAZUH_HOST: ${WAZUH_HOST:?Required}
-      WAZUH_PORT: ${WAZUH_PORT:-55000}
-      WAZUH_USER: ${WAZUH_USER:?Required}
-      WAZUH_PASS: ${WAZUH_PASS:?Required}
-      
-      MCP_TRANSPORT: ${MCP_TRANSPORT:-stdio}
-      MCP_HOST: ${MCP_HOST:-0.0.0.0}
-      MCP_PORT: ${MCP_PORT:-3000}
-      
-      VERIFY_SSL: ${VERIFY_SSL:-true}
-      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+    # Load configuration from file
+    env_file:
+      - ./config/wazuh.env
     
+    # Transport mode can be overridden
+    environment:
+      MCP_TRANSPORT: ${MCP_TRANSPORT:-stdio}
+    
+    # Conditional port mapping for HTTP mode
     ports:
       - "${MCP_PORT:-3000}:3000"
     
+    # Health check
     healthcheck:
       test: ["CMD", "python3", "-c", "from src.wazuh_mcp_server.config import WazuhConfig; WazuhConfig.from_env()"]
       interval: 30s
       timeout: 10s
       retries: 3
     
+    # Resource limits
     deploy:
       resources:
         limits:
           memory: 512M
           cpus: '0.5'
+    
+    # Required for STDIO mode
+    stdin_open: true
+    tty: true

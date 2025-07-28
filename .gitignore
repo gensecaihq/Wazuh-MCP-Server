@@ -1,5 +1,3 @@
-# .gitignore for Wazuh MCP Server
-
 # Python
 __pycache__/
 *.py[cod]
@@ -7,112 +5,57 @@ __pycache__/
 *.so
 .Python
 build/
-develop-eggs/
 dist/
-downloads/
-eggs/
-.eggs/
-lib/
-lib64/
-parts/
-sdist/
-var/
-wheels/
 *.egg-info/
-.installed.cfg
+.eggs/
 *.egg
-
-# Build artifacts
-*.whl
-*.tar.gz
 
 # Virtual environments
 .env
-.env.local
-.env.production
-.env.test
 .venv
 venv/
 ENV/
+env/
 
 # IDE
 .idea/
 .vscode/
 *.swp
 *.swo
-
-# OS
 .DS_Store
-Thumbs.db
+
+# Configuration
+config/wazuh.env
+.env.local
+.env.production
+
+# Docker
+compose.override.yml
+docker-compose.override.yml
 
 # Logs
 *.log
 logs/
 
-# Docker
-docker-compose.override.yml
-
-# Production data
-data/
-letsencrypt/
-prometheus-data/
-grafana-data/
-redis-data/
-
-# SSL certificates
-*.pem
-*.crt
-*.key
-
 # Testing
 .coverage
 .pytest_cache/
 htmlcov/
+.tox/
 
-# Temporary
+# Temporary files
 *.tmp
+*.bak
 temp/
+tmp/
 
-# Validation reports
-validation_report.json
-*_validation_report.md
-*_compatibility_report.json
-*_communication_report.json
-*_config_template.json
+# Security
+*.pem
+*.key
+*.crt
+*.p12
+secrets/
 
-# Test files
-.test_resilience.py
-get-pip.py
-installation_test_report_*.json
-test_installation.py
-test_claude_desktop_*.py
-static_claude_desktop_analysis.py
-test_venv/
-
-# Development and planning files
-*_IMPLEMENTATION_PLAN.md
-*_SCOPE.md
-fix-*.py
-production-checklist.md
-
-# Analysis and temporary files  
-*_TODO.md
-*_ANALYSIS.md
-*_REPORT.md
-*_report.md
-*_PLAN.md
-*_plan.md
-GITHUB_ISSUES_*.md
-PRODUCTION_*.md
-
-# Test and development files
-test_env/
-*_mock.py
-*compatibility*.py
-*pydantic*.py
-
-# Backup and status files
-*.backup
-*_STATUS.md
-CURRENT_STATUS.md
-
+# OS
+Thumbs.db
+.DS_Store

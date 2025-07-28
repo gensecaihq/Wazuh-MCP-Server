@@ -16,6 +16,7 @@ try:
     from fastmcp import FastMCP, Context
     from pydantic import Field
     from dotenv import load_dotenv
+    import httpx
 except ImportError as e:
     print(f"CRITICAL: Missing dependency: {e}")
     sys.exit(1)
@@ -232,10 +233,14 @@ async def search_wazuh_logs(
         
         return results
         
-    except Exception as e:
+    except (ConnectionError, ValueError, KeyError, AttributeError, httpx.RequestError) as e:
         if ctx:
             await ctx.error(f"Log search failed: {e}")
         raise ValueError(f"Failed to search logs: {e}")
+    except Exception as e:
+        if ctx:
+            await ctx.error(f"Unexpected error in log search: {e}")
+        raise RuntimeError(f"Unexpected error searching logs: {e}")
 
 
 def _categorize_log_message(message: str) -> str:
@@ -308,10 +313,14 @@ async def get_security_incidents(
             "query_time": datetime.now(timezone.utc).isoformat()
         }
         
-    except Exception as e:
+    except (ConnectionError, ValueError, KeyError, AttributeError, httpx.RequestError) as e:
         if ctx:
             await ctx.error(f"Failed to retrieve incidents: {e}")
         raise ValueError(f"Failed to retrieve security incidents: {e}")
+    except Exception as e:
+        if ctx:
+            await ctx.error(f"Unexpected error retrieving incidents: {e}")
+        raise RuntimeError(f"Unexpected error retrieving security incidents: {e}")
 
 
 @mcp.tool
@@ -362,10 +371,14 @@ async def create_security_incident(
             ]
         }
         
-    except Exception as e:
+    except (ValueError, KeyError, AttributeError) as e:
         if ctx:
             await ctx.error(f"Failed to create incident: {e}")
         raise ValueError(f"Failed to create security incident: {e}")
+    except Exception as e:
+        if ctx:
+            await ctx.error(f"Unexpected error creating incident: {e}")
+        raise RuntimeError(f"Unexpected error creating security incident: {e}")
 
 
 @mcp.tool
@@ -419,10 +432,14 @@ async def update_security_incident(
             "updated_at": update_data["updated_at"]
         }
         
-    except Exception as e:
+    except (ValueError, KeyError, AttributeError) as e:
         if ctx:
             await ctx.error(f"Failed to update incident: {e}")
         raise ValueError(f"Failed to update security incident: {e}")
+    except Exception as e:
+        if ctx:
+            await ctx.error(f"Unexpected error updating incident: {e}")
+        raise RuntimeError(f"Unexpected error updating security incident: {e}")
 
 
 def _group_alerts_into_incidents(alerts: list) -> list:
@@ -566,10 +583,14 @@ async def get_wazuh_rules(
             "query_time": datetime.now(timezone.utc).isoformat()
         }
         
-    except Exception as e:
+    except (ConnectionError, ValueError, KeyError, AttributeError, httpx.RequestError) as e:
         if ctx:
             await ctx.error(f"Failed to retrieve rules: {e}")
         raise ValueError(f"Failed to retrieve Wazuh rules: {e}")
+    except Exception as e:
+        if ctx:
+            await ctx.error(f"Unexpected error retrieving rules: {e}")
+        raise RuntimeError(f"Unexpected error retrieving Wazuh rules: {e}")
 
 
 @mcp.tool
@@ -647,10 +668,14 @@ async def analyze_rule_coverage(
         
         return analysis
         
-    except Exception as e:
+    except (ConnectionError, ValueError, KeyError, AttributeError, httpx.RequestError) as e:
         if ctx:
             await ctx.error(f"Rule coverage analysis failed: {e}")
         raise ValueError(f"Failed to analyze rule coverage: {e}")
+    except Exception as e:
+        if ctx:
+            await ctx.error(f"Unexpected error in rule coverage analysis: {e}")
+        raise RuntimeError(f"Unexpected error analyzing rule coverage: {e}")
 
 
 @mcp.tool
@@ -1483,7 +1508,7 @@ async def execute_active_response(
                 if ctx:
                     await ctx.info(f"Active response executed successfully on agent {agent_id}")
                     
-            except Exception as e:
+            except (ConnectionError, httpx.RequestError, ValueError) as e:
                 result = {
                     "agent_id": agent_id,
                     "status": "failed",
@@ -1495,6 +1520,18 @@ async def execute_active_response(
                 
                 if ctx:
                     await ctx.error(f"Active response failed on agent {agent_id}: {e}")
+            except Exception as e:
+                result = {
+                    "agent_id": agent_id,
+                    "status": "failed",
+                    "error": f"Unexpected error: {str(e)}",
+                    "execution_time": datetime.now(timezone.utc).isoformat()
+                }
+                execution_results.append(result)
+                failed_executions += 1
+                
+                if ctx:
+                    await ctx.error(f"Unexpected error on agent {agent_id}: {e}")
         
         return {
             "command": command,
@@ -1509,10 +1546,14 @@ async def execute_active_response(
             "execution_timestamp": datetime.now(timezone.utc).isoformat()
         }
         
-    except Exception as e:
+    except (ConnectionError, ValueError, KeyError, AttributeError, httpx.RequestError) as e:
         if ctx:
             await ctx.error(f"Active response execution failed: {e}")
         raise ValueError(f"Failed to execute active response: {e}")
+    except Exception as e:
+        if ctx:
+            await ctx.error(f"Unexpected error executing active response: {e}")
+        raise RuntimeError(f"Unexpected error executing active response: {e}")
 
 
 @mcp.tool
@@ -1802,8 +1843,10 @@ async def _generate_performance_analytics(client, time_range_hours: int) -> dict
                 "performance_sample_size": len(agent_performance)
             }
         }
-    except Exception as e:
+    except (ConnectionError, httpx.RequestError, KeyError, AttributeError) as e:
         return {"error": f"Performance analytics generation failed: {e}"}
+    except Exception as e:
+        return {"error": f"Unexpected error in performance analytics: {e}"}
 
 
 async def _generate_security_trends_analytics(client, time_range_hours: int) -> dict:
@@ -1859,8 +1902,10 @@ async def _generate_security_trends_analytics(client, time_range_hours: int) -> 
                 "most_active_rule": max(rule_trends, key=rule_trends.get) if rule_trends else "No data"
             }
         }
-    except Exception as e:
+    except (ConnectionError, httpx.RequestError, ValueError, KeyError, AttributeError) as e:
         return {"error": f"Security trends analytics generation failed: {e}"}
+    except Exception as e:
+        return {"error": f"Unexpected error in security trends analytics: {e}"}
 
 
 async def _generate_agent_health_analytics(client) -> dict:
@@ -1899,8 +1944,10 @@ async def _generate_agent_health_analytics(client) -> dict:
             "agent_health_metrics": health_metrics,
             "health_recommendations": _generate_health_recommendations(health_metrics)
         }
-    except Exception as e:
+    except (ConnectionError, httpx.RequestError, KeyError, AttributeError) as e:
         return {"error": f"Agent health analytics generation failed: {e}"}
+    except Exception as e:
+        return {"error": f"Unexpected error in agent health analytics: {e}"}
 
 
 async def _generate_threat_landscape_analytics(client, time_range_hours: int) -> dict:
@@ -1950,8 +1997,10 @@ async def _generate_threat_landscape_analytics(client, time_range_hours: int) ->
                 "high_severity_vulns": len([v for v in vulnerabilities if v.get("vulnerability", {}).get("severity") == "Critical"])
             }
         }
-    except Exception as e:
+    except (ConnectionError, httpx.RequestError, ValueError, KeyError, AttributeError) as e:
         return {"error": f"Threat landscape analytics generation failed: {e}"}
+    except Exception as e:
+        return {"error": f"Unexpected error in threat landscape analytics: {e}"}
 
 
 async def _generate_predictions(analytics_data: dict, analysis_type: str) -> dict:
@@ -2093,10 +2142,14 @@ async def analyze_security_threats(
         
         return analysis
         
-    except Exception as e:
+    except (ConnectionError, ValueError, KeyError, AttributeError, httpx.RequestError) as e:
         if ctx:
             await ctx.error(f"Threat analysis failed: {e}")
         raise ValueError(f"Failed to analyze security threats: {e}")
+    except Exception as e:
+        if ctx:
+            await ctx.error(f"Unexpected error in threat analysis: {e}")
+        raise RuntimeError(f"Unexpected error analyzing security threats: {e}")
 
 
 def _categorize_threat(description: str) -> str:
@@ -2187,15 +2240,25 @@ async def get_server_status() -> str:
 
 The MCP server is successfully connected to Wazuh and ready to process security queries.
 """
-    except Exception as e:
+    except (ConnectionError, httpx.RequestError, ValueError) as e:
         return f"""# Wazuh MCP Server Status
 
-**Server Status**: Error  
+**Server Status**: Connection Error  
 **Connection**: Failed  
 **Error**: {str(e)}  
 **Last Check**: {datetime.now(timezone.utc).isoformat()}
 
 Please check your Wazuh configuration and network connectivity.
+"""
+    except Exception as e:
+        return f"""# Wazuh MCP Server Status
+
+**Server Status**: Unexpected Error  
+**Connection**: Failed  
+**Error**: {str(e)}  
+**Last Check**: {datetime.now(timezone.utc).isoformat()}
+
+Please check system configuration and restart the service.
 """
 
 
@@ -2247,13 +2310,23 @@ Total alerts in recent activity: **{len(alerts)}**
 
 *Updated: {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S')} UTC*
 """
-    except Exception as e:
+    except (ConnectionError, httpx.RequestError, ValueError, KeyError, AttributeError) as e:
         return f"""# Wazuh Security Dashboard
 
-## Dashboard Error
+## Dashboard Connection Error
 Unable to retrieve dashboard data: {str(e)}
 
 Please check your Wazuh connection and try again.
+
+*Updated: {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S')} UTC*
+"""
+    except Exception as e:
+        return f"""# Wazuh Security Dashboard
+
+## Dashboard System Error
+Unexpected error retrieving dashboard data: {str(e)}
+
+Please restart the service and try again.
 
 *Updated: {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S')} UTC*
 """
@@ -2273,8 +2346,11 @@ async def initialize_server():
         # Verify FastMCP tools are registered
         print(f" FastMCP server initialized with {len(mcp._tools)} tools and {len(mcp._resources)} resources")
         
+    except (ConnectionError, httpx.RequestError, ValueError) as e:
+        print(f" Server initialization failed - Connection/Config error: {e}")
+        sys.exit(1)
     except Exception as e:
-        print(f" Server initialization failed: {e}")
+        print(f" Server initialization failed - Unexpected error: {e}")
         sys.exit(1)
 
 
