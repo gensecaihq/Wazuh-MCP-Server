@@ -1,261 +1,292 @@
 # 🛡️ Wazuh MCP Server
 
-**Production-grade Docker-only FastMCP server for Wazuh SIEM integration with comprehensive security analysis capabilities.**
+**Production-ready FastMCP server for Wazuh SIEM integration with comprehensive security analysis capabilities.**
 
-> 🐳 **Docker-Only Deployment** - Eliminates all local OS environment challenges by running everything in a container.
+> 🐳 **Docker-Only Deployment** - Zero OS dependencies. Just install Docker and deploy anywhere.
 
-## 📋 Prerequisites
+## 🚀 Quick Start
 
-**Only Docker Required:**
-- 🐳 **Docker 20.10+** and **Docker Compose 2.0+** 
-- 🌐 Network access to your Wazuh Manager
-- 💾 500MB RAM and 1GB disk space
+### Prerequisites
+- Docker 20.10+ and Docker Compose 2.0+
+- Network access to your Wazuh Manager
+- Valid Wazuh API credentials
 
-**Wazuh Infrastructure:**
-- **Wazuh Manager 4.8.0+** with API enabled (tested up to 4.12.0+)
-- **Wazuh Indexer 4.8.0+** (recommended for enhanced features)
-- Valid Wazuh API credentials (username/password)
+### 1-Minute Deployment
 
-## 🚀 Quick Deploy
-
-### 🏆 Option 1: Pre-Built Image (Fastest - No Build Required)
-
-**⚡ One Command Deploy:**
 ```bash
-curl -fsSL https://raw.githubusercontent.com/gensecaihq/Wazuh-MCP-Server/main/deploy-prebuilt.sh | bash -s -- your-wazuh-host.com api-username api-password
-```
-
-**🔧 Or Download and Run:**
-```bash
-curl -O https://raw.githubusercontent.com/gensecaihq/Wazuh-MCP-Server/main/deploy-prebuilt.sh
-chmod +x deploy-prebuilt.sh
-./deploy-prebuilt.sh your-wazuh-host.com api-username api-password
-```
-
-**📖 See [PREBUILT_IMAGE.md](PREBUILT_IMAGE.md) for complete pre-built image documentation.**
-
----
-
-### 🛠️ Option 2: Build from Source
-
-**Step 1: Get the Project**
-```bash
+# Clone the repository
 git clone https://github.com/gensecaihq/Wazuh-MCP-Server.git
 cd Wazuh-MCP-Server
-```
 
-**Step 2: Configure and Deploy**
-```bash
-# Interactive setup
+# Configure your Wazuh connection
 ./configure-wazuh.sh
 
-# Or one-liner
-./quick-deploy.sh your-wazuh-host.com api-username api-password
+# Deploy immediately
+docker compose up -d
 ```
 
-**Step 3: Access Your Server**
+**Your MCP server is now running at:** `http://localhost:3000`
+
+## ⚙️ Configuration
+
+You only need to set **3 required variables**:
+
+```bash
+export WAZUH_HOST=your-wazuh-manager.company.com
+export WAZUH_USER=your-api-username  
+export WAZUH_PASS=your-api-password
 ```
-🌐 Server URL: http://localhost:3000
-🏥 Health Check: http://localhost:3000/health
+
+### Quick Configuration Script
+
+```bash
+./configure-wazuh.sh
 ```
 
-## 📊 Capabilities
+This interactive script will:
+- Prompt for your Wazuh server details
+- Create the configuration file
+- Validate the connection
+- Start the MCP server
 
-### 🔧 20 Security Tools Available (4.8-4.12+ Compatible)
+### Manual Configuration
 
-**Core Security Operations:**
-- `get_wazuh_alerts` - Real-time security alerts with filtering
-- `search_wazuh_logs` - Advanced log search across all sources
-- `get_agent_status` - Agent health and connectivity monitoring
+Edit `config/wazuh.env`:
+```bash
+WAZUH_HOST=wazuh-manager.your-domain.com
+WAZUH_USER=mcp-user
+WAZUH_PASS=secure-password
+```
+
+## 🔌 Client Integration
+
+### Claude Desktop Integration
+
+1. Set STDIO mode:
+```bash
+echo "MCP_TRANSPORT=stdio" >> config/wazuh.env
+docker compose restart
+```
+
+2. Add to Claude Desktop config:
+```json
+{
+  "mcpServers": {
+    "wazuh": {
+      "command": "docker",
+      "args": ["compose", "exec", "wazuh-mcp-server", "./wazuh-mcp-server", "--stdio"],
+      "cwd": "/path/to/Wazuh-MCP-Server"
+    }
+  }
+}
+```
+
+### Web/HTTP Integration
+
+Default mode - access at `http://localhost:3000`
+
+```bash
+# Already configured for HTTP mode
+docker compose up -d
+```
+
+## 🛠️ Available Tools
+
+The MCP server provides **20 security tools**:
+
+### Core Security Operations
+- `get_wazuh_alerts` - Retrieve and analyze security alerts
+- `search_wazuh_logs` - Advanced log search and filtering
+- `get_agent_status` - Monitor agent health and connectivity
 - `get_vulnerability_summary` - Comprehensive vulnerability assessment
-- `get_cluster_status` - Wazuh infrastructure health monitoring
-
-**Incident & Response Management:**
-- `get_security_incidents` - View and track security incidents
-- `create_security_incident` - Create new incident tickets
-- `update_security_incident` - Update incident status and details
-- `execute_active_response` - Automated threat response actions
-
-**Detection & Analytics:**
-- `get_wazuh_rules` - Detection rules management
-- `analyze_rule_coverage` - Rule effectiveness analysis
-- `get_rule_decoders` - Log parsing decoder management
-- `advanced_wazuh_query` - Complex multi-field queries
-- `multi_field_search` - Advanced search capabilities
-- `get_enhanced_analytics` - Predictive security analytics
 - `analyze_security_threats` - AI-powered threat analysis
 
-**Monitoring & Intelligence:**
-- `get_realtime_alerts` - Live alert monitoring dashboards
-- `get_live_dashboard_data` - Real-time security metrics
-- `get_cdb_lists` - Threat intelligence and blacklists
-- `get_fim_events` - File integrity monitoring events
+### Advanced Operations
+- `get_realtime_alerts` - Live security monitoring
+- `execute_active_response` - Automated threat response
+- `multi_field_search` - Cross-source security investigations
+- `get_security_incidents` - Incident management
+- `get_enhanced_analytics` - Predictive security analytics
 
-### 📡 2 Real-time Resources
-- `wazuh://status/server` - Live server status and health
+### Real-time Resources
+- `wazuh://status/server` - Live server health monitoring
 - `wazuh://dashboard/summary` - Security metrics dashboard
 
-## 🏗️ Architecture
-
-```
-MCP Client → Docker Container → Wazuh Manager API → Security Data
-(Claude)         ↓                    ↓                    ↓
-            FastMCP Server → Wazuh Indexer → Enhanced Analytics
-                               (Optional)
-```
-
-**Container Architecture:**
-- 🐳 **Base**: Python 3.12 slim
-- 🔒 **Security**: Non-root user, minimal attack surface
-- 📦 **Dependencies**: All included (FastMCP, httpx, pydantic, uvicorn)
-- 🛡️ **Monitoring**: Built-in health checks and validation tools
-- ⚡ **Performance**: Optimized for production workloads
-
-## 🔧 Configuration
-
-### Required Settings (Only 3)
-```bash
-WAZUH_HOST=your-wazuh-manager.domain.com  # Wazuh Manager hostname/IP
-WAZUH_USER=your-api-username              # Wazuh API username  
-WAZUH_PASS=your-api-password              # Wazuh API password
-```
-
-### Optional Settings (Smart Defaults)
-```bash
-WAZUH_PORT=55000          # Wazuh API port
-MCP_PORT=3000            # Server port (HTTP/SSE mode)
-MCP_TRANSPORT=http       # Transport mode (http/stdio)
-VERIFY_SSL=true          # SSL certificate verification
-```
-
-## 🛠️ Container Management
+## 🐳 Container Management
 
 ### Essential Commands
+
 ```bash
-# View real-time logs
+# View logs
 docker compose logs -f
 
-# Check container status  
+# Check status
 docker compose ps
 
-# Stop the server
+# Stop server
 docker compose down
 
-# Restart the server
+# Restart server
 docker compose restart
 
-# Update to latest version
+# Update to latest
 git pull && docker compose up -d --build
 ```
 
-### Health & Testing
+### Health Monitoring
+
 ```bash
 # Health check
 curl http://localhost:3000/health
 
-# Run functionality tests
+# Container health
+docker compose exec wazuh-mcp-server python3 validate-production.py
+
+# Run tests
 docker compose exec wazuh-mcp-server python3 test-functionality.py
-
-# Run production validation
-docker compose exec wazuh-mcp-server python3 validate-production.py --full
-
-# Container shell access
-docker compose exec wazuh-mcp-server bash
 ```
 
-## 🔄 Transport Modes
+## 🔧 Advanced Configuration
 
-### HTTP/SSE Mode (Default - Recommended)
-**Best for web clients, remote access, and production deployments.**
+### Environment Variables
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `WAZUH_HOST` | *required* | Wazuh Manager hostname/IP |
+| `WAZUH_USER` | *required* | Wazuh API username |
+| `WAZUH_PASS` | *required* | Wazuh API password |
+| `WAZUH_PORT` | `55000` | Wazuh API port |
+| `MCP_TRANSPORT` | `http` | Transport mode (`http` or `stdio`) |
+| `MCP_PORT` | `3000` | HTTP server port |
+| `VERIFY_SSL` | `true` | SSL certificate verification |
+
+### Transport Modes
+
+#### HTTP Mode (Default)
+- Best for web clients and remote access
+- Access URL: `http://localhost:3000`
+- Port: 3000 (configurable)
+
+#### STDIO Mode  
+- Direct integration with Claude Desktop
+- No network ports required
+- Real-time communication
+
 ```bash
-# Default mode - no changes needed
-docker compose up -d
-# Access at: http://localhost:3000
-```
-
-### STDIO Mode
-**For Claude Desktop direct integration.**
-```bash
-# Enable STDIO mode
-echo "MCP_TRANSPORT=stdio" >> .env.wazuh
-docker compose up -d
-```
-
-## 🌍 Cross-Platform Deployment
-
-### Any OS with Docker
-```bash
-# Linux, macOS, Windows - same commands
-git clone https://github.com/gensecaihq/Wazuh-MCP-Server.git
-cd Wazuh-MCP-Server
-./configure-wazuh.sh
-```
-
-### Cloud Deployment
-```bash
-# Works on any cloud VM (AWS, Azure, GCP, etc.)
-curl -fsSL https://get.docker.com | sh
-git clone https://github.com/gensecaihq/Wazuh-MCP-Server.git
-cd Wazuh-MCP-Server
-./configure-wazuh.sh
-# Configure cloud firewall for port 3000 if needed
-```
-
-## 🔒 Security Features
-
-- 🛡️ **Container Security**: Non-root user, minimal base image
-- 🔐 **SSL/TLS**: Certificate verification enabled by default
-- 📊 **Monitoring**: Built-in health checks and metrics
-- 🚨 **Validation**: Production readiness verification tools
-- 🔍 **Audit**: Comprehensive security analysis capabilities
-
-## 🚨 Troubleshooting
-
-### Container Issues
-```bash
-# Check container logs
-docker compose logs -f
-
-# Verify configuration
-docker compose config
-
-# Test Wazuh connectivity
-docker compose exec wazuh-mcp-server curl -k https://YOUR_WAZUH_HOST:55000
-```
-
-### Network Issues
-```bash
-# Test network connectivity
-docker compose exec wazuh-mcp-server ping your-wazuh-host
-
-# Check port availability
-docker compose ps
-```
-
-### Configuration Issues
-```bash
-# Reconfigure
-./configure-wazuh.sh
-
-# Or edit directly
-nano .env.wazuh
+# Switch to STDIO mode
+echo "MCP_TRANSPORT=stdio" >> config/wazuh.env
 docker compose restart
 ```
 
+## 🚨 Troubleshooting
+
+### Connection Issues
+
+```bash
+# Test Wazuh connectivity
+docker compose exec wazuh-mcp-server curl -k https://YOUR_WAZUH_HOST:55000
+
+# Check container logs
+docker compose logs wazuh-mcp-server
+
+# Verify configuration
+docker compose exec wazuh-mcp-server python3 -c "
+from src.wazuh_mcp_server.config import WazuhConfig
+config = WazuhConfig.from_env()
+print(f'Host: {config.wazuh_host}:{config.wazuh_port}')
+"
+```
+
+### Common Solutions
+
+**Connection Refused:**
+- Verify `WAZUH_HOST` is correct
+- Check firewall rules for port 55000
+- Ensure Wazuh API is enabled
+
+**Authentication Failed:**
+- Verify `WAZUH_USER` and `WAZUH_PASS`
+- Check user permissions in Wazuh
+- Confirm API access is enabled
+
+**Container Won't Start:**
+- Check Docker daemon is running
+- Verify port 3000 is available
+- Review logs: `docker compose logs`
+
+## 🔒 Security Features
+
+- **Container Security**: Non-root user, minimal attack surface
+- **SSL/TLS Support**: Certificate verification enabled by default
+- **Rate Limiting**: Built-in API rate limiting
+- **Health Monitoring**: Comprehensive health checks
+- **Input Validation**: Pydantic validation on all inputs
+
+## 📊 Monitoring & Metrics
+
+### Built-in Monitoring
+
+```bash
+# Server health
+curl http://localhost:3000/health
+
+# Container metrics
+docker stats wazuh-mcp-server
+
+# Application metrics
+docker compose exec wazuh-mcp-server python3 -c "
+import asyncio
+from src.wazuh_mcp_server.server import mcp
+asyncio.run(mcp.get_tools())
+"
+```
+
+### Log Analysis
+
+```bash
+# Real-time logs
+docker compose logs -f wazuh-mcp-server
+
+# Error logs only
+docker compose logs wazuh-mcp-server | grep ERROR
+
+# Last 100 lines
+docker compose logs --tail 100 wazuh-mcp-server
+```
+
+## 🌍 Multi-Platform Support
+
+Works on any OS with Docker:
+
+- ✅ **Linux** (Ubuntu, CentOS, RHEL, etc.)
+- ✅ **macOS** (Intel & Apple Silicon)  
+- ✅ **Windows** (Docker Desktop)
+- ✅ **Cloud** (AWS, Azure, GCP)
+- ✅ **Kubernetes** (with Helm charts)
+
 ## 📚 Documentation
 
-- 🏆 **[Pre-Built Image Guide](PREBUILT_IMAGE.md)** - Use ready-to-deploy Docker image (fastest)
-- 📖 **[Complete Docker Guide](DOCKER_DEPLOY.md)** - Build from source instructions
-- 🎯 **[Deployment Summary](DEPLOYMENT_SUMMARY.md)** - Technical overview and achievements
-- 🔧 **[Configuration Examples](config/wazuh.env.example)** - Configuration templates
+- [Quick Start Guide](docs/QUICK_START.md) - Get running in 5 minutes
+- [Configuration Guide](docs/guides/CONFIGURATION.md) - Detailed setup options
+- [API Reference](docs/API_REFERENCE.md) - Complete tool documentation
+- [Troubleshooting](docs/TROUBLESHOOTING.md) - Common issues and solutions
 
-## 🤝 Support
+## 🆘 Support
 
-**If you encounter issues:**
-1. Check logs: `docker compose logs -f`
-2. Verify Wazuh connectivity
-3. Run health checks: `curl http://localhost:3000/health`
-4. Review troubleshooting section above
+### Getting Help
+
+1. **Check the logs**: `docker compose logs -f`
+2. **Run health check**: `curl http://localhost:3000/health`
+3. **Verify configuration**: Review `config/wazuh.env`
+4. **Test connectivity**: Check network access to Wazuh Manager
+
+### Reporting Issues
+
+When reporting issues, please include:
+- Docker version: `docker --version`
+- Container logs: `docker compose logs`
+- Configuration: `cat config/wazuh.env` (remove passwords)
+- Error messages and steps to reproduce
 
 ## 📄 License
 
@@ -263,6 +294,6 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 ---
 
-**🐳 Docker-Only Deployment - Zero OS Dependencies!**
+**🐳 Zero OS Dependencies - Deploy Anywhere with Docker**
 
-*Everything runs in a container. Just install Docker and deploy anywhere.*
+*Professional SIEM integration made simple. From development to production in minutes.*

@@ -1,13 +1,12 @@
 #!/usr/bin/env python3
 """
-Wazuh MCP Server - Production Entry Point
-Main executable for the Wazuh Model Context Protocol Server
+Wazuh MCP Server - Main Executable
+Production-grade FastMCP server for Wazuh SIEM integration
 """
 
-import sys
 import os
+import sys
 import argparse
-import asyncio
 from pathlib import Path
 
 # Add src directory to Python path
@@ -18,183 +17,228 @@ sys.path.insert(0, str(src_dir))
 def parse_arguments():
     """Parse command line arguments."""
     parser = argparse.ArgumentParser(
-        description="Wazuh MCP Server - Production-grade FastMCP server for Wazuh SIEM integration",
-        epilog="For more information, visit: https://github.com/gensecaihq/Wazuh-MCP-Server"
+        description="Wazuh MCP Server - FastMCP server for Wazuh SIEM integration",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+Examples:
+  ./wazuh-mcp-server --http          # Start HTTP/SSE server (default)
+  ./wazuh-mcp-server --stdio         # Start STDIO server for Claude Desktop
+  ./wazuh-mcp-server --version       # Show version information
+  
+Environment Variables:
+  WAZUH_HOST        - Wazuh Manager hostname/IP (required)
+  WAZUH_USER        - Wazuh API username (required)
+  WAZUH_PASS        - Wazuh API password (required)
+  WAZUH_PORT        - Wazuh API port (default: 55000)
+  MCP_TRANSPORT     - Transport mode: http or stdio (default: http)
+  MCP_HOST          - HTTP server bind address (default: 0.0.0.0)
+  MCP_PORT          - HTTP server port (default: 3000)
+  VERIFY_SSL        - SSL verification (default: true)
+"""
     )
     
-    # Transport mode arguments
-    transport_group = parser.add_mutually_exclusive_group()
-    transport_group.add_argument(
-        "--stdio", "--local",
-        action="store_const",
-        const="stdio",
-        dest="transport",
-        help="Use STDIO transport mode (for Claude Desktop integration)"
-    )
-    transport_group.add_argument(
+    group = parser.add_mutually_exclusive_group()
+    group.add_argument(
         "--http", "--remote", "--server",
-        action="store_const", 
-        const="http",
-        dest="transport",
-        help="Use HTTP/SSE transport mode (for web clients and remote access)"
+        action="store_true",
+        help="Start HTTP/SSE server for web clients (default)"
     )
-    
-    # Configuration options
-    parser.add_argument(
-        "--host",
-        default=None,
-        help="Host to bind HTTP server to (default: 0.0.0.0)"
+    group.add_argument(
+        "--stdio", "--local",
+        action="store_true", 
+        help="Start STDIO server for Claude Desktop integration"
     )
-    parser.add_argument(
-        "--port", "-p",
-        type=int,
-        default=None,
-        help="Port for HTTP server (default: 3000)"
-    )
-    parser.add_argument(
-        "--config", "-c",
-        default=None,
-        help="Path to configuration file (default: config/wazuh.env)"
-    )
-    
-    # Utility options
-    parser.add_argument(
+    group.add_argument(
         "--version", "-v",
-        action="version",
-        version="Wazuh MCP Server v2.1.0"
+        action="store_true",
+        help="Show version information"
     )
-    parser.add_argument(
+    group.add_argument(
         "--validate",
         action="store_true",
-        help="Validate configuration and exit"
-    )
-    parser.add_argument(
-        "--debug",
-        action="store_true",
-        help="Enable debug logging"
+        help="Run validation tests and exit"
     )
     
     return parser.parse_args()
 
-def setup_environment(args):
-    """Set up environment variables based on arguments."""
-    # Set transport mode
-    if args.transport:
-        os.environ["MCP_TRANSPORT"] = args.transport
-    elif "MCP_TRANSPORT" not in os.environ:
-        # Default to HTTP mode
-        os.environ["MCP_TRANSPORT"] = "http"
+def show_version():
+    """Show version information."""
+    print("🛡️ Wazuh MCP Server v2.0.0")
+    print("FastMCP-powered Wazuh SIEM integration")
+    print("https://github.com/gensecaihq/Wazuh-MCP-Server")
+    print()
+    print(f"Python: {sys.version}")
+    print(f"Platform: {sys.platform}")
     
-    # Set HTTP settings if provided
-    if args.host:
-        os.environ["MCP_HOST"] = args.host
-    if args.port:
-        os.environ["MCP_PORT"] = str(args.port)
-    
-    # Set debug mode
-    if args.debug:
-        os.environ["DEBUG"] = "true"
-        os.environ["LOG_LEVEL"] = "DEBUG"
-    
-    # Set config file path
-    if args.config:
-        os.environ["WAZUH_CONFIG_FILE"] = args.config
-
-async def validate_configuration():
-    """Validate configuration and return status."""
     try:
-        from wazuh_mcp_server.config import WazuhConfig
-        config = WazuhConfig.from_env()
-        print("✅ Configuration validation successful")
-        print(f"   Wazuh Host: {config.wazuh_host}:{config.wazuh_port}")
-        print(f"   Transport: {config.mcp_transport}")
-        if config.mcp_transport == "http":
-            print(f"   HTTP Server: {config.mcp_host}:{config.mcp_port}")
-        return True
+        import fastmcp
+        print(f"FastMCP: {fastmcp.__version__}")
+    except (ImportError, AttributeError):
+        print("FastMCP: Not available")
+    
+    try:
+        import httpx
+        print(f"HTTPX: {httpx.__version__}")
+    except (ImportError, AttributeError):
+        print("HTTPX: Not available")
+
+def validate_environment():
+    """Validate required environment variables."""
+    required_vars = ["WAZUH_HOST", "WAZUH_USER", "WAZUH_PASS"]
+    missing_vars = []
+    
+    for var in required_vars:
+        if not os.getenv(var):
+            missing_vars.append(var)
+    
+    if missing_vars:
+        print("❌ ERROR: Missing required environment variables:")
+        for var in missing_vars:
+            print(f"   - {var}")
+        print()
+        print("Please set these variables and try again.")
+        print("Example:")
+        print("  export WAZUH_HOST=your-wazuh-server.com")
+        print("  export WAZUH_USER=your-api-user")
+        print("  export WAZUH_PASS=your-api-password")
+        return False
+    
+    return True
+
+def run_validation():
+    """Run validation tests."""
+    try:
+        import subprocess
+        result = subprocess.run([sys.executable, "validate-production.py", "--full"], 
+                              capture_output=True, text=True)
+        print(result.stdout)
+        if result.stderr:
+            print(result.stderr, file=sys.stderr)
+        return result.returncode == 0
     except Exception as e:
-        print(f"❌ Configuration validation failed: {e}")
+        print(f"❌ Validation failed: {e}")
         return False
 
-async def initialize_and_run():
-    """Initialize FastMCP server and run based on transport mode."""
+def start_http_server():
+    """Start HTTP/SSE server."""
     try:
-        # Import server components
+        import uvicorn
+        import asyncio
         from wazuh_mcp_server.server import mcp, initialize_server
-        from wazuh_mcp_server.config import WazuhConfig
-        
-        print("🛡️  Wazuh MCP Server v2.1.0")
-        print("=" * 50)
         
         # Initialize server components
-        await initialize_server()
+        print("🔍 Initializing server...")
+        asyncio.run(initialize_server())
         
         # Get configuration
-        config = WazuhConfig.from_env()
-        transport = config.mcp_transport.lower()
+        host = os.getenv("MCP_HOST", "0.0.0.0")
+        try:
+            port = int(os.getenv("MCP_PORT", "3000"))
+            if port < 1 or port > 65535:
+                raise ValueError("Port must be between 1 and 65535")
+        except ValueError as e:
+            print(f"❌ ERROR: Invalid MCP_PORT value '{os.getenv('MCP_PORT')}': {e}")
+            return False
         
-        if transport == "http":
-            # HTTP/SSE mode
-            import uvicorn
-            print(f"🌐 Starting HTTP/SSE server on {config.mcp_host}:{config.mcp_port}")
-            print(f"   Access URL: http://{config.mcp_host}:{config.mcp_port}")
-            print(f"   Health Check: http://{config.mcp_host}:{config.mcp_port}/health")
-            print("=" * 50)
-            
-            # Create FastMCP app and run with uvicorn
-            app = mcp.create_app()
-            uvicorn.run(
-                app,
-                host=config.mcp_host,
-                port=config.mcp_port,
-                log_level="info" if not os.getenv("DEBUG") else "debug"
-            )
-            
-        elif transport == "stdio":
-            # STDIO mode
-            print("📱 Starting STDIO server for Claude Desktop")
-            print("   Ready for MCP client connections")
-            print("=" * 50)
-            
-            # Run FastMCP in STDIO mode
-            mcp.run()
-            
-        else:
-            print(f"❌ Invalid transport mode: {transport}")
-            print("   Valid options: http, stdio")
-            sys.exit(1)
-            
-    except ImportError as e:
-        print(f"❌ Import error: {e}")
-        print("   Please ensure all dependencies are installed:")
-        print("   pip install -r requirements.txt")
-        sys.exit(1)
-    except Exception as e:
-        print(f"❌ Server initialization failed: {e}")
-        sys.exit(1)
-
-def main():
-    """Main entry point."""
-    try:
-        # Parse arguments
-        args = parse_arguments()
+        print(f"🚀 Starting HTTP/SSE server on {host}:{port}")
+        print(f"🌐 Access URL: http://{host}:{port}")
+        print(f"🏥 Health Check: http://{host}:{port}/health")
+        print("   Press Ctrl+C to stop")
         
-        # Setup environment
-        setup_environment(args)
-        
-        # Handle validation-only mode
-        if args.validate:
-            success = asyncio.run(validate_configuration())
-            sys.exit(0 if success else 1)
-        
-        # Initialize and run server
-        asyncio.run(initialize_and_run())
+        # Start server using FastMCP's HTTP app
+        app = mcp.http_app()
+        uvicorn.run(
+            app,
+            host=host,
+            port=port,
+            log_level="info",
+            access_log=True
+        )
+        return True
         
     except KeyboardInterrupt:
         print("\n🛑 Server stopped by user")
-        sys.exit(0)
+        return True
+    except ImportError as e:
+        print(f"❌ ERROR: Missing dependency: {e}")
+        print("   Please install required packages: pip install -r requirements.txt")
+        return False
     except Exception as e:
-        print(f"❌ Fatal error: {e}")
-        sys.exit(1)
+        print(f"❌ ERROR: Server startup failed: {e}")
+        return False
+
+def start_stdio_server():
+    """Start STDIO server."""
+    try:
+        import asyncio
+        from wazuh_mcp_server.server import mcp, initialize_server
+        
+        # Initialize server components
+        print("🔍 Initializing server...")
+        asyncio.run(initialize_server())
+        
+        print("🚀 Starting STDIO server for Claude Desktop")
+        print("   Waiting for MCP client connection...")
+        print("   Press Ctrl+C to stop")
+        
+        # Start STDIO server
+        mcp.run()
+        return True
+        
+    except KeyboardInterrupt:
+        print("\n🛑 Server stopped by user")
+        return True
+    except ImportError as e:
+        print(f"❌ ERROR: Missing dependency: {e}")
+        print("   Please install required packages: pip install -r requirements.txt")
+        return False
+    except Exception as e:
+        print(f"❌ ERROR: Server startup failed: {e}")
+        return False
+
+def main():
+    """Main entry point."""
+    args = parse_arguments()
+    
+    # Handle version request
+    if args.version:
+        show_version()
+        return 0
+    
+    # Handle validation request
+    if args.validate:
+        if not validate_environment():
+            return 1
+        success = run_validation()
+        return 0 if success else 1
+    
+    # Validate environment for server start
+    if not validate_environment():
+        return 1
+    
+    # Determine transport mode
+    if args.stdio:
+        transport = "stdio"
+    elif args.http:
+        transport = "http"
+    else:
+        # Use environment variable or default to http
+        transport = os.getenv("MCP_TRANSPORT", "http").lower()
+    
+    # Start appropriate server
+    success = False
+    if transport == "http":
+        os.environ["MCP_TRANSPORT"] = "http"
+        success = start_http_server()
+    elif transport == "stdio":
+        os.environ["MCP_TRANSPORT"] = "stdio"
+        success = start_stdio_server()
+    else:
+        print(f"❌ ERROR: Invalid transport mode '{transport}'")
+        print("   Valid options: http, stdio")
+        return 1
+    
+    return 0 if success else 1
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())

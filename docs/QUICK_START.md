@@ -1,77 +1,65 @@
 # 🚀 Wazuh MCP Server - Quick Start Guide
 
+**Get your Wazuh MCP Server running in under 2 minutes.**
+
 ## Prerequisites
-- Docker and Docker Compose installed
-- Access to a Wazuh Manager (4.8.0+)
+- Docker 20.10+ and Docker Compose 2.0+
+- Network access to your Wazuh Manager
 - Wazuh API credentials
 
-## 🎯 Quick Setup (3 Steps)
+## ⚡ 1-Minute Setup
 
-### 1️⃣ Clone and Configure
+### Step 1: Clone and Configure
 ```bash
 # Clone the repository
 git clone https://github.com/gensecaihq/Wazuh-MCP-Server.git
 cd Wazuh-MCP-Server
 
-# Run configuration wizard
-./scripts/configure.sh
+# Run interactive configuration
+./configure-wazuh.sh
 ```
 
-The configuration wizard will ask for:
-- **Wazuh Manager hostname/IP** (required)
-- **API username** (required) 
-- **API password** (required)
-- Optional: Indexer settings (if you have Wazuh Indexer)
+The script will prompt for:
+- **Wazuh Manager hostname/IP**
+- **API username** 
+- **API password**
+- Optional settings (ports, SSL)
 
-### 2️⃣ Start the Server
-```bash
-# Quick start (builds and runs)
-./scripts/quick-start.sh
+### Step 2: That's It! 
+The configuration script automatically starts your server.
 
-# Or manually:
-docker compose up -d
-```
+**Server is now running at:** `http://localhost:3000`
 
-### 3️⃣ Access the Server
-The server runs at `http://localhost:3000` by default.
+## 🔌 Connect to Claude Desktop
 
-**Test the connection:**
-```bash
-curl http://localhost:3000/health
-```
+To use with Claude Desktop:
 
-**For Claude Desktop integration (optional):**
-1. Switch to STDIO mode:
+1. **Enable STDIO mode:**
    ```bash
-   echo "MCP_TRANSPORT=stdio" >> config/wazuh.env
+   echo "MCP_TRANSPORT=stdio" >> .env.wazuh
    docker compose restart
    ```
 
-2. Add to Claude Desktop settings:
+2. **Add to Claude Desktop config:**
    ```json
    {
      "mcpServers": {
        "wazuh": {
          "command": "docker",
-         "args": ["exec", "-i", "wazuh-mcp-server", "./wazuh-mcp-server", "--stdio"]
+         "args": ["compose", "exec", "wazuh-mcp-server", "./wazuh-mcp-server", "--stdio"],
+         "cwd": "/path/to/Wazuh-MCP-Server"
        }
      }
    }
    ```
 
-## ✅ That's It!
-You can now access Wazuh MCP Server at `http://localhost:3000` or use it with MCP clients:
-- Continue.dev, Cursor: Use HTTP transport
-- Claude Desktop: Switch to STDIO mode (see above)
-- Custom clients: Connect to HTTP endpoint
-
-## 📋 Common Commands
+## 📋 Essential Commands
 
 ```bash
 # Check server status
 docker compose ps
 
-# View logs
+# View real-time logs
 docker compose logs -f
 
 # Stop server
@@ -80,56 +68,65 @@ docker compose down
 # Restart server
 docker compose restart
 
-# Reconfigure
-./scripts/configure.sh
+# Health check
+curl http://localhost:3000/health
+
+# Run tests
+docker compose exec wazuh-mcp-server python3 test-functionality.py
 ```
 
-## 🔧 Manual Configuration (Optional)
+## 🔧 Manual Setup (Alternative)
 
-If you prefer manual setup:
+If you prefer manual configuration:
 
-1. Copy the example config:
+1. **Create config file:**
    ```bash
-   cp config/wazuh.env.example config/wazuh.env
+   cp config/wazuh.env.example .env.wazuh
    ```
 
-2. Edit `config/wazuh.env` with your settings:
+2. **Edit with your settings:**
    ```env
    WAZUH_HOST=your-wazuh-manager.com
-   WAZUH_USER=your-username
-   WAZUH_PASS=your-password
+   WAZUH_USER=your-api-username
+   WAZUH_PASS=your-api-password
    ```
 
-3. Start the server:
+3. **Start server:**
    ```bash
    docker compose up -d
    ```
 
-## 🆘 Troubleshooting
+## 🚨 Quick Troubleshooting
 
-### Connection Issues
+**Server won't start?**
 ```bash
-# Test Wazuh connectivity
-curl -k "https://${WAZUH_HOST}:55000/security/user/authenticate" \
-  -u "${WAZUH_USER}:${WAZUH_PASS}"
+# Check logs
+docker compose logs wazuh-mcp-server
+
+# Test Wazuh connection
+docker compose exec wazuh-mcp-server curl -k https://YOUR_WAZUH_HOST:55000
 ```
 
-### Container Issues
-```bash
-# Full diagnostic
-./install/verify-installation.sh
+**Connection refused?**
+- Verify `WAZUH_HOST` is reachable
+- Check firewall allows port 55000
+- Confirm Wazuh API is enabled
 
-# Check container health
-docker compose ps
-docker logs wazuh-mcp-server
-```
+**Authentication failed?**
+- Verify username/password in Wazuh
+- Check API user permissions
+- Test: `curl -k https://WAZUH_HOST:55000 -u USERNAME:PASSWORD`
 
-### Configuration Issues
-- Ensure your Wazuh API user has read permissions
-- Check firewall allows connection to Wazuh Manager port 55000
-- Verify SSL certificates if using VERIFY_SSL=true
+## ✅ Verification
 
-## 📚 Next Steps
-- [Full Documentation](../README.md)
-- [Production Deployment Guide](./guides/PRODUCTION_DEPLOYMENT.md)
-- [Advanced Configuration](./guides/CONFIGURATION.md)
+Your server is working correctly if:
+- ✅ `curl http://localhost:3000/health` returns `{"status": "healthy"}`
+- ✅ Container shows "Running" in `docker compose ps`
+- ✅ Logs show "FastMCP server started" message
+
+## 📚 What's Next?
+
+- **Use the tools:** 20 security analysis tools are now available
+- **View documentation:** [Full README](../README.md)
+- **Advanced config:** [Configuration Guide](guides/CONFIGURATION.md)
+- **Production setup:** Ready to deploy anywhere with Docker

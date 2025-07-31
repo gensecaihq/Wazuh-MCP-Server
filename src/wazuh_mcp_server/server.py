@@ -2375,7 +2375,9 @@ if __name__ == "__main__":
             print(f"ERROR: Invalid MCP_PORT value '{os.getenv('MCP_PORT')}': {e}")
             sys.exit(1)
         print(f" Starting HTTP/SSE server on {host}:{port}")
-        uvicorn.run(mcp.create_app(), host=host, port=port)
+        # Use FastMCP's HTTP app for HTTP/SSE transport
+        app = mcp.http_app()
+        uvicorn.run(app, host=host, port=port)
     elif transport == "stdio":
         print(" Starting STDIO server for Claude Desktop")
         mcp.run()

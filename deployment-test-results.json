@@ -1,0 +1,324 @@
+{
+  "summary": {
+    "passed": 39,
+    "failed": 0,
+    "warnings": 0,
+    "ready_for_production": true,
+    "total_duration": 3.523768901824951
+  },
+  "tests": [
+    {
+      "name": "FastMCP Server Creation",
+      "status": "PASS",
+      "message": "Server: Wazuh MCP Server",
+      "critical": true,
+      "timestamp": "2025-07-31T17:41:47.656831+00:00",
+      "duration": 2.6131558418273926
+    },
+    {
+      "name": "FastMCP Tools Registration",
+      "status": "PASS",
+      "message": "20 tools registered",
+      "critical": true,
+      "timestamp": "2025-07-31T17:41:47.656914+00:00",
+      "duration": 2.613227128982544
+    },
+    {
+      "name": "FastMCP Resources Registration",
+      "status": "PASS",
+      "message": "2 resources registered",
+      "critical": false,
+      "timestamp": "2025-07-31T17:41:47.656977+00:00",
+      "duration": 2.6132819652557373
+    },
+    {
+      "name": "HTTP Transport App",
+      "status": "PASS",
+      "message": "HTTP/SSE app created successfully",
+      "critical": true,
+      "timestamp": "2025-07-31T17:41:47.674186+00:00",
+      "duration": 2.6305060386657715
+    },
+    {
+      "name": "STDIO Transport Mode",
+      "status": "PASS",
+      "message": "STDIO mode available for Claude Desktop",
+      "critical": true,
+      "timestamp": "2025-07-31T17:41:47.674219+00:00",
+      "duration": 2.6305220127105713
+    },
+    {
+      "name": "Docker File: Dockerfile",
+      "status": "PASS",
+      "message": "Docker build configuration exists",
+      "critical": true,
+      "timestamp": "2025-07-31T17:41:47.674357+00:00",
+      "duration": 0.00010919570922851562
+    },
+    {
+      "name": "Docker File: compose.yml",
+      "status": "PASS",
+      "message": "Docker Compose orchestration exists",
+      "critical": true,
+      "timestamp": "2025-07-31T17:41:47.674432+00:00",
+      "duration": 0.00018215179443359375
+    },
+    {
+      "name": "Docker File: docker/entrypoint.sh",
+      "status": "PASS",
+      "message": "Container entrypoint script exists",
+      "critical": true,
+      "timestamp": "2025-07-31T17:41:47.674497+00:00",
+      "duration": 0.00024700164794921875
+    },
+    {
+      "name": "Docker File: docker/.env.docker",
+      "status": "PASS",
+      "message": "Container environment template exists",
+      "critical": true,
+      "timestamp": "2025-07-31T17:41:47.674556+00:00",
+      "duration": 0.0003070831298828125
+    },
+    {
+      "name": "Dependency Isolation",
+      "status": "PASS",
+      "message": "All dependencies available in container",
+      "critical": true,
+      "timestamp": "2025-07-31T17:41:47.674582+00:00",
+      "duration": 0.00032901763916015625
+    },
+    {
+      "name": "Docker Compose Config",
+      "status": "PASS",
+      "message": "Compose configuration valid",
+      "critical": true,
+      "timestamp": "2025-07-31T17:41:48.558976+00:00",
+      "duration": 0.8847661018371582
+    },
+    {
+      "name": "Wazuh Configuration",
+      "status": "PASS",
+      "message": "Config loaded for demo.wazuh.com:55000",
+      "critical": true,
+      "timestamp": "2025-07-31T17:41:48.562878+00:00",
+      "duration": 0.0037789344787597656
+    },
+    {
+      "name": "Wazuh Client Creation",
+      "status": "PASS",
+      "message": "Wazuh API client created successfully",
+      "critical": true,
+      "timestamp": "2025-07-31T17:41:48.562946+00:00",
+      "duration": 0.003834962844848633
+    },
+    {
+      "name": "API Endpoint: /alerts",
+      "status": "PASS",
+      "message": "Endpoint URL constructed correctly",
+      "critical": false,
+      "timestamp": "2025-07-31T17:41:48.562979+00:00",
+      "duration": 0.0038650035858154297
+    },
+    {
+      "name": "API Endpoint: /agents",
+      "status": "PASS",
+      "message": "Endpoint URL constructed correctly",
+      "critical": false,
+      "timestamp": "2025-07-31T17:41:48.562996+00:00",
+      "duration": 0.0038797855377197266
+    },
+    {
+      "name": "API Endpoint: /vulnerability/agents",
+      "status": "PASS",
+      "message": "Endpoint URL constructed correctly",
+      "critical": false,
+      "timestamp": "2025-07-31T17:41:48.563011+00:00",
+      "duration": 0.0038950443267822266
+    },
+    {
+      "name": "API Endpoint: /cluster/status",
+      "status": "PASS",
+      "message": "Endpoint URL constructed correctly",
+      "critical": false,
+      "timestamp": "2025-07-31T17:41:48.563022+00:00",
+      "duration": 0.0039048194885253906
+    },
+    {
+      "name": "API Endpoint: /manager/logs",
+      "status": "PASS",
+      "message": "Endpoint URL constructed correctly",
+      "critical": false,
+      "timestamp": "2025-07-31T17:41:48.563033+00:00",
+      "duration": 0.003921985626220703
+    },
+    {
+      "name": "API Endpoint: /rules",
+      "status": "PASS",
+      "message": "Endpoint URL constructed correctly",
+      "critical": false,
+      "timestamp": "2025-07-31T17:41:48.563050+00:00",
+      "duration": 0.0039331912994384766
+    },
+    {
+      "name": "API Endpoint: /decoders",
+      "status": "PASS",
+      "message": "Endpoint URL constructed correctly",
+      "critical": false,
+      "timestamp": "2025-07-31T17:41:48.563060+00:00",
+      "duration": 0.003942966461181641
+    },
+    {
+      "name": "API Endpoint: /active-response",
+      "status": "PASS",
+      "message": "Endpoint URL constructed correctly",
+      "critical": false,
+      "timestamp": "2025-07-31T17:41:48.563070+00:00",
+      "duration": 0.003952980041503906
+    },
+    {
+      "name": "SSL Configuration",
+      "status": "PASS",
+      "message": "SSL verification enabled (recommended)",
+      "critical": false,
+      "timestamp": "2025-07-31T17:41:48.563086+00:00",
+      "duration": 0.003969907760620117
+    },
+    {
+      "name": "Claude Desktop Compatibility",
+      "status": "PASS",
+      "message": "Tools format compatible: 20 tools",
+      "critical": true,
+      "timestamp": "2025-07-31T17:41:48.563192+00:00",
+      "duration": 7.700920104980469e-05
+    },
+    {
+      "name": "Resource Availability",
+      "status": "PASS",
+      "message": "Resources available: 2 URIs",
+      "critical": false,
+      "timestamp": "2025-07-31T17:41:48.563244+00:00",
+      "duration": 0.0001220703125
+    },
+    {
+      "name": "Transport Modes",
+      "status": "PASS",
+      "message": "Available: HTTP, STDIO",
+      "critical": true,
+      "timestamp": "2025-07-31T17:41:48.563859+00:00",
+      "duration": 0.0007469654083251953
+    },
+    {
+      "name": "Security Capabilities",
+      "status": "PASS",
+      "message": "7 security-focused tools",
+      "critical": true,
+      "timestamp": "2025-07-31T17:41:48.563949+00:00",
+      "duration": 0.0008320808410644531
+    },
+    {
+      "name": "Search Capabilities",
+      "status": "PASS",
+      "message": "5 search/analysis tools",
+      "critical": true,
+      "timestamp": "2025-07-31T17:41:48.564011+00:00",
+      "duration": 0.0008852481842041016
+    },
+    {
+      "name": "File: wazuh-mcp-server",
+      "status": "PASS",
+      "message": "Main executable exists",
+      "critical": true,
+      "timestamp": "2025-07-31T17:41:48.564268+00:00",
+      "duration": 0.00023293495178222656
+    },
+    {
+      "name": "File: src/wazuh_mcp_server/server.py",
+      "status": "PASS",
+      "message": "Server module exists",
+      "critical": true,
+      "timestamp": "2025-07-31T17:41:48.564326+00:00",
+      "duration": 0.00028896331787109375
+    },
+    {
+      "name": "File: src/wazuh_mcp_server/config.py",
+      "status": "PASS",
+      "message": "Configuration exists",
+      "critical": true,
+      "timestamp": "2025-07-31T17:41:48.564367+00:00",
+      "duration": 0.0003299713134765625
+    },
+    {
+      "name": "File: src/wazuh_mcp_server/api/wazuh_client.py",
+      "status": "PASS",
+      "message": "API client exists",
+      "critical": true,
+      "timestamp": "2025-07-31T17:41:48.564406+00:00",
+      "duration": 0.00036787986755371094
+    },
+    {
+      "name": "File: requirements.txt",
+      "status": "PASS",
+      "message": "Dependencies exists",
+      "critical": true,
+      "timestamp": "2025-07-31T17:41:48.564444+00:00",
+      "duration": 0.0004069805145263672
+    },
+    {
+      "name": "File: pyproject.toml",
+      "status": "PASS",
+      "message": "Project config exists",
+      "critical": true,
+      "timestamp": "2025-07-31T17:41:48.564481+00:00",
+      "duration": 0.00044274330139160156
+    },
+    {
+      "name": "File: validate-production.py",
+      "status": "PASS",
+      "message": "Validation script exists",
+      "critical": false,
+      "timestamp": "2025-07-31T17:41:48.564521+00:00",
+      "duration": 0.0004839897155761719
+    },
+    {
+      "name": "File: test-functionality.py",
+      "status": "PASS",
+      "message": "Test suite exists",
+      "critical": false,
+      "timestamp": "2025-07-31T17:41:48.564555+00:00",
+      "duration": 0.0005168914794921875
+    },
+    {
+      "name": "Executable: wazuh-mcp-server",
+      "status": "PASS",
+      "message": "Script is executable",
+      "critical": true,
+      "timestamp": "2025-07-31T17:41:48.564614+00:00",
+      "duration": 0.0005829334259033203
+    },
+    {
+      "name": "Executable: docker/entrypoint.sh",
+      "status": "PASS",
+      "message": "Script is executable",
+      "critical": true,
+      "timestamp": "2025-07-31T17:41:48.564683+00:00",
+      "duration": 0.0006458759307861328
+    },
+    {
+      "name": "Port Configuration",
+      "status": "PASS",
+      "message": "Valid port: 3000",
+      "critical": true,
+      "timestamp": "2025-07-31T17:41:48.566251+00:00",
+      "duration": 0.002377033233642578
+    },
+    {
+      "name": "Transport Configuration",
+      "status": "PASS",
+      "message": "Valid transport: stdio",
+      "critical": true,
+      "timestamp": "2025-07-31T17:41:48.566431+00:00",
+      "duration": 0.0026340484619140625
+    }
+  ],
+  "timestamp": "2025-07-31T17:41:48.567476+00:00"
+}

@@ -1,0 +1,445 @@
+{
+  "summary": {
+    "passed": 48,
+    "failed": 0,
+    "warnings": 6,
+    "success": true,
+    "total_duration": 2.0184450149536133
+  },
+  "checks": [
+    {
+      "name": "Import fastmcp",
+      "status": "PASS",
+      "message": "FastMCP framework imported successfully",
+      "details": {},
+      "timestamp": "2025-07-31T23:00:39.073181",
+      "duration": 1.8463637828826904
+    },
+    {
+      "name": "Import pydantic",
+      "status": "PASS",
+      "message": "Data validation imported successfully",
+      "details": {},
+      "timestamp": "2025-07-31T23:00:39.073205",
+      "duration": 1.8463778495788574
+    },
+    {
+      "name": "Import dotenv",
+      "status": "PASS",
+      "message": "Environment configuration imported successfully",
+      "details": {},
+      "timestamp": "2025-07-31T23:00:39.073213",
+      "duration": 1.8463847637176514
+    },
+    {
+      "name": "Import httpx",
+      "status": "PASS",
+      "message": "HTTP client imported successfully",
+      "details": {},
+      "timestamp": "2025-07-31T23:00:39.073219",
+      "duration": 1.8463900089263916
+    },
+    {
+      "name": "Import uvicorn",
+      "status": "PASS",
+      "message": "ASGI server imported successfully",
+      "details": {},
+      "timestamp": "2025-07-31T23:00:39.073224",
+      "duration": 1.84639573097229
+    },
+    {
+      "name": "Import asyncio",
+      "status": "PASS",
+      "message": "Async runtime imported successfully",
+      "details": {},
+      "timestamp": "2025-07-31T23:00:39.073229",
+      "duration": 1.8464000225067139
+    },
+    {
+      "name": "Import json",
+      "status": "PASS",
+      "message": "JSON handling imported successfully",
+      "details": {},
+      "timestamp": "2025-07-31T23:00:39.073234",
+      "duration": 1.846404790878296
+    },
+    {
+      "name": "Import datetime",
+      "status": "PASS",
+      "message": "Date/time handling imported successfully",
+      "details": {},
+      "timestamp": "2025-07-31T23:00:39.073238",
+      "duration": 1.8464088439941406
+    },
+    {
+      "name": "Import uuid",
+      "status": "PASS",
+      "message": "UUID generation imported successfully",
+      "details": {},
+      "timestamp": "2025-07-31T23:00:39.073242",
+      "duration": 1.8464136123657227
+    },
+    {
+      "name": "Import typing",
+      "status": "PASS",
+      "message": "Type hints imported successfully",
+      "details": {},
+      "timestamp": "2025-07-31T23:00:39.073247",
+      "duration": 1.8464179039001465
+    },
+    {
+      "name": "Import pathlib",
+      "status": "PASS",
+      "message": "Path handling imported successfully",
+      "details": {},
+      "timestamp": "2025-07-31T23:00:39.073251",
+      "duration": 1.8464219570159912
+    },
+    {
+      "name": "Import os",
+      "status": "PASS",
+      "message": "OS interface imported successfully",
+      "details": {},
+      "timestamp": "2025-07-31T23:00:39.073255",
+      "duration": 1.8464267253875732
+    },
+    {
+      "name": "Import sys",
+      "status": "PASS",
+      "message": "System interface imported successfully",
+      "details": {},
+      "timestamp": "2025-07-31T23:00:39.073260",
+      "duration": 1.846430778503418
+    },
+    {
+      "name": "Import wazuh_mcp_server.config",
+      "status": "PASS",
+      "message": "Configuration module imported successfully",
+      "details": {},
+      "timestamp": "2025-07-31T23:00:39.076045",
+      "duration": 1.8492276668548584
+    },
+    {
+      "name": "Import wazuh_mcp_server.api.wazuh_client",
+      "status": "PASS",
+      "message": "Wazuh API client imported successfully",
+      "details": {},
+      "timestamp": "2025-07-31T23:00:39.077725",
+      "duration": 1.8509047031402588
+    },
+    {
+      "name": "Import wazuh_mcp_server.server",
+      "status": "PASS",
+      "message": "MCP server imported successfully",
+      "details": {},
+      "timestamp": "2025-07-31T23:00:39.201549",
+      "duration": 1.9747326374053955
+    },
+    {
+      "name": "Container Environment",
+      "status": "WARN",
+      "message": "Environment type: production (expected: docker)",
+      "details": {},
+      "timestamp": "2025-07-31T23:00:39.201601",
+      "duration": 1.6689300537109375e-05
+    },
+    {
+      "name": "Python Version",
+      "status": "PASS",
+      "message": "Python 3.13.5",
+      "details": {},
+      "timestamp": "2025-07-31T23:00:39.201614",
+      "duration": 2.7894973754882812e-05
+    },
+    {
+      "name": "Container Env PYTHONUNBUFFERED",
+      "status": "WARN",
+      "message": "Python output buffering disabled not set",
+      "details": {},
+      "timestamp": "2025-07-31T23:00:39.201627",
+      "duration": 4.076957702636719e-05
+    },
+    {
+      "name": "Container Env PYTHONDONTWRITEBYTECODE",
+      "status": "WARN",
+      "message": "Python bytecode writing disabled not set",
+      "details": {},
+      "timestamp": "2025-07-31T23:00:39.201638",
+      "duration": 5.173683166503906e-05
+    },
+    {
+      "name": "Container Env PYTHONHASHSEED",
+      "status": "WARN",
+      "message": "Python hash seed randomization not set",
+      "details": {},
+      "timestamp": "2025-07-31T23:00:39.201646",
+      "duration": 5.91278076171875e-05
+    },
+    {
+      "name": "MCP Server Creation",
+      "status": "PASS",
+      "message": "FastMCP server instance created successfully",
+      "details": {},
+      "timestamp": "2025-07-31T23:00:39.201665",
+      "duration": 8.106231689453125e-06
+    },
+    {
+      "name": "MCP Tools Registration",
+      "status": "PASS",
+      "message": "20 tools registered",
+      "details": {},
+      "timestamp": "2025-07-31T23:00:39.201681",
+      "duration": 2.4080276489257812e-05
+    },
+    {
+      "name": "MCP Resources Registration",
+      "status": "PASS",
+      "message": "2 resources registered",
+      "details": {},
+      "timestamp": "2025-07-31T23:00:39.201699",
+      "duration": 4.1961669921875e-05
+    },
+    {
+      "name": "Critical Tool get_wazuh_alerts",
+      "status": "PASS",
+      "message": "Tool available",
+      "details": {},
+      "timestamp": "2025-07-31T23:00:39.201705",
+      "duration": 4.8160552978515625e-05
+    },
+    {
+      "name": "Critical Tool get_agent_status",
+      "status": "PASS",
+      "message": "Tool available",
+      "details": {},
+      "timestamp": "2025-07-31T23:00:39.201710",
+      "duration": 5.2928924560546875e-05
+    },
+    {
+      "name": "Critical Tool get_vulnerability_summary",
+      "status": "PASS",
+      "message": "Tool available",
+      "details": {},
+      "timestamp": "2025-07-31T23:00:39.201715",
+      "duration": 5.817413330078125e-05
+    },
+    {
+      "name": "Critical Tool search_wazuh_logs",
+      "status": "PASS",
+      "message": "Tool available",
+      "details": {},
+      "timestamp": "2025-07-31T23:00:39.201719",
+      "duration": 6.222724914550781e-05
+    },
+    {
+      "name": "Critical Tool analyze_security_threats",
+      "status": "PASS",
+      "message": "Tool available",
+      "details": {},
+      "timestamp": "2025-07-31T23:00:39.201723",
+      "duration": 6.604194641113281e-05
+    },
+    {
+      "name": "File wazuh-mcp-server",
+      "status": "PASS",
+      "message": "Main executable script exists",
+      "details": {},
+      "timestamp": "2025-07-31T23:00:39.201815",
+      "duration": 8.487701416015625e-05
+    },
+    {
+      "name": "File src/wazuh_mcp_server/server.py",
+      "status": "PASS",
+      "message": "Server module exists",
+      "details": {},
+      "timestamp": "2025-07-31T23:00:39.201862",
+      "duration": 0.0001308917999267578
+    },
+    {
+      "name": "File src/wazuh_mcp_server/config.py",
+      "status": "PASS",
+      "message": "Configuration module exists",
+      "details": {},
+      "timestamp": "2025-07-31T23:00:39.201896",
+      "duration": 0.00016498565673828125
+    },
+    {
+      "name": "File src/wazuh_mcp_server/api/wazuh_client.py",
+      "status": "PASS",
+      "message": "Wazuh client exists",
+      "details": {},
+      "timestamp": "2025-07-31T23:00:39.201928",
+      "duration": 0.00019693374633789062
+    },
+    {
+      "name": "File docker/entrypoint.sh",
+      "status": "PASS",
+      "message": "Container entrypoint exists",
+      "details": {},
+      "timestamp": "2025-07-31T23:00:39.201959",
+      "duration": 0.00022792816162109375
+    },
+    {
+      "name": "File validate-production.py",
+      "status": "PASS",
+      "message": "Production validation exists",
+      "details": {},
+      "timestamp": "2025-07-31T23:00:39.201987",
+      "duration": 0.00025582313537597656
+    },
+    {
+      "name": "File test-functionality.py",
+      "status": "PASS",
+      "message": "Functionality tests exists",
+      "details": {},
+      "timestamp": "2025-07-31T23:00:39.202014",
+      "duration": 0.00028204917907714844
+    },
+    {
+      "name": "File requirements.txt",
+      "status": "PASS",
+      "message": "Dependencies exists",
+      "details": {},
+      "timestamp": "2025-07-31T23:00:39.202040",
+      "duration": 0.000308990478515625
+    },
+    {
+      "name": "File pyproject.toml",
+      "status": "PASS",
+      "message": "Project configuration exists",
+      "details": {},
+      "timestamp": "2025-07-31T23:00:39.202067",
+      "duration": 0.00033593177795410156
+    },
+    {
+      "name": "Executable wazuh-mcp-server",
+      "status": "PASS",
+      "message": "Script is executable",
+      "details": {},
+      "timestamp": "2025-07-31T23:00:39.202125",
+      "duration": 0.00039386749267578125
+    },
+    {
+      "name": "Executable docker/entrypoint.sh",
+      "status": "PASS",
+      "message": "Script is executable",
+      "details": {},
+      "timestamp": "2025-07-31T23:00:39.202175",
+      "duration": 0.0004439353942871094
+    },
+    {
+      "name": "Executable validate-production.py",
+      "status": "PASS",
+      "message": "Script is executable",
+      "details": {},
+      "timestamp": "2025-07-31T23:00:39.202220",
+      "duration": 0.0004889965057373047
+    },
+    {
+      "name": "Executable test-functionality.py",
+      "status": "PASS",
+      "message": "Script is executable",
+      "details": {},
+      "timestamp": "2025-07-31T23:00:39.202262",
+      "duration": 0.0005311965942382812
+    },
+    {
+      "name": "Health Check - Config",
+      "status": "PASS",
+      "message": "Configuration loads successfully",
+      "details": {},
+      "timestamp": "2025-07-31T23:00:39.204491",
+      "duration": 0.0022170543670654297
+    },
+    {
+      "name": "Health Check - Server",
+      "status": "PASS",
+      "message": "MCP server creates successfully",
+      "details": {},
+      "timestamp": "2025-07-31T23:00:39.204509",
+      "duration": 0.0022270679473876953
+    },
+    {
+      "name": "Health Check - Transport",
+      "status": "PASS",
+      "message": "Valid transport mode: stdio",
+      "details": {},
+      "timestamp": "2025-07-31T23:00:39.204516",
+      "duration": 0.002232789993286133
+    },
+    {
+      "name": "Health Check - Port",
+      "status": "PASS",
+      "message": "Valid port: 3000",
+      "details": {},
+      "timestamp": "2025-07-31T23:00:39.204523",
+      "duration": 0.0022401809692382812
+    },
+    {
+      "name": "OS-Specific Pattern subprocess.run",
+      "status": "PASS",
+      "message": "No System command execution found in source code",
+      "details": {},
+      "timestamp": "2025-07-31T23:00:39.241944",
+      "duration": 0.03741788864135742
+    },
+    {
+      "name": "OS-Specific Pattern os.system",
+      "status": "PASS",
+      "message": "No System command execution found in source code",
+      "details": {},
+      "timestamp": "2025-07-31T23:00:39.242718",
+      "duration": 0.038188934326171875
+    },
+    {
+      "name": "OS-Specific Pattern platform",
+      "status": "WARN",
+      "message": "Platform detection found in: src/wazuh_mcp_server/server.py",
+      "details": {},
+      "timestamp": "2025-07-31T23:00:39.243360",
+      "duration": 0.03882908821105957
+    },
+    {
+      "name": "OS-Specific Pattern sys.platform",
+      "status": "PASS",
+      "message": "No Platform detection found in source code",
+      "details": {},
+      "timestamp": "2025-07-31T23:00:39.244141",
+      "duration": 0.03961014747619629
+    },
+    {
+      "name": "OS-Specific Pattern shell=True",
+      "status": "PASS",
+      "message": "No Shell execution found in source code",
+      "details": {},
+      "timestamp": "2025-07-31T23:00:39.244790",
+      "duration": 0.04025912284851074
+    },
+    {
+      "name": "Container Config PYTHONPATH",
+      "status": "WARN",
+      "message": "Python path set correctly not set",
+      "details": {},
+      "timestamp": "2025-07-31T23:00:39.244819",
+      "duration": 0.04028201103210449
+    },
+    {
+      "name": "Container Config HOME",
+      "status": "PASS",
+      "message": "Home directory available: /Users/alokemajumder",
+      "details": {},
+      "timestamp": "2025-07-31T23:00:39.244833",
+      "duration": 0.04029512405395508
+    },
+    {
+      "name": "Container Config USER",
+      "status": "PASS",
+      "message": "User context available: alokemajumder",
+      "details": {},
+      "timestamp": "2025-07-31T23:00:39.244841",
+      "duration": 0.04030299186706543
+    }
+  ],
+  "timestamp": "2025-07-31T23:00:39.245272",
+  "mode": "quick"
+}

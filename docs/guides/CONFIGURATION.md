@@ -1,225 +1,343 @@
-# Configuration Guide
+# 🔧 Configuration Guide
 
-## Overview
+**Complete guide to configuring your Wazuh MCP Server for any environment.**
 
-Wazuh MCP Server uses a single configuration file `config/wazuh.env` for all settings. This guide covers all configuration options.
+## ⚡ Quick Start
 
-> **Note**: This project uses `compose.yml` following modern Docker Compose V2+ standards. All commands use `docker compose` (not `docker-compose`).
-
-## Quick Setup
-
+**Fastest way to configure:**
 ```bash
-# Run the configuration wizard
-./scripts/configure.sh
+./configure-wazuh.sh
 ```
 
-## Configuration File
+The interactive script handles everything automatically.
 
-All settings are stored in `config/wazuh.env`:
+## 📋 Configuration Overview
 
-### Required Settings
+The server uses **two configuration methods**:
+1. **`.env.wazuh`** - Main configuration (created by configure script)
+2. **Environment variables** - For Docker override
+
+## 🎯 Required Settings
+
+**Only 3 settings are required:**
 
 ```env
-# Wazuh Manager Connection
-WAZUH_HOST=your-wazuh-manager.com    # Hostname or IP address
-WAZUH_USER=your-api-username         # API user with read permissions
+WAZUH_HOST=your-wazuh-manager.com    # Your Wazuh Manager hostname/IP
+WAZUH_USER=your-api-username         # API user with read permissions  
 WAZUH_PASS=your-api-password         # API password
 ```
 
-### Optional Settings
+**That's it!** Everything else has sensible defaults.
 
-#### Basic Options
+## 🔧 Configuration Methods
 
-```env
-# Wazuh Manager Port (default: 55000)
-WAZUH_PORT=55000
-
-# SSL Certificate Verification (default: true)
-# Set to false for self-signed certificates
-VERIFY_SSL=true
-```
-
-#### Wazuh Indexer (Enhanced Features)
-
-If you have Wazuh Indexer installed, enable these for enhanced analytics:
-
-```env
-# Indexer Connection
-WAZUH_INDEXER_HOST=your-wazuh-indexer.com
-WAZUH_INDEXER_USER=admin
-WAZUH_INDEXER_PASS=your-indexer-password
-WAZUH_INDEXER_PORT=9200
-```
-
-#### Transport Mode
-
-```env
-# MCP Transport Mode (default: http)
-# - http: For web/remote access (default)
-# - stdio: For direct Claude Desktop integration
-MCP_TRANSPORT=http
-
-# HTTP/SSE Mode Settings (default mode)
-MCP_HOST=0.0.0.0
-MCP_PORT=3000
-```
-
-#### Advanced Settings
-
-These rarely need to be changed:
-
-```env
-# Performance Tuning
-MAX_ALERTS_PER_QUERY=1000      # Max alerts per API request
-REQUEST_TIMEOUT_SECONDS=30     # API request timeout
-MAX_CONNECTIONS=10             # Connection pool size
-
-# Logging
-LOG_LEVEL=INFO                 # DEBUG, INFO, WARNING, ERROR
-```
-
-## Configuration Methods
-
-### Method 1: Configuration Wizard (Recommended)
+### Method 1: Interactive Script (Recommended)
 
 ```bash
-./scripts/configure.sh
+./configure-wazuh.sh
 ```
 
-Interactive wizard that guides you through all settings.
+**Advantages:**
+- ✅ Validates your settings
+- ✅ Tests Wazuh connectivity  
+- ✅ Starts server automatically
+- ✅ No manual file editing
 
-### Method 2: Copy Template
+### Method 2: Manual Configuration
 
-```bash
-cp config/wazuh.env.example config/wazuh.env
-nano config/wazuh.env
-```
+1. **Copy template:**
+   ```bash
+   cp config/wazuh.env.example .env.wazuh
+   ```
+
+2. **Edit settings:**
+   ```bash
+   nano .env.wazuh
+   ```
+
+3. **Start server:**
+   ```bash
+   docker compose up -d
+   ```
 
 ### Method 3: Environment Variables
 
-You can override any setting with environment variables:
-
+**Override any setting:**
 ```bash
 export WAZUH_HOST=my-wazuh.com
+export MCP_PORT=4000
 docker compose up -d
 ```
 
-## Transport Modes
+## 🚀 Transport Modes
 
-### HTTP/SSE Mode (Default)
+### HTTP Mode (Default)
+**Best for:** Web clients, REST APIs, remote access
 
-Best for web clients and remote access:
-- Web-based interface at `http://localhost:3000`
-- RESTful API access
-- Supports multiple concurrent connections
-- Server-Sent Events for real-time updates
-
-### STDIO Mode (Optional)
-
-For direct Claude Desktop integration:
-1. Set in configuration:
-   ```bash
-   echo "MCP_TRANSPORT=stdio" >> config/wazuh.env
-   ```
-
-2. Restart server:
-   ```bash
-   docker compose restart
-   ```
-
-3. Configure Claude Desktop with container exec command
-
-## Validation
-
-### Test Configuration
-
-```bash
-# Validate configuration syntax
-docker compose config
-
-# Test Wazuh connection
-python3 test-functionality.py
+```env
+MCP_TRANSPORT=http
+MCP_HOST=0.0.0.0  
+MCP_PORT=3000
 ```
 
-### Check Logs
+**Access:** `http://localhost:3000`
+
+### STDIO Mode
+**Best for:** Claude Desktop direct integration
+
+```env
+MCP_TRANSPORT=stdio
+```
+
+**Claude Desktop config:**
+```json
+{
+  "mcpServers": {
+    "wazuh": {
+      "command": "docker",
+      "args": ["compose", "exec", "wazuh-mcp-server", "./wazuh-mcp-server", "--stdio"],
+      "cwd": "/path/to/Wazuh-MCP-Server"
+    }
+  }
+}
+```
+
+## ⚙️ Optional Settings
+
+### Wazuh Connection
+```env
+WAZUH_PORT=55000              # Default: 55000
+VERIFY_SSL=true               # Default: true (recommended)
+```
+
+### Performance Tuning
+```env
+MAX_ALERTS_PER_QUERY=1000     # Max alerts per request
+REQUEST_TIMEOUT_SECONDS=30    # API timeout
+MAX_CONNECTIONS=10            # Connection pool
+```
+
+### Indexer (Enhanced Features)
+```env
+# Enable only if you have Wazuh Indexer
+WAZUH_INDEXER_HOST=indexer.com
+WAZUH_INDEXER_USER=admin
+WAZUH_INDEXER_PASS=password
+WAZUH_INDEXER_PORT=9200
+```
+
+### Logging
+```env
+LOG_LEVEL=INFO                # DEBUG, INFO, WARNING, ERROR
+STRUCTURED_LOGGING=true       # JSON log format
+```
+
+## ✅ Validation & Testing
+
+### Test Your Configuration
 
 ```bash
-# View server logs
+# Validate Docker config
+docker compose config
+
+# Test server health
+curl http://localhost:3000/health
+
+# Run comprehensive tests
+docker compose exec wazuh-mcp-server python3 test-functionality.py
+
+# Test Wazuh connectivity
+docker compose exec wazuh-mcp-server python3 test-wazuh-connectivity.py
+```
+
+### Check Server Status
+
+```bash
+# Container status
+docker compose ps
+
+# Real-time logs
 docker compose logs -f
 
-# Check for configuration errors
+# Error checking
 docker compose logs | grep -i error
 ```
 
-## Troubleshooting
+## 🚨 Troubleshooting
 
-### Common Issues
+### Connection Issues
 
-1. **Connection Failed**
-   - Check WAZUH_HOST is reachable
-   - Verify firewall allows port 55000
-   - Test with: `curl -k https://${WAZUH_HOST}:55000`
-
-2. **Authentication Failed**
-   - Verify API user exists in Wazuh
-   - Check user has read permissions
-   - Ensure password doesn't contain special shell characters
-
-3. **SSL Errors**
-   - Set `VERIFY_SSL=false` for self-signed certificates
-   - Or add certificate to trusted store
-
-### Debug Mode
-
-Enable debug logging:
+**Problem:** Can't connect to Wazuh Manager
 ```bash
-echo "LOG_LEVEL=DEBUG" >> config/wazuh.env
+# Test connectivity
+docker compose exec wazuh-mcp-server curl -k https://YOUR_WAZUH_HOST:55000
+
+# Check firewall
+telnet YOUR_WAZUH_HOST 55000
+```
+
+**Solutions:**
+- ✅ Verify `WAZUH_HOST` is correct
+- ✅ Check firewall allows port 55000
+- ✅ Confirm Wazuh API service is running
+
+### Authentication Issues
+
+**Problem:** Invalid credentials
+```bash
+# Test authentication
+curl -k "https://WAZUH_HOST:55000/security/user/authenticate" \
+  -u "USERNAME:PASSWORD"
+```
+
+**Solutions:**
+- ✅ Verify username/password in Wazuh
+- ✅ Check API user permissions
+- ✅ Ensure no special characters break parsing
+
+### SSL Certificate Issues
+
+**Problem:** SSL verification fails
+```bash
+# Disable SSL verification (development only)
+echo "VERIFY_SSL=false" >> .env.wazuh
 docker compose restart
 ```
 
-## Security Best Practices
+**Solutions:**
+- ✅ Use `VERIFY_SSL=false` for self-signed certs
+- ✅ Install proper certificates
+- ✅ Update certificate bundle
 
-1. **Protect Configuration File**
-   ```bash
-   chmod 600 config/wazuh.env
-   ```
+### Container Issues
 
-2. **Use Strong Passwords**
-   - Minimum 12 characters
-   - Mix of letters, numbers, symbols
+**Problem:** Container won't start
+```bash
+# Check container health
+docker compose ps
+docker compose logs wazuh-mcp-server
 
-3. **Enable SSL Verification**
-   - Keep `VERIFY_SSL=true` in production
-   - Use proper certificates
+# Check port conflicts
+lsof -i :3000
+```
 
-4. **Restrict Network Access**
-   - Use firewall rules
-   - Limit API user permissions in Wazuh
+**Solutions:**
+- ✅ Check Docker daemon is running
+- ✅ Verify port 3000 is available
+- ✅ Review error logs
 
-## Migration from Previous Versions
+## 🔒 Security Best Practices
 
-If upgrading from an older version:
+### File Permissions
+```bash
+# Protect configuration file
+chmod 600 .env.wazuh
+```
 
-1. Backup existing configuration
-2. Run configuration wizard: `./scripts/configure.sh`
-3. The wizard will migrate your settings automatically
+### Strong Authentication
+- ✅ Use dedicated Wazuh API user
+- ✅ Minimum 12-character passwords
+- ✅ Rotate credentials regularly
+- ✅ Limit API user permissions
 
-## Environment-Specific Configurations
+### Network Security
+- ✅ Enable SSL verification in production
+- ✅ Use firewall rules
+- ✅ Restrict network access
+- ✅ Monitor API access logs
+
+## 🌍 Environment-Specific Configs
 
 ### Development
 ```env
 VERIFY_SSL=false
 LOG_LEVEL=DEBUG
+MAX_ALERTS_PER_QUERY=10
+```
+
+### Staging
+```env
+VERIFY_SSL=true
+LOG_LEVEL=INFO
+MAX_ALERTS_PER_QUERY=100
 ```
 
 ### Production
 ```env
 VERIFY_SSL=true
-LOG_LEVEL=INFO
+LOG_LEVEL=WARNING
+MAX_ALERTS_PER_QUERY=1000
+STRUCTURED_LOGGING=true
 ```
 
-### Testing
+## 📊 Configuration Examples
+
+### Basic Setup
 ```env
-MAX_ALERTS_PER_QUERY=10
-REQUEST_TIMEOUT_SECONDS=5
+WAZUH_HOST=wazuh.company.com
+WAZUH_USER=mcp-reader
+WAZUH_PASS=SecurePassword123
 ```
+
+### High-Performance Setup
+```env
+WAZUH_HOST=wazuh.company.com
+WAZUH_USER=mcp-reader
+WAZUH_PASS=SecurePassword123
+MAX_ALERTS_PER_QUERY=5000
+MAX_CONNECTIONS=20
+REQUEST_TIMEOUT_SECONDS=60
+```
+
+### Multi-Node Wazuh
+```env
+WAZUH_HOST=wazuh-manager.company.com
+WAZUH_INDEXER_HOST=wazuh-indexer.company.com
+WAZUH_USER=mcp-reader
+WAZUH_PASS=SecurePassword123
+```
+
+## 🔄 Configuration Updates
+
+### Updating Settings
+```bash
+# Edit configuration
+nano .env.wazuh
+
+# Apply changes
+docker compose restart
+
+# Verify
+curl http://localhost:3000/health
+```
+
+### Reconfiguration
+```bash
+# Re-run configuration wizard
+./configure-wazuh.sh
+
+# Or manually update and restart
+docker compose down
+docker compose up -d
+```
+
+## 📚 Advanced Topics
+
+### Custom Docker Override
+Create `docker-compose.override.yml`:
+```yaml
+services:
+  wazuh-mcp-server:
+    environment:
+      - LOG_LEVEL=DEBUG
+    ports:
+      - "4000:3000"
+```
+
+### Environment File Priority
+1. Environment variables (highest)
+2. `.env.wazuh` 
+3. Container defaults (lowest)
+
+### Configuration Validation
+The server validates all settings on startup and provides detailed error messages for invalid configurations.
