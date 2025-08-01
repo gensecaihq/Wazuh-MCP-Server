@@ -63,9 +63,9 @@ check_python() {
     
     echo -e "${GREEN}✅ Found Python $PYTHON_VERSION${NC}"
     
-    # Check if version meets requirements (3.11+)
-    if [ "$PYTHON_MAJOR" -lt 3 ] || [ "$PYTHON_MAJOR" -eq 3 -a "$PYTHON_MINOR" -lt 11 ]; then
-        echo -e "${YELLOW}⚠️  Python 3.11+ recommended for optimal performance${NC}"
+    # Check if version meets requirements (3.9+)
+    if [ "$PYTHON_MAJOR" -lt 3 ] || [ "$PYTHON_MAJOR" -eq 3 -a "$PYTHON_MINOR" -lt 9 ]; then
+        echo -e "${YELLOW}⚠️  Python 3.9+ required for Wazuh MCP Server${NC}"
         echo "Current version: $PYTHON_VERSION"
         echo "Consider upgrading Python for better FastMCP compatibility"
     fi
@@ -279,12 +279,12 @@ main() {
     
     # Installation steps
     if ! check_python; then
-        echo -e "${YELLOW}Installing Python 3.11...${NC}"
+        echo -e "${YELLOW}Installing Python 3.9...${NC}"
         # Add deadsnakes PPA for newer Python versions on older Ubuntu
         if command -v add-apt-repository &> /dev/null; then
             sudo add-apt-repository ppa:deadsnakes/ppa -y || true
             sudo apt update || true
-            sudo apt install python3.11 python3.11-venv python3.11-dev -y || true
+            sudo apt install python3.9 python3.9-venv python3.9-dev -y || true
         fi
     fi
     

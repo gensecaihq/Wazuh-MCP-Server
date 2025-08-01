@@ -10,7 +10,7 @@ except ImportError:
     class ValidationError(Exception):
         pass
 
-from src.config import WazuhConfig, ConfigurationError
+from wazuh_mcp_server.config import WazuhConfig, ConfigurationError
 
 
 class TestWazuhConfig:

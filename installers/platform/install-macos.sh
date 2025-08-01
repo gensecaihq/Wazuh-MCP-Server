@@ -104,11 +104,11 @@ check_python() {
     
     echo -e "${GREEN}✅ Found Python $PYTHON_VERSION${NC}"
     
-    # Check if version meets requirements (3.11+)
-    if [ "$PYTHON_MAJOR" -lt 3 ] || [ "$PYTHON_MAJOR" -eq 3 -a "$PYTHON_MINOR" -lt 11 ]; then
-        echo -e "${YELLOW}⚠️  Python 3.11+ recommended for optimal performance${NC}"
+    # Check if version meets requirements (3.9+)
+    if [ "$PYTHON_MAJOR" -lt 3 ] || [ "$PYTHON_MAJOR" -eq 3 -a "$PYTHON_MINOR" -lt 9 ]; then
+        echo -e "${YELLOW}⚠️  Python 3.9+ recommended for optimal performance${NC}"
         echo "Current version: $PYTHON_VERSION"
-        echo "Installing Python 3.11 via Homebrew..."
+        echo "Installing Python 3.9 via Homebrew..."
         return 1
     fi
     
@@ -116,20 +116,20 @@ check_python() {
 }
 
 install_python() {
-    echo -e "${BLUE}🐍 Installing Python 3.11 via Homebrew...${NC}"
+    echo -e "${BLUE}🐍 Installing Python 3.9 via Homebrew...${NC}"
     
-    # Install Python 3.11
-    brew install python@3.11
+    # Install Python 3.9
+    brew install python@3.9
     
     # Create symlinks if needed
     if [[ "$APPLE_SILICON" == true ]]; then
-        PYTHON_PATH="/opt/homebrew/bin/python3.11"
+        PYTHON_PATH="/opt/homebrew/bin/python3.9"
     else
-        PYTHON_PATH="/usr/local/bin/python3.11"
+        PYTHON_PATH="/usr/local/bin/python3.9"
     fi
     
     if [ -f "$PYTHON_PATH" ]; then
-        echo -e "${GREEN}✅ Python 3.11 installed at $PYTHON_PATH${NC}"
+        echo -e "${GREEN}✅ Python 3.9 installed at $PYTHON_PATH${NC}"
         # Use this specific Python version
         ln -sf "$PYTHON_PATH" /usr/local/bin/python3 || true
     fi
@@ -170,10 +170,10 @@ create_venv() {
     fi
     
     # Use python3 or the specific version we installed
-    if [[ "$APPLE_SILICON" == true && -f "/opt/homebrew/bin/python3.11" ]]; then
-        /opt/homebrew/bin/python3.11 -m venv venv
-    elif [[ -f "/usr/local/bin/python3.11" ]]; then
-        /usr/local/bin/python3.11 -m venv venv
+    if [[ "$APPLE_SILICON" == true && -f "/opt/homebrew/bin/python3.9" ]]; then
+        /opt/homebrew/bin/python3.9 -m venv venv
+    elif [[ -f "/usr/local/bin/python3.9" ]]; then
+        /usr/local/bin/python3.9 -m venv venv
     else
         python3 -m venv venv
     fi

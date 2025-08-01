@@ -5,13 +5,13 @@
 fastmcp>=2.10.6
 
 # HTTP client for Wazuh API (async)
-aiohttp>=3.8.0
+aiohttp>=3.8.0,<4.0.0
 
 # Data validation and serialization
-pydantic>=2.10.0
+pydantic>=2.10.0,<3.0.0
 
 # Environment configuration
-python-dotenv>=1.0.0
+python-dotenv>=1.0.0,<2.0.0
 
 # SSL/TLS support
 certifi>=2023.7.22

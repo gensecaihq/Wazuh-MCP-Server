@@ -16,7 +16,7 @@ import logging
 
 from ..config import WazuhConfig
 from ..api.wazuh_client_manager import WazuhClientManager
-from .logging_setup import get_logger
+from .logging import get_logger
 
 logger = get_logger(__name__)
 

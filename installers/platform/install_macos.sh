@@ -207,10 +207,10 @@ check_python() {
     
     if [ -z "$python_cmd" ]; then
         print_error "Python 3.9+ not found"
-        print_info "Installing Python 3.11 via Homebrew..."
-        brew install python@3.11
-        python_cmd=python3.11
-        python_version="3.11"
+        print_info "Installing Python 3.9 via Homebrew..."
+        brew install python@3.9
+        python_cmd=python3.9
+        python_version="3.9"
     fi
     
     export PYTHON_CMD=$python_cmd

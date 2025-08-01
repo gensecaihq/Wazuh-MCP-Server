@@ -9,15 +9,15 @@ from unittest.mock import Mock, AsyncMock, patch, MagicMock
 from typing import Dict, Any, List
 
 # Import all modules to test
-from src.config import WazuhConfig, ConfigurationError
-from src.__version__ import __version__, __min_wazuh_version__
-from src.api.wazuh_client_manager import WazuhClientManager
-from src.api.wazuh_indexer_client import WazuhIndexerClient
-from src.api.wazuh_field_mappings import WazuhFieldMapper, WazuhVersion
-from src.utils.production_error_handler import ProductionErrorHandler, CircuitBreaker, CircuitBreakerConfig
-from src.analyzers.security_analyzer import SecurityAnalyzer
-from src.analyzers.compliance_analyzer import ComplianceAnalyzer
-from src.wazuh_mcp_server import WazuhMCPServer
+from wazuh_mcp_server.config import WazuhConfig, ConfigurationError
+from wazuh_mcp_server.__version__ import __version__, __min_wazuh_version__
+from wazuh_mcp_server.api.wazuh_client_manager import WazuhClientManager
+from wazuh_mcp_server.api.wazuh_indexer_client import WazuhIndexerClient
+from wazuh_mcp_server.api.wazuh_field_mappings import WazuhFieldMapper, WazuhVersion
+from wazuh_mcp_server.utils.production_error_handler import ProductionErrorHandler, CircuitBreaker, CircuitBreakerConfig
+from wazuh_mcp_server.analyzers.security_analyzer import SecurityAnalyzer
+from wazuh_mcp_server.analyzers.compliance_analyzer import ComplianceAnalyzer
+from wazuh_mcp_server.server import mcp
 
 
 class TestProductionStability:
@@ -422,7 +422,7 @@ class TestProductionStability:
         
         # Test rate limiting
         async def rate_limited_operation():
-            from src.utils.exceptions import RateLimitError
+            from wazuh_mcp_server.utils.exceptions import RateLimitError
             raise RateLimitError("Rate limit exceeded")
         
         with pytest.raises(Exception):
@@ -435,7 +435,7 @@ class TestProductionStability:
         
         # Test authentication failures
         async def auth_failed_operation():
-            from src.utils.exceptions import AuthenticationError
+            from wazuh_mcp_server.utils.exceptions import AuthenticationError
             raise AuthenticationError("Invalid credentials")
         
         with pytest.raises(Exception):

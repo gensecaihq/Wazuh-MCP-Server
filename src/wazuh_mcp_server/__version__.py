@@ -5,7 +5,7 @@ __author__ = "Wazuh MCP Server Project"
 __email__ = "info@wazuh-mcp-server.org"
 
 # Compatibility information - FastMCP STDIO Only
-__min_python_version__ = "3.11"
+__min_python_version__ = "3.9"
 __min_wazuh_version__ = "4.5.0"
 __recommended_wazuh_version__ = "4.8.0+"
 __license__ = "MIT"

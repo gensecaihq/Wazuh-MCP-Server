@@ -80,9 +80,9 @@ check_python() {
     
     echo -e "${GREEN}✅ Found Python $PYTHON_VERSION${NC}"
     
-    # Check if version meets requirements (3.11+)
+    # Check if version meets requirements (3.9+)
     if [ "$PYTHON_MAJOR" -lt 3 ] || [ "$PYTHON_MAJOR" -eq 3 -a "$PYTHON_MINOR" -lt 11 ]; then
-        echo -e "${YELLOW}⚠️  Python 3.11+ recommended for optimal performance${NC}"
+        echo -e "${YELLOW}⚠️  Python 3.9+ recommended for optimal performance${NC}"
         echo "Current version: $PYTHON_VERSION"
         echo "Arch Linux typically has the latest Python version available"
     fi
@@ -327,7 +327,7 @@ pkgdesc="Wazuh MCP Server - FastMCP STDIO Edition for security monitoring"
 arch=('any')
 url="https://github.com/your-repo/wazuh-mcp-server"
 license=('MIT')
-depends=('python>=3.11' 'python-pip')
+depends=('python>=3.9' 'python-pip')
 makedepends=('python-build' 'python-installer' 'python-wheel')
 source=()
 sha256sums=()

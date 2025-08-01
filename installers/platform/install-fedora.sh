@@ -94,9 +94,9 @@ check_python() {
     
     echo -e "${GREEN}✅ Found Python $PYTHON_VERSION${NC}"
     
-    # Check if version meets requirements (3.11+)
+    # Check if version meets requirements (3.9+)
     if [ "$PYTHON_MAJOR" -lt 3 ] || [ "$PYTHON_MAJOR" -eq 3 -a "$PYTHON_MINOR" -lt 11 ]; then
-        echo -e "${YELLOW}⚠️  Python 3.11+ recommended for optimal performance${NC}"
+        echo -e "${YELLOW}⚠️  Python 3.9+ recommended for optimal performance${NC}"
         echo "Current version: $PYTHON_VERSION"
         echo "Consider upgrading Python for better FastMCP compatibility"
     fi
