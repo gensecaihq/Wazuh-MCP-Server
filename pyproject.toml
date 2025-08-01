@@ -33,15 +33,16 @@ classifiers = [
 requires-python = ">=3.9"
 dependencies = [
     "fastmcp>=2.10.6",
-    "aiohttp>=3.8.0,<4.0.0",
+    "aiohttp>=3.12.14,<4.0.0",
     "urllib3>=1.26.0,<3.0.0",
     "pyjwt>=2.8.0",
-    "certifi>=2023.7.22",
-    "python-dateutil>=2.8.2",
-    "python-dotenv>=1.0.0,<2.0.0",
-    "pydantic>=2.10.0,<3.0.0",
-    "packaging>=21.0",
-    "psutil>=5.9.0",
+    "certifi>=2025.7.14",
+    "python-dateutil>=2.9.0",
+    "python-dotenv>=1.1.1,<2.0.0",
+    "pydantic>=2.11.7,<3.0.0",
+    "packaging>=25.0",
+    "psutil>=7.0.0",
+    "zipp>=3.19.1",
 ]
 
 [project.optional-dependencies]
