@@ -1,17 +1,26 @@
-# Core MCP and async dependencies
-mcp>=1.10.1
-aiohttp>=3.8.0,<4.0.0
-urllib3>=1.26.0,<3.0.0
+# Wazuh MCP Server v2.1.0 - FastMCP STDIO Only
+# Minimal dependencies for cross-platform compatibility
 
-# Authentication and security
-pyjwt>=2.8.0
-certifi>=2021.0.0
+# Core FastMCP framework
+fastmcp>=2.10.6
 
-# Utilities and data handling
+# HTTP client for Wazuh API (async)
+aiohttp>=3.8.0
+
+# Data validation and serialization
+pydantic>=2.10.0
+
+# Environment configuration
+python-dotenv>=1.0.0
+
+# SSL/TLS support
+certifi>=2023.7.22
+
+# Date and time utilities
 python-dateutil>=2.8.2
-python-dotenv>=0.19.0,<2.0.0
-pydantic>=1.10.0,<3.0.0
+
+# Version management
 packaging>=21.0
 
-# Websockets dependencies quick fix
-websockets>=15.0.1
+# Cross-platform system utilities
+psutil>=5.9.0

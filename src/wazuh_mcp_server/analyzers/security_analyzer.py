@@ -48,8 +48,9 @@ class RiskAssessment:
 class SecurityAnalyzer:
     """Advanced security analysis engine with ML-inspired algorithms."""
     
-    def __init__(self):
+    def __init__(self, client_manager=None):
         self.logger = get_logger(__name__)
+        self.client_manager = client_manager
         
         # Pre-compiled regex patterns for performance
         self.attack_patterns = {
@@ -624,3 +625,332 @@ class SecurityAnalyzer:
             "confidence": confidence,
             "evidence": [f"{len(relevant_alerts)} persistence-related alerts"]
         }
+    
+    # Async methods required by FastMCP server
+    
+    async def analyze_threat(self, indicator: str, indicator_type: str = "ip") -> Dict[str, Any]:
+        """Analyze a threat indicator."""
+        try:
+            # Get related alerts from Wazuh
+            if self.client_manager:
+                alerts_data = await self.client_manager.get_alerts(limit=1000)
+                alerts = alerts_data.get('data', {}).get('affected_items', [])
+                
+                # Filter alerts related to this indicator
+                related_alerts = []
+                for alert in alerts:
+                    if indicator_type == "ip":
+                        src_ip = alert.get('data', {}).get('srcip')
+                        dst_ip = alert.get('data', {}).get('dstip')
+                        if src_ip == indicator or dst_ip == indicator:
+                            related_alerts.append(alert)
+                    # Add more indicator types as needed
+                
+                # Perform risk assessment on related alerts
+                if related_alerts:
+                    risk_assessment = self.calculate_comprehensive_risk_score(related_alerts)
+                    return {
+                        "indicator": indicator,
+                        "indicator_type": indicator_type,
+                        "risk_assessment": {
+                            "score": risk_assessment.overall_score,
+                            "level": risk_assessment.risk_level.value,
+                            "confidence": risk_assessment.confidence
+                        },
+                        "related_alerts": len(related_alerts),
+                        "recommendations": risk_assessment.recommendations
+                    }
+            
+            return {
+                "indicator": indicator,
+                "indicator_type": indicator_type,
+                "risk_assessment": {"score": 0, "level": "unknown"},
+                "related_alerts": 0,
+                "recommendations": ["No data available for analysis"]
+            }
+            
+        except Exception as e:
+            self.logger.error(f"Error analyzing threat: {e}")
+            return {"error": str(e)}
+    
+    async def check_ioc_reputation(self, indicator: str, indicator_type: str = "ip") -> Dict[str, Any]:
+        """Check reputation of an Indicator of Compromise."""
+        try:
+            # Get historical alerts for this indicator
+            if self.client_manager:
+                alerts_data = await self.client_manager.get_alerts(limit=5000)
+                alerts = alerts_data.get('data', {}).get('affected_items', [])
+                
+                # Count alerts associated with this indicator
+                alert_count = 0
+                severity_counts = {"low": 0, "medium": 0, "high": 0, "critical": 0}
+                
+                for alert in alerts:
+                    if indicator_type == "ip":
+                        src_ip = alert.get('data', {}).get('srcip')
+                        dst_ip = alert.get('data', {}).get('dstip')
+                        if src_ip == indicator or dst_ip == indicator:
+                            alert_count += 1
+                            level = int(alert.get('rule', {}).get('level', 0))
+                            if level >= 12:
+                                severity_counts["critical"] += 1
+                            elif level >= 8:
+                                severity_counts["high"] += 1
+                            elif level >= 5:
+                                severity_counts["medium"] += 1
+                            else:
+                                severity_counts["low"] += 1
+                
+                # Determine reputation based on alert patterns
+                if alert_count == 0:
+                    reputation = "unknown"
+                elif severity_counts["critical"] > 0:
+                    reputation = "malicious"
+                elif severity_counts["high"] > 2:
+                    reputation = "suspicious"
+                elif alert_count > 10:
+                    reputation = "suspicious"
+                else:
+                    reputation = "clean"
+                
+                return {
+                    "indicator": indicator,
+                    "indicator_type": indicator_type,
+                    "reputation": reputation,
+                    "alert_count": alert_count,
+                    "severity_breakdown": severity_counts,
+                    "confidence": min(alert_count / 10, 1.0)
+                }
+            
+            return {
+                "indicator": indicator,
+                "indicator_type": indicator_type,
+                "reputation": "unknown",
+                "alert_count": 0,
+                "confidence": 0
+            }
+            
+        except Exception as e:
+            self.logger.error(f"Error checking IoC reputation: {e}")
+            return {"error": str(e)}
+    
+    async def perform_risk_assessment(self, agent_id: Optional[str] = None) -> Dict[str, Any]:
+        """Perform comprehensive risk assessment."""
+        try:
+            if self.client_manager:
+                # Get alerts for specific agent or all agents
+                if agent_id:
+                    alerts_data = await self.client_manager.get_alerts(agent_id=agent_id, limit=1000)
+                else:
+                    alerts_data = await self.client_manager.get_alerts(limit=5000)
+                
+                alerts = alerts_data.get('data', {}).get('affected_items', [])
+                
+                if alerts:
+                    risk_assessment = self.calculate_comprehensive_risk_score(alerts)
+                    attack_patterns = self.detect_attack_patterns(alerts)
+                    
+                    return {
+                        "agent_id": agent_id,
+                        "risk_score": risk_assessment.overall_score,
+                        "risk_level": risk_assessment.risk_level.value,
+                        "confidence": risk_assessment.confidence,
+                        "factors": [
+                            {
+                                "name": f.name,
+                                "score": f.score,
+                                "weight": f.weight,
+                                "description": f.description
+                            } for f in risk_assessment.factors
+                        ],
+                        "recommendations": risk_assessment.recommendations,
+                        "attack_patterns": attack_patterns,
+                        "total_alerts": len(alerts),
+                        "timestamp": risk_assessment.timestamp.isoformat()
+                    }
+            
+            return {
+                "agent_id": agent_id,
+                "risk_score": 0,
+                "risk_level": "unknown",
+                "confidence": 0,
+                "recommendations": ["No data available for risk assessment"]
+            }
+            
+        except Exception as e:
+            self.logger.error(f"Error performing risk assessment: {e}")
+            return {"error": str(e)}
+    
+    async def analyze_alert_patterns(self, time_range: str = "24h", min_frequency: int = 5) -> Dict[str, Any]:
+        """Analyze alert patterns to identify trends and anomalies."""
+        try:
+            if self.client_manager:
+                hours = {"1h": 1, "6h": 6, "24h": 24, "7d": 168}.get(time_range, 24)
+                alerts_data = await self.client_manager.get_alerts(
+                    timestamp_gte=f"now-{hours}h",
+                    limit=5000
+                )
+                alerts = alerts_data.get('data', {}).get('affected_items', [])
+                
+                # Pattern analysis
+                rule_patterns = Counter()
+                agent_patterns = Counter()
+                time_patterns = defaultdict(int)
+                
+                for alert in alerts:
+                    rule_id = alert.get('rule', {}).get('id')
+                    agent_id = alert.get('agent', {}).get('id')
+                    timestamp = alert.get('timestamp')
+                    
+                    if rule_id:
+                        rule_patterns[rule_id] += 1
+                    if agent_id:
+                        agent_patterns[agent_id] += 1
+                    if timestamp:
+                        # Group by hour
+                        hour = timestamp[:13] if len(timestamp) >= 13 else timestamp
+                        time_patterns[hour] += 1
+                
+                # Find patterns exceeding minimum frequency
+                significant_rules = {k: v for k, v in rule_patterns.items() if v >= min_frequency}
+                significant_agents = {k: v for k, v in agent_patterns.items() if v >= min_frequency}
+                
+                return {
+                    "time_range": time_range,
+                    "total_alerts": len(alerts),
+                    "rule_patterns": dict(rule_patterns.most_common(10)),
+                    "agent_patterns": dict(agent_patterns.most_common(10)),
+                    "significant_rules": significant_rules,
+                    "significant_agents": significant_agents,
+                    "time_distribution": dict(time_patterns),
+                    "anomalies_detected": len(significant_rules) + len(significant_agents)
+                }
+            
+            return {"error": "No client manager available"}
+            
+        except Exception as e:
+            self.logger.error(f"Error analyzing alert patterns: {e}")
+            return {"error": str(e)}
+    
+    async def get_top_security_threats(self, limit: int = 10, time_range: str = "24h") -> Dict[str, Any]:
+        """Get top security threats based on alert frequency and severity."""
+        try:
+            if self.client_manager:
+                hours = {"1h": 1, "6h": 6, "24h": 24, "7d": 168}.get(time_range, 24)
+                alerts_data = await self.client_manager.get_alerts(
+                    timestamp_gte=f"now-{hours}h",
+                    limit=5000
+                )
+                alerts = alerts_data.get('data', {}).get('affected_items', [])
+                
+                # Calculate threat scores
+                threat_scores = defaultdict(lambda: {"count": 0, "severity_sum": 0, "max_level": 0})
+                
+                for alert in alerts:
+                    rule_description = alert.get('rule', {}).get('description', 'Unknown')
+                    level = int(alert.get('rule', {}).get('level', 0))
+                    
+                    threat_scores[rule_description]["count"] += 1
+                    threat_scores[rule_description]["severity_sum"] += level
+                    threat_scores[rule_description]["max_level"] = max(
+                        threat_scores[rule_description]["max_level"], level
+                    )
+                
+                # Score threats based on frequency and severity
+                scored_threats = []
+                for description, data in threat_scores.items():
+                    score = (data["count"] * 0.7) + (data["severity_sum"] * 0.3)
+                    scored_threats.append({
+                        "threat": description,
+                        "score": score,
+                        "count": data["count"],
+                        "avg_severity": data["severity_sum"] / data["count"],
+                        "max_level": data["max_level"]
+                    })
+                
+                # Sort by score and return top threats
+                top_threats = sorted(scored_threats, key=lambda x: x["score"], reverse=True)[:limit]
+                
+                return {
+                    "time_range": time_range,
+                    "total_unique_threats": len(threat_scores),
+                    "top_threats": top_threats,
+                    "total_alerts": len(alerts)
+                }
+            
+            return {"error": "No client manager available"}
+            
+        except Exception as e:
+            self.logger.error(f"Error getting top security threats: {e}")
+            return {"error": str(e)}
+    
+    async def generate_security_report(self, report_type: str = "daily", include_recommendations: bool = True) -> Dict[str, Any]:
+        """Generate comprehensive security report."""
+        try:
+            if self.client_manager:
+                # Determine time range based on report type
+                time_ranges = {
+                    "daily": ("24h", "now-24h"),
+                    "weekly": ("7d", "now-7d"),
+                    "monthly": ("30d", "now-30d"),
+                    "incident": ("1h", "now-1h")
+                }
+                
+                time_label, time_filter = time_ranges.get(report_type, ("24h", "now-24h"))
+                
+                # Get alerts for the time period
+                alerts_data = await self.client_manager.get_alerts(
+                    timestamp_gte=time_filter,
+                    limit=10000
+                )
+                alerts = alerts_data.get('data', {}).get('affected_items', [])
+                
+                # Get agents data
+                agents_data = await self.client_manager.get_agents()
+                agents = agents_data.get('data', {}).get('affected_items', [])
+                
+                # Analyze the data
+                if alerts:
+                    risk_assessment = self.calculate_comprehensive_risk_score(alerts)
+                    attack_patterns = self.detect_attack_patterns(alerts)
+                    top_threats = await self.get_top_security_threats(10, time_label)
+                else:
+                    risk_assessment = None
+                    attack_patterns = {}
+                    top_threats = {"top_threats": []}
+                
+                # Generate summary statistics
+                critical_alerts = len([a for a in alerts if int(a.get('rule', {}).get('level', 0)) >= 12])
+                high_alerts = len([a for a in alerts if int(a.get('rule', {}).get('level', 0)) >= 8])
+                active_agents = len([a for a in agents if a.get('status') == 'active'])
+                
+                report = {
+                    "report_type": report_type,
+                    "time_period": time_label,
+                    "generated_at": datetime.now().isoformat(),
+                    "summary": {
+                        "total_alerts": len(alerts),
+                        "critical_alerts": critical_alerts,
+                        "high_alerts": high_alerts,
+                        "total_agents": len(agents),
+                        "active_agents": active_agents
+                    },
+                    "risk_assessment": {
+                        "overall_score": risk_assessment.overall_score if risk_assessment else 0,
+                        "risk_level": risk_assessment.risk_level.value if risk_assessment else "unknown",
+                        "confidence": risk_assessment.confidence if risk_assessment else 0
+                    },
+                    "attack_patterns": attack_patterns,
+                    "top_threats": top_threats.get("top_threats", [])
+                }
+                
+                if include_recommendations and risk_assessment:
+                    report["recommendations"] = risk_assessment.recommendations
+                
+                return report
+            
+            return {"error": "No client manager available"}
+            
+        except Exception as e:
+            self.logger.error(f"Error generating security report: {e}")
+            return {"error": str(e)}

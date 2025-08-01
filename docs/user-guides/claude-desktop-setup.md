@@ -1,312 +1,559 @@
-# Claude Desktop Setup Guide
+# Claude Desktop Setup Guide - Wazuh MCP Server
 
-This guide explains how to configure the Wazuh MCP Server with Claude Desktop.
+This comprehensive guide walks you through connecting your Wazuh MCP Server (FastMCP STDIO) to Claude Desktop.
 
-## Overview
+## 📋 Prerequisites
 
-The Wazuh MCP Server uses the Model Context Protocol (MCP) to integrate with Claude Desktop, allowing you to interact with your Wazuh security infrastructure using natural language.
+- ✅ Docker installed (for Docker deployment) OR Python 3.11+ (for manual installation)
+- ✅ Wazuh MCP Server deployed and running
+- ✅ Claude Desktop application installed
+- ✅ Valid Wazuh server credentials configured
 
-## Configuration File Location
+## 🚀 Quick Setup
 
-Claude Desktop stores its MCP server configuration in a specific location based on your operating system:
+### Option 1: Docker Deployment (Recommended)
 
-- **macOS**: `~/Library/Application Support/Claude/claude_desktop_config.json`
-- **Windows**: `%APPDATA%\Claude\claude_desktop_config.json`
-- **Linux**: `~/.config/Claude/claude_desktop_config.json`
+1. **Deploy Wazuh MCP Server:**
+```bash
+./deploy-docker.sh
+```
 
-> **Important**: This configuration file is NOT created automatically. You must create it through Claude Desktop's interface.
-
-## Setup Steps
-
-### 1. Create Wazuh API User
-
-**Important**: Before configuring Claude Desktop, create a dedicated API user in Wazuh:
-
-1. Login to your Wazuh Dashboard (https://your-wazuh-server:443)
-2. Navigate to **Security** → **Internal users**
-3. Click **Create internal user**
-4. Fill in the details:
-   - Username: `wazuh-mcp-api` (or your preferred name)
-   - Password: Generate a strong password
-   - Backend roles: `wazuh`
-5. Save the user
-
-> **Why this is needed**: Wazuh Dashboard and API use separate authentication systems. Your dashboard login credentials won't work for API access.
-
-### 2. Create the Configuration File
-
-1. Open Claude Desktop
-2. Navigate to **Settings** → **Developer**
-3. Click **Edit Config**
-   - This will create the `claude_desktop_config.json` file if it doesn't exist
-   - It will also open the file in your default text editor
-
-### 3. Add Platform-Specific Configuration
-
-#### macOS/Linux Configuration
-
-**Recommended**: Use the wrapper script for better environment handling and compatibility.
-
+2. **Add to Claude Desktop config:**
 ```json
 {
   "mcpServers": {
     "wazuh": {
-      "command": "/path/to/Wazuh-MCP-Server/mcp_wrapper.sh",
-      "args": ["--stdio"],
-      "env": {
-        "LOG_LEVEL": "INFO"
-      }
+      "command": "docker",
+      "args": ["exec", "-i", "wazuh-mcp-server", "python3", "wazuh-mcp-server", "--stdio"]
     }
   }
 }
 ```
 
-**macOS Example:**
-```json
-"command": "/Users/username/Documents/Wazuh-MCP-Server/mcp_wrapper.sh"
+### Option 2: Manual Installation
+
+1. **Install dependencies:**
+```bash
+pip install -r requirements.txt
 ```
 
-**Linux Example:**
-```json
-"command": "/home/username/Wazuh-MCP-Server/mcp_wrapper.sh"
-```
-
-#### Windows Configuration
-
+2. **Add to Claude Desktop config:**
 ```json
 {
   "mcpServers": {
     "wazuh": {
-      "command": "python",
-      "args": ["/path/to/Wazuh-MCP-Server/src/wazuh_mcp_server/main.py", "--stdio"],
-      "env": {
-        "LOG_LEVEL": "INFO"
-      }
+      "command": "python3",
+      "args": ["/absolute/path/to/Wazuh-MCP-Server/wazuh-mcp-server", "--stdio"]
     }
   }
 }
 ```
 
-**Windows Example:**
-```json
-"args": ["C:/Users/username/Wazuh-MCP-Server/src/wazuh_mcp_server/main.py", "--stdio"]
+## 📁 Configuration File Locations
+
+### Windows
+**File Location:**
+```
+%APPDATA%\Claude\claude_desktop_config.json
 ```
 
-### 4. Update the Path
-
-Replace `/path/to/Wazuh-MCP-Server` with your actual installation path:
-
-**Windows Example:**
-```json
-"args": ["C:/Users/username/Documents/Wazuh-MCP-Server/src/wazuh_mcp_server/main.py", "--stdio"]
+**Full Path Example:**
+```
+C:\Users\YourUsername\AppData\Roaming\Claude\claude_desktop_config.json
 ```
 
-> **Note**: On Windows, use forward slashes `/` or double backslashes `\\` in paths.
+**How to Access:**
+1. Press `Win + R`
+2. Type `%APPDATA%\Claude`
+3. Create `claude_desktop_config.json` if it doesn't exist
 
-### 5. Using Virtual Environment (Recommended for Windows)
+### macOS
+**File Location:**
+```
+~/.config/claude/claude_desktop_config.json
+```
 
-**macOS/Linux**: The wrapper script automatically handles virtual environment activation. See [Unix Troubleshooting Guide](unix-troubleshooting.md) for detailed information.
+**Full Path Example:**
+```
+/Users/YourUsername/.config/claude/claude_desktop_config.json
+```
 
-**Windows with Virtual Environment:**
+**How to Access:**
+1. Open Terminal
+2. Run: `mkdir -p ~/.config/claude`
+3. Create/edit: `nano ~/.config/claude/claude_desktop_config.json`
+
+### Linux
+**File Location:**
+```
+~/.config/claude/claude_desktop_config.json
+```
+
+**Full Path Example:**
+```
+/home/yourusername/.config/claude/claude_desktop_config.json
+```
+
+**How to Access:**
+1. Open terminal
+2. Run: `mkdir -p ~/.config/claude`
+3. Create/edit: `nano ~/.config/claude/claude_desktop_config.json`
+
+## 🔧 Detailed Configuration Steps
+
+### Step 1: Create/Edit Configuration File
+
+#### First Time Setup (New File)
+
+Create the configuration file with this content:
+
+**For Docker Deployment:**
 ```json
 {
   "mcpServers": {
     "wazuh": {
-      "command": "C:/path/to/Wazuh-MCP-Server/venv/Scripts/python.exe",
-      "args": ["C:/path/to/Wazuh-MCP-Server/src/wazuh_mcp_server/main.py", "--stdio"],
-      "env": {
-        "LOG_LEVEL": "INFO"
-      }
+      "command": "docker",
+      "args": ["exec", "-i", "wazuh-mcp-server", "python3", "wazuh-mcp-server", "--stdio"]
     }
   }
 }
 ```
 
-**Alternative for Linux/macOS (without wrapper script):**
+**For Manual Installation:**
 ```json
 {
   "mcpServers": {
     "wazuh": {
-      "command": "/path/to/Wazuh-MCP-Server/venv/bin/python",
-      "args": ["/path/to/Wazuh-MCP-Server/src/wazuh_mcp_server/main.py", "--stdio"],
-      "env": {
-        "LOG_LEVEL": "INFO"
-      }
+      "command": "python3",
+      "args": ["/Users/yourusername/Wazuh-MCP-Server/wazuh-mcp-server", "--stdio"]
     }
   }
 }
 ```
 
-> **Note**: Using the wrapper script is recommended for macOS/Linux as it handles environment setup automatically.
+#### Existing Configuration (Adding to Existing Servers)
 
-### 6. Save and Restart
+If you already have MCP servers configured:
 
-1. Save the configuration file
-2. **Restart Claude Desktop** (required for changes to take effect)
-3. The Wazuh server should now appear in Claude's MCP servers
+```json
+{
+  "mcpServers": {
+    "filesystem": {
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-filesystem", "/Users/yourusername/Desktop"]
+    },
+    "wazuh": {
+      "command": "docker",
+      "args": ["exec", "-i", "wazuh-mcp-server", "python3", "wazuh-mcp-server", "--stdio"]
+    }
+  }
+}
+```
 
-## Verifying the Setup
+### Step 2: Validate JSON Syntax
 
-After restarting Claude Desktop:
+**Common JSON Errors to Avoid:**
 
-1. In a new conversation, try asking:
-   - "Show me recent Wazuh alerts"
-   - "What's the status of my Wazuh agents?"
-   - "List critical vulnerabilities"
+❌ **Trailing comma:**
+```json
+{
+  "mcpServers": {
+    "wazuh": {
+      "command": "docker",
+      "args": ["exec", "-i", "wazuh-mcp-server", "python3", "wazuh-mcp-server", "--stdio"],
+    }
+  }
+}
+```
 
-2. Check for the Wazuh server in Claude's interface:
-   - Look for MCP server indicators in the UI
-   - The server name "wazuh" should be visible when active
+❌ **Missing comma between servers:**
+```json
+{
+  "mcpServers": {
+    "server1": { "command": "cmd1" }
+    "wazuh": { "command": "docker" }
+  }
+}
+```
 
-## Troubleshooting
+✅ **Correct syntax:**
+```json
+{
+  "mcpServers": {
+    "server1": { "command": "cmd1" },
+    "wazuh": { "command": "docker", "args": ["exec", "-i", "wazuh-mcp-server", "python3", "wazuh-mcp-server", "--stdio"] }
+  }
+}
+```
 
-### Server Not Appearing
+**Validate your JSON using:**
+- Online JSON validator: https://jsonlint.com/
+- VS Code with JSON extension
+- Command line: `python3 -m json.tool < claude_desktop_config.json`
 
-1. **Check the configuration file path**:
-   - Ensure you're editing the correct file
-   - The file must be named exactly `claude_desktop_config.json`
+### Step 3: Verify Server is Running
 
-2. **Verify JSON syntax**:
-   - Ensure proper JSON formatting (use a JSON validator)
-   - Check for missing commas or brackets
+**For Docker Deployment:**
+```bash
+# Check container status
+docker ps | grep wazuh-mcp-server
 
-3. **Confirm paths are absolute**:
-   - Use full paths, not relative paths
-   - Verify the paths exist and are accessible
+# Check container logs
+docker logs wazuh-mcp-server
 
-### Connection Errors
+# Test server health
+docker exec -it wazuh-mcp-server python3 -c "from wazuh_mcp_server.server import mcp; print('Server healthy')"
+```
 
-1. **Test the server manually**:
+**For Manual Installation:**
+```bash
+# Test server startup
+python3 /path/to/wazuh-mcp-server --stdio
+
+# Should show: "Starting Wazuh MCP Server with FastMCP (STDIO mode)..."
+```
+
+### Step 4: Restart Claude Desktop Properly
+
+#### Windows
+1. **Close Claude Desktop completely:**
+   - Right-click Claude Desktop in system tray
+   - Select "Exit" or "Quit"
+   - Wait 5 seconds
+
+2. **Restart Claude Desktop:**
+   - Launch from Start Menu or desktop shortcut
+
+#### macOS
+1. **Quit Claude Desktop completely:**
+   - Press `Cmd + Q` while Claude Desktop is active
+   - OR: Claude menu → Quit Claude
+   - Wait 5 seconds
+
+2. **Restart Claude Desktop:**
+   - Launch from Applications folder or Dock
+
+#### Linux
+1. **Close Claude Desktop:**
+   - Close the application window
+   - Check if process is still running: `ps aux | grep claude`
+   - Kill if necessary: `killall claude-desktop`
+
+2. **Restart Claude Desktop:**
+   - Launch from application menu or terminal
+
+## 🧪 Testing the Connection
+
+### Step 1: Verify MCP Server Appears
+
+After restarting Claude Desktop, the Wazuh MCP Server should be available. Look for:
+- No error messages in Claude Desktop
+- Server appears in Claude's available tools
+
+### Step 2: Test with Sample Queries
+
+Try these test queries to verify the connection:
+
+**Basic Connection Test:**
+```
+Validate the connection to Wazuh server
+```
+
+**Agent Status:**
+```
+Show me the current status of all Wazuh agents
+```
+
+**Recent Alerts:**
+```
+Get the most recent security alerts from the last 2 hours
+```
+
+**Vulnerability Check:**
+```
+Show me critical vulnerabilities from all monitored systems
+```
+
+**Security Analysis:**
+```
+Perform a risk assessment on agent 001
+```
+
+**Compliance Check:**
+```
+Run a PCI-DSS compliance check on the environment
+```
+
+### Step 3: Expected Responses
+
+✅ **Successful connection:** Claude will query the Wazuh server and return structured data
+
+❌ **Connection failed:** Claude will show error messages or say the server is unavailable
+
+## 🔍 Troubleshooting
+
+### Common Issues and Solutions
+
+#### 1. "Server not found" or "Command failed"
+
+**Possible Causes:**
+- Incorrect file path in configuration
+- Docker container not running
+- JSON syntax errors
+
+**Solutions:**
+```bash
+# For Docker: Check container status
+docker ps | grep wazuh-mcp-server
+
+# For Docker: Restart container
+docker-compose restart wazuh-mcp-server
+
+# For Manual: Check Python path
+which python3
+
+# For Manual: Test server directly
+python3 /path/to/wazuh-mcp-server --stdio
+```
+
+#### 2. "Permission denied"
+
+**Solutions:**
+```bash
+# Make script executable
+chmod +x /path/to/wazuh-mcp-server
+
+# Check Docker permissions
+docker exec wazuh-mcp-server ls -la /app/wazuh-mcp-server
+```
+
+#### 3. "Module not found" errors
+
+**For Docker Deployment:**
+```bash
+# Rebuild container with dependencies
+docker-compose down
+docker-compose build --no-cache
+docker-compose up -d
+```
+
+**For Manual Installation:**
+```bash
+# Reinstall dependencies
+pip install -r requirements.txt --upgrade
+```
+
+#### 4. JSON Configuration Errors
+
+**Validate JSON syntax:**
+```bash
+# Test JSON validity
+python3 -c "import json; json.load(open('claude_desktop_config.json'))"
+```
+
+**Common fixes:**
+- Remove trailing commas
+- Use double quotes, not single quotes
+- Ensure proper escaping of backslashes in Windows paths
+
+#### 5. Claude Desktop Not Recognizing Changes
+
+**Solutions:**
+1. **Complete restart procedure:**
+   - Close Claude Desktop completely
+   - Wait 10 seconds
+   - Restart Claude Desktop
+
+2. **Clear Claude Desktop cache:**
+   - Windows: Delete `%APPDATA%\Claude\cache\`
+   - macOS/Linux: Delete `~/.config/claude/cache/`
+
+3. **Check file permissions:**
    ```bash
-   python /path/to/src/wazuh_mcp_server/main.py --stdio
-   ```
-   Type: `{"jsonrpc": "2.0", "method": "initialize", "id": 1}`
-   
-   You should see a response if the server is working.
-
-2. **Check Python environment**:
-   - Ensure all dependencies are installed
-   - Run `python validate_setup.py` in the project directory
-
-3. **Review logs**:
-   - Check Claude Desktop logs for error messages
-   - Look for Wazuh MCP Server logs in the `logs/` directory
-
-### Authentication Issues
-
-**Problem**: "Invalid credentials" or "Authentication failed" errors
-
-**Solution**: This usually means you need to create a proper API user:
-
-1. **Create API User** (if not done already):
-   - Login to Wazuh Dashboard
-   - Go to **Server Management** → **Security** → **Users**
-   - Create a new user with appropriate roles
-   - Use these credentials in your `.env` file
-
-2. **Test API Authentication**:
-   ```bash
-   curl -k -X POST "https://your-wazuh:55000/security/user/authenticate" \
-     -H "Content-Type: application/json" \
-     -d '{"username":"your-api-user","password":"your-api-password"}'
+   # Ensure config file is readable
+   chmod 644 ~/.config/claude/claude_desktop_config.json
    ```
 
-3. **Common Issues**:
-   - Dashboard credentials ≠ API credentials
-   - Default admin account may be disabled for API access
-   - User must have proper backend roles assigned
-   - Check that `WAZUH_USER` and `WAZUH_PASS` in `.env` match your API user
+### Debug Mode
 
-### Platform-Specific Issues
+Enable debug logging by setting environment variables:
 
-**macOS/Linux Wrapper Script Issues**:
+**For Docker:**
+```bash
+# Add to docker-compose.yml
+environment:
+  - LOG_LEVEL=DEBUG
+```
 
-1. **Permission Issues**:
-   ```bash
-   chmod +x mcp_wrapper.sh
-   ```
+**For Manual:**
+```bash
+export LOG_LEVEL=DEBUG
+python3 wazuh-mcp-server --stdio
+```
 
-2. **Test the wrapper**:
-   ```bash
-   ./mcp_wrapper.sh --stdio
-   ```
+### Getting Help
 
-3. **Environment Issues**: The wrapper script handles .env loading and virtual environment activation automatically. See [Unix Troubleshooting Guide](unix-troubleshooting.md) for comprehensive troubleshooting.
+If you're still having issues:
+
+1. **Check logs:**
+   - Docker: `docker logs wazuh-mcp-server`
+   - Manual: Check console output when running the server
+
+2. **Verify requirements:**
+   - Docker version: `docker --version`
+   - Python version: `python3 --version`
+   - Dependencies: `pip list | grep fastmcp`
+
+3. **Test components separately:**
+   - Test Wazuh connectivity
+   - Test FastMCP server startup
+   - Test Claude Desktop configuration syntax
+
+## 💡 Advanced Configuration
 
 ### Environment Variables
 
-If your Wazuh configuration uses environment variables, you can add them to the MCP server configuration:
+Pass custom environment variables to the MCP server:
 
 ```json
 {
   "mcpServers": {
     "wazuh": {
-      "command": "python",
-      "args": ["/path/to/src/wazuh_mcp_server/main.py", "--stdio"],
+      "command": "docker",
+      "args": ["exec", "-i", "wazuh-mcp-server", "python3", "wazuh-mcp-server", "--stdio"],
       "env": {
-        "LOG_LEVEL": "INFO",
-        "WAZUH_HOST": "your-wazuh-server.com",
-        "WAZUH_USER": "wazuh-mcp-api",
-        "WAZUH_PASS": "your-api-password"
+        "LOG_LEVEL": "DEBUG",
+        "WAZUH_TIMEOUT": "30"
       }
     }
   }
 }
 ```
 
-> **Security Note**: Adding credentials directly to the config file is less secure than using a `.env` file. Use this method only for testing or in secure environments.
+### Multiple Wazuh Environments
 
-## Advanced Configuration
-
-### Multiple Wazuh Instances
-
-You can configure multiple Wazuh servers:
+Configure multiple Wazuh environments:
 
 ```json
 {
   "mcpServers": {
     "wazuh-prod": {
-      "command": "python",
-      "args": ["/path/to/src/wazuh_mcp_server/main.py", "--stdio"],
-      "env": {
-        "WAZUH_HOST": "prod.wazuh.com"
-      }
+      "command": "docker",
+      "args": ["exec", "-i", "wazuh-mcp-server-prod", "python3", "wazuh-mcp-server", "--stdio"]
     },
     "wazuh-dev": {
-      "command": "python",
-      "args": ["/path/to/src/wazuh_mcp_server/main.py", "--stdio"],
-      "env": {
-        "WAZUH_HOST": "dev.wazuh.com"
-      }
+      "command": "docker",
+      "args": ["exec", "-i", "wazuh-mcp-server-dev", "python3", "wazuh-mcp-server", "--stdio"]
     }
   }
 }
 ```
 
-### Debug Mode
+### Custom Resource Limits
 
-Enable debug logging for troubleshooting:
+For Docker deployment with custom resource limits:
+
+```bash
+# Modify docker-compose.yml
+deploy:
+  resources:
+    limits:
+      memory: 1G
+      cpus: '1.0'
+```
+
+## 🎯 Configuration Examples by Platform
+
+### Windows with Docker Desktop
+
+```json
+{
+  "mcpServers": {
+    "wazuh": {
+      "command": "docker",
+      "args": ["exec", "-i", "wazuh-mcp-server", "python3", "wazuh-mcp-server", "--stdio"]
+    }
+  }
+}
+```
+
+### Windows Manual Installation
 
 ```json
 {
   "mcpServers": {
     "wazuh": {
       "command": "python",
-      "args": ["/path/to/src/wazuh_mcp_server/main.py", "--stdio"],
-      "env": {
-        "LOG_LEVEL": "DEBUG",
-        "DEBUG": "true"
-      }
+      "args": ["C:/Users/YourUsername/Wazuh-MCP-Server/wazuh-mcp-server", "--stdio"]
     }
   }
 }
 ```
 
-## Getting Help
+### macOS with Docker
 
-- **Unix Systems (macOS/Linux)**: See [Unix Troubleshooting Guide](unix-troubleshooting.md)
-- **Windows**: See [Windows Troubleshooting Guide](windows-troubleshooting.md)  
-- **Wrapper Script**: See [Wrapper Script Documentation](../WRAPPER_SCRIPT_DOCUMENTATION.md)
-- **Main Documentation**: Check the main [README.md](../README.md)
-- **Issues**: Report problems on [GitHub](https://github.com/gensecaihq/Wazuh-MCP-Server/issues)
-- **MCP Documentation**: Learn more about MCP at [modelcontextprotocol.io](https://modelcontextprotocol.io)
+```json
+{
+  "mcpServers": {
+    "wazuh": {
+      "command": "docker",
+      "args": ["exec", "-i", "wazuh-mcp-server", "python3", "wazuh-mcp-server", "--stdio"]
+    }
+  }
+}
+```
+
+### macOS Manual Installation
+
+```json
+{
+  "mcpServers": {
+    "wazuh": {
+      "command": "python3",
+      "args": ["/Users/yourusername/Wazuh-MCP-Server/wazuh-mcp-server", "--stdio"]
+    }
+  }
+}
+```
+
+### Linux with Docker
+
+```json
+{
+  "mcpServers": {
+    "wazuh": {
+      "command": "docker",
+      "args": ["exec", "-i", "wazuh-mcp-server", "python3", "wazuh-mcp-server", "--stdio"]
+    }
+  }
+}
+```
+
+### Linux Manual Installation
+
+```json
+{
+  "mcpServers": {
+    "wazuh": {
+      "command": "python3",
+      "args": ["/home/yourusername/Wazuh-MCP-Server/wazuh-mcp-server", "--stdio"]
+    }
+  }
+}
+```
+
+---
+
+## ✅ Verification Checklist
+
+Before asking for help, verify:
+
+- [ ] Configuration file exists at correct location
+- [ ] JSON syntax is valid
+- [ ] Wazuh MCP Server container/process is running
+- [ ] Docker/Python path is correct in configuration
+- [ ] Claude Desktop was completely restarted
+- [ ] No error messages in logs
+- [ ] Test queries return Wazuh data
+
+**Your Wazuh MCP Server should now be fully integrated with Claude Desktop! 🎉**

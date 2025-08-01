@@ -1,414 +1,282 @@
-# Wazuh MCP Server
+# Wazuh MCP Server v2.1.0
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Python 3.9+](https://img.shields.io/badge/python-3.9+-blue.svg)](https://www.python.org/downloads/)
+[![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
 [![Wazuh Compatible](https://img.shields.io/badge/Wazuh-4.8%2B-orange.svg)](https://wazuh.com/)
-[![Current Release](https://img.shields.io/badge/Release-v2.0.0-green.svg)](https://github.com/gensecaihq/Wazuh-MCP-Server/releases)
+[![FastMCP](https://img.shields.io/badge/FastMCP-2.10.6+-green.svg)](https://github.com/jlowin/fastmcp)
 
-A **production-ready Model Context Protocol (MCP) server** that connects Wazuh SIEM with Claude Desktop for AI-powered security operations using **stdio transport**.
+A **production-ready FastMCP server** that connects Wazuh SIEM with Claude Desktop for AI-powered security operations using **STDIO transport only**.
 
-## ✨ What it does
+## ✨ Key Features
 
-- **🔍 Security Monitoring**: Query Wazuh alerts, agents, and vulnerabilities through Claude
-- **🧠 AI Analysis**: Get AI-powered security insights, threat analysis, and compliance reports  
-- **💬 Natural Language**: Ask questions like "Show me critical alerts from the last hour"
-- **📱 Local Integration**: Direct stdio connection with Claude Desktop - no network setup required
-- **🛠️ 26 Security Tools**: Comprehensive coverage of Wazuh functionality
-
-<img width="797" height="568" alt="claude0mcp-wazuh" src="https://github.com/user-attachments/assets/458d3c94-e1f9-4143-a1a4-85cb629287d4" />
-
----
+- 🔍 **29 Security Tools**: Complete FastMCP tool suite for Wazuh integration
+- 🧠 **AI-Powered Analysis**: Threat analysis, risk assessment, and compliance reporting  
+- 💬 **Natural Language Queries**: Ask Claude "Show me critical vulnerabilities"
+- 📡 **STDIO Only**: Secure local connection to Claude Desktop - no network setup
+- ⚡ **Dual API Support**: Intelligent routing between Wazuh Server API and Indexer API
+- 🛡️ **Production Ready**: Comprehensive health checks, error handling, and security
 
 ## 🚀 Quick Start
 
-### 1. Install
+### Method 1: Package Installation (Recommended)
 
-**Option A: Stable Release (Recommended)**
 ```bash
+# Install the package
+pip install wazuh-mcp-server
+
+# Create configuration file
+cp .env.example .env
+# Edit .env with your Wazuh server details
+
+# Validate configuration
+wazuh-mcp-server --check
+
+# The server is now ready for Claude Desktop integration
+```
+
+### Method 2: Development Installation
+
+```bash
+# Clone the repository
 git clone https://github.com/gensecaihq/Wazuh-MCP-Server.git
 cd Wazuh-MCP-Server
-# Use main branch (default) for production
-python3 scripts/install.py
+
+# Install in development mode
+pip install -e .
+
+# Configure environment
+cp .env.example .env
+# Edit .env with your settings
+
+# Validate setup
+wazuh-mcp-server --check
 ```
 
-**Option B: Enhanced FastMCP STDIO (v2-fastmcp) - ⚠️ TESTING NEEDED**
+## ⚙️ Configuration
+
+### Required Wazuh Settings
+
+Edit `.env` with your Wazuh server details:
+
 ```bash
-git clone https://github.com/gensecaihq/Wazuh-MCP-Server.git
-cd Wazuh-MCP-Server
-git checkout v2-fastmcp
-# ⚠️ WARNING: Not stable - testing needed before production use
-# Enhanced stdio server with FastMCP - requires Python 3.10+
-pip install -r requirements.txt
-# Still uses stdio transport for Claude Desktop
-```
-
-**Option C: Remote HTTP Server (v3-fastmcp-remote) - 🧪 EXPERIMENTAL**
-```bash
-git clone https://github.com/gensecaihq/Wazuh-MCP-Server.git
-cd Wazuh-MCP-Server
-git checkout v3-fastmcp-remote
-# 🧪 WARNING: Experimental - extensive testing needed
-# Remote MCP server with Docker - requires Python 3.10+
-python3 validate-production.py
-pip install -r requirements.txt
-# Use Docker deployment: docker compose up -d
-# See docs/ for comprehensive deployment guides
-```
-
-**Option D: Manual (Main Branch)**
-```bash
-pip install -r requirements.txt
-```
-
-### 2. Configure
-
-Create `.env` file with your Wazuh settings:
-```env
+# Wazuh Server API Configuration
 WAZUH_HOST=your-wazuh-server.com
 WAZUH_PORT=55000
-WAZUH_USER=your-api-user
-WAZUH_PASS=your-password
-VERIFY_SSL=true
+WAZUH_USER=your-api-username
+WAZUH_PASS=your-secure-password
+
+# Wazuh Indexer Configuration (for 4.8.0+)
+WAZUH_INDEXER_HOST=your-wazuh-server.com
+WAZUH_INDEXER_PORT=9200
+WAZUH_INDEXER_USER=your-indexer-username
+WAZUH_INDEXER_PASS=your-indexer-password
+
+# SSL Configuration (Production Ready Defaults)
+VERIFY_SSL=true                    # Enable SSL verification
+WAZUH_ALLOW_SELF_SIGNED=true      # Allow self-signed certificates
 ```
 
-### 3. Connect to Claude Desktop
+### SSL Configuration Options
 
-Add to your Claude Desktop config:
+| Scenario | Configuration | Use Case |
+|----------|---------------|----------|
+| **Production** | `VERIFY_SSL=true` + `WAZUH_ALLOW_SELF_SIGNED=false` | Valid CA certificates |
+| **Self-Signed** | `VERIFY_SSL=true` + `WAZUH_ALLOW_SELF_SIGNED=true` | Self-signed certificates |
+| **Development** | `VERIFY_SSL=false` | HTTP-only or invalid certificates |
 
-**Windows**: `%APPDATA%\Claude\claude_desktop_config.json`
-**macOS/Linux**: `~/.config/claude/claude_desktop_config.json`
+## 🖥️ Claude Desktop Integration
 
-**For Main Branch (v2.0.0):**
+### Configuration
+
+Add to Claude Desktop config:
+- **Windows**: `%APPDATA%\\Claude\\claude_desktop_config.json`
+- **macOS/Linux**: `~/.config/claude/claude_desktop_config.json`
+
 ```json
 {
   "mcpServers": {
     "wazuh": {
-      "command": "python3",
-      "args": ["/path/to/Wazuh-MCP-Server/src/wazuh_mcp_server/main.py"]
+      "command": "wazuh-mcp-server",
+      "args": []
     }
   }
 }
 ```
 
-**For v2-fastmcp Branch (Enhanced STDIO):**
-```json
-{
-  "mcpServers": {
-    "wazuh": {
-      "command": "python3",
-      "args": ["/path/to/Wazuh-MCP-Server/wazuh-mcp-server", "--stdio"]
-    }
-  }
-}
+### Usage Examples
+
+Once configured, you can interact with Wazuh through Claude Desktop:
+
+```
+🔍 "Show me all critical security alerts from the last 24 hours"
+🚨 "What are the top 5 security threats in my environment?"
+🛡️ "Run a PCI-DSS compliance check"
+📊 "Generate a weekly security report"
+🔧 "Check the health of agent web-server-01"
+🌐 "Show me vulnerability summary for the last week"
 ```
 
-**For v3-fastmcp-remote Branch (Remote HTTP Server):**
-```json
-{
-  "mcpServers": {
-    "wazuh": {
-      "command": "npx",
-      "args": [
-        "@modelcontextprotocol/server-everything",
-        "http://localhost:3000/mcp"
-      ]
-    }
-  }
-}
-```
+## 📚 Complete Tool Reference
 
-> **Note**: v3-fastmcp-remote runs as a remote HTTP server. You connect to it via HTTP transport, not direct stdio. Start the server with `docker compose up -d` first.
+### Alert Management (4 tools)
+- `get_wazuh_alerts` - Retrieve security alerts with filtering
+- `get_wazuh_alert_summary` - Alert summaries and statistics
+- `analyze_alert_patterns` - AI-powered pattern analysis
+- `search_security_events` - Advanced security event search
 
-### 4. Restart Claude Desktop
+### Agent Management (6 tools)
+- `get_wazuh_agents` - Agent information and status
+- `get_wazuh_running_agents` - Active agents overview
+- `check_agent_health` - Comprehensive agent health validation
+- `get_agent_processes` - Running processes per agent
+- `get_agent_ports` - Open ports and services per agent
+- `get_agent_configuration` - Detailed agent configuration
 
-That's it! Start asking Claude about your Wazuh security data.
+### Vulnerability Management (3 tools)
+- `get_wazuh_vulnerabilities` - Comprehensive vulnerability scanning
+- `get_wazuh_critical_vulnerabilities` - Critical vulnerabilities only
+- `get_wazuh_vulnerability_summary` - Vulnerability statistics and trends
 
----
+### Security Analysis (6 tools)
+- `analyze_security_threat` - AI-powered threat indicator analysis
+- `check_ioc_reputation` - IOC reputation checking against threat feeds
+- `perform_risk_assessment` - Comprehensive security risk analysis
+- `get_top_security_threats` - Top threats by severity and frequency
+- `generate_security_report` - Automated security reporting
+- `run_compliance_check` - Multi-framework compliance validation
 
-## 🎯 Version Information
+### System Monitoring (10 tools)
+- `get_wazuh_statistics` - Comprehensive system statistics
+- `get_wazuh_weekly_stats` - Weekly performance and security trends
+- `get_wazuh_cluster_health` - Cluster health and status monitoring
+- `get_wazuh_cluster_nodes` - Individual cluster node information
+- `get_wazuh_rules_summary` - Rule effectiveness and performance
+- `get_wazuh_remoted_stats` - Agent communication statistics
+- `get_wazuh_log_collector_stats` - Log collection performance metrics
+- `search_wazuh_manager_logs` - Manager log search and analysis
+- `get_wazuh_manager_error_logs` - Error log retrieval and analysis
+- `validate_wazuh_connection` - Connection validation and diagnostics
 
-### 📦 **Current Stable Release: v2.0.0** (main branch)
-- **Fixed all GitHub issues** (#34, #33, #30, #25)  
-- **Cross-platform compatibility** - works on Windows, macOS, Linux
-- **26 security tools** - comprehensive Wazuh integration
-- **Pydantic V1/V2 support** - works with both versions
-- **Production-ready** - stable, tested, and reliable
+## 📖 Documentation
 
-### 🧪 **Enhanced: v2-fastmcp** (FastMCP stdio branch) - ⚠️ **TESTING NEEDED**
-- **FastMCP Framework** - Built with FastMCP 2.10.6+ for enhanced performance
-- **STDIO Transport** - Standard MCP protocol over stdio (like main branch)
-- **Python 3.10+ Required** - Latest FastMCP compatibility
-- **Enhanced Performance** - Improved async operations and memory management
-- **⚠️ NOT STABLE** - Requires extensive testing before production use
+### Complete API Documentation
+- **[Alert Management API](docs/api/alerts.md)** - Comprehensive alert management tools
+- **[Agent Management API](docs/api/agents.md)** - Agent monitoring and health tools
+- **[Vulnerability Management API](docs/api/vulnerabilities.md)** - Vulnerability assessment tools
+- **[Security Analysis API](docs/api/security-analysis.md)** - AI-powered security analysis tools
+- **[System Monitoring API](docs/api/system-monitoring.md)** - Infrastructure monitoring tools
+- **[Compliance & Reporting API](docs/api/compliance-reporting.md)** - Compliance and reporting tools
+- **[Log Management API](docs/api/log-management.md)** - Advanced log search and analysis
 
-### 🧪 **Remote Server: v3-fastmcp-remote** (Docker/HTTP branch) - 🧪 **EXPERIMENTAL**
-- **Remote MCP Server** - HTTP-based MCP server for remote access
-- **Docker Deployment** - Complete containerization with docker-compose
-- **HTTP Transport** - MCP over HTTP for remote client connections
-- **Enterprise Security** - JWT authentication, rate limiting, input validation
-- **🧪 EXPERIMENTAL** - Feature-complete but requires extensive testing
+### Deployment Guides
+- **[Installation Guide](docs/installation.md)** - Comprehensive installation instructions
+- **[Configuration Guide](docs/configuration.md)** - Detailed configuration options
+- **[Troubleshooting Guide](docs/troubleshooting.md)** - Common issues and solutions
+- **[Security Guide](docs/security.md)** - Security best practices and hardening
 
-> **Note**: `main` branch is the stable stdio MCP server. `v2-fastmcp` is an enhanced stdio version using FastMCP framework. `v3-fastmcp-remote` is a remote HTTP-based MCP server with Docker deployment for enterprise use.
+## 🔧 Command Line Interface
 
-### 🔀 **Branch Selection Guide**
-
-**📍 For Local Claude Desktop Integration (STDIO):**
-- **Use `main` branch** if you need:
-  - Stable, production-tested stdio MCP server
-  - Python 3.9+ compatibility  
-  - Established tool ecosystem (26 tools)
-  - Maximum compatibility and reliability
-  
-- **Use `v2-fastmcp` branch** if you want to test:
-  - ⚠️ **Testing needed** - Enhanced stdio MCP server with FastMCP framework
-  - Better performance and modern architecture (requires testing)
-  - Python 3.10+ with latest FastMCP features
-  - Still uses stdio transport for Claude Desktop
-
-**🌐 For Remote/Enterprise Deployments (HTTP):**
-- **Use `v3-fastmcp-remote` branch** for experimental testing:
-  - 🧪 **Experimental** - Remote MCP server accessible over HTTP
-  - Docker deployment with docker-compose (needs extensive testing)
-  - Enterprise security features (JWT auth, rate limiting)
-  - Multi-client access and scalability
-  - **Requires extensive testing before production use**
-
-### 🏗️ **Architecture (main branch)** 
-- **Transport**: stdio (standard MCP protocol)
-- **Dependencies**: Minimal, essential only
-- **Platform**: Cross-platform Python 3.9+
-- **Deployment**: Local process, no containers needed
-
----
-
-## 🛠️ Available Tools
-
-### Core Security Tools
-- `get_wazuh_alerts` - Query and analyze security alerts
-- `get_wazuh_agents` - Monitor agent status and health
-- `get_wazuh_vulnerabilities` - Vulnerability assessment
-- `analyze_security_threat` - AI-powered threat analysis
-
-### Statistics & Monitoring  
-- `get_wazuh_alert_summary` - Alert statistics and trends
-- `get_wazuh_weekly_stats` - Weekly security reports
-- `get_wazuh_running_agents` - Active agent monitoring
-- `get_wazuh_rules_summary` - Rule effectiveness analysis
-
-### Cluster & Infrastructure
-- `get_wazuh_cluster_health` - Cluster status monitoring
-- `get_wazuh_cluster_nodes` - Node information
-- `get_wazuh_remoted_stats` - Remote daemon statistics
-- `get_wazuh_log_collector_stats` - Log collection metrics
-
-### Advanced Analysis
-- `get_wazuh_vulnerability_summary` - Vulnerability summaries
-- `get_wazuh_critical_vulnerabilities` - Critical security issues
-- `search_wazuh_manager_logs` - Manager log analysis
-- `get_wazuh_manager_error_logs` - Error investigation
-
-**Total: 26 comprehensive security tools**
-
----
-
-## 📋 Requirements
-
-### System Requirements
-- **Python**: 3.9 or higher
-- **RAM**: 256MB minimum
-- **Disk**: 100MB for installation
-- **Network**: HTTPS access to Wazuh Manager
-
-### Dependencies (Auto-installed)
-```
-mcp>=1.10.1              # MCP protocol
-aiohttp>=3.8.0           # HTTP client
-urllib3>=1.26.0          # HTTP utilities  
-pydantic>=1.10.0         # Data validation (V1/V2 compatible)
-python-dotenv>=0.19.0    # Environment variables
-pyjwt>=2.8.0            # JWT authentication
-certifi>=2021.0.0       # SSL certificates
-python-dateutil>=2.8.2  # Date handling
-packaging>=21.0         # Version utilities
-```
-
----
-
-## 🔧 Installation Scripts
-
-### Windows
-```batch
-scripts\install_windows.bat
-```
-
-### macOS  
 ```bash
-scripts/install_macos.sh
+# Start the MCP server (default)
+wazuh-mcp-server
+
+# Validate configuration and connectivity
+wazuh-mcp-server --check
+
+# Show version information
+wazuh-mcp-server --version
+
+# Show help information
+wazuh-mcp-server --help
 ```
 
-### Linux (Ubuntu/Debian)
+## 🏗️ Architecture
+
+```
+┌─────────────────┐    STDIO    ┌─────────────────┐    HTTPS   ┌─────────────────┐
+│                 │◄──────────► │                 │◄─────────► │                 │
+│  Claude Desktop │             │ Wazuh MCP Server│            │   Wazuh SIEM    │
+│                 │             │                 │            │                 │
+└─────────────────┘             └─────────────────┘            └─────────────────┘
+                                         │                              │
+                                         │                              │
+                                         ▼                              ▼
+                                ┌─────────────────┐            ┌─────────────────┐
+                                │                 │            │                 │
+                                │ FastMCP Runtime │            │ Wazuh Indexer   │
+                                │ (29 Tools)      │            │ (OpenSearch)    │
+                                │                 │            │                 │
+                                └─────────────────┘            └─────────────────┘
+```
+
+## 🛡️ Security Features
+
+- **🔐 Secure by Default**: SSL/TLS verification enabled by default
+- **🚫 No Network Exposure**: STDIO transport only - no HTTP server
+- **🔑 Credential Validation**: Strong password requirements and validation
+- **📝 Audit Logging**: Comprehensive security event logging
+- **⚡ Rate Limiting**: Built-in API rate limiting and connection pooling
+- **🛠️ Error Handling**: Graceful error handling and recovery mechanisms
+
+## 🧪 Testing & Validation
+
 ```bash
-scripts/install_debian.sh
+# Install development dependencies
+pip install -e ".[dev]"
+
+# Run tests
+pytest tests/
+
+# Run security validation
+wazuh-mcp-server --check
+
+# Test Claude Desktop integration
+# (Configure Claude Desktop and test with natural language queries)
 ```
 
-### Fedora/RHEL/CentOS
-```bash
-scripts/install_fedora.sh
-```
+## 📊 System Requirements
 
-### Universal (Recommended)
-```bash
-python3 scripts/install.py
-```
+### Minimum Requirements
+- **OS**: Windows 10+, macOS 10.15+, Linux (any modern distribution)
+- **Python**: 3.11 or higher
+- **RAM**: 512MB available memory
+- **Network**: HTTPS access to Wazuh server
 
----
-
-## 🔒 Security Configuration
-
-### Wazuh API User Setup
-
-1. **Create dedicated API user** (don't use admin):
-```bash
-# On Wazuh Manager
-curl -k -X POST "https://localhost:55000/security/users" \
-  -H "Authorization: Bearer $JWT_TOKEN" \
-  -d '{"username": "mcp-api-user", "password": "SecurePass123!"}'
-```
-
-2. **Assign minimal permissions**:
-```bash
-curl -k -X POST "https://localhost:55000/security/users/mcp-api-user/roles?role_ids=1"
-```
-
-### SSL Configuration
-
-**Production (Recommended)**:
-```env
-VERIFY_SSL=true
-WAZUH_SSL_VERIFY=true
-```
-
-**Development Only**:
-```env  
-VERIFY_SSL=false
-ALLOW_SELF_SIGNED=true
-```
-
----
-
-## 🚨 Troubleshooting
-
-### Common Issues
-
-**Import Errors**:
-```bash
-# Ensure Python 3.9+
-python3 --version
-
-# Reinstall dependencies
-pip install -r requirements.txt
-```
-
-**Connection Issues**:
-```bash
-# Test Wazuh connectivity
-curl -k https://your-wazuh-server:55000/
-
-# Check API credentials
-curl -k -X POST "https://your-wazuh-server:55000/security/user/authenticate" \
-  -H "Content-Type: application/json" \
-  -d '{"username":"your-user","password":"your-password"}'
-```
-
-**Claude Desktop Issues**:
-1. Check config file path and JSON syntax
-2. Restart Claude Desktop after config changes
-3. Verify Python path in config is correct
-
-### Platform-Specific Guides
-- **Windows**: `docs/troubleshooting/windows-troubleshooting.md`
-- **Unix/Linux**: `docs/troubleshooting/unix-troubleshooting.md`
-
----
-
-## 📚 Documentation
-
-### Setup Guides
-- [Claude Desktop Setup](docs/user-guides/claude-desktop-setup.md)
-- [Configuration Examples](examples/configuration_examples/)
-- [Troubleshooting Guides](docs/troubleshooting/)
-
-### API Reference
-- [Tool Documentation](docs/api/)
-- [Configuration Reference](docs/configuration/)
-- [Security Best Practices](docs/security/)
-
----
+### Recommended Requirements
+- **Python**: 3.12 or higher  
+- **RAM**: 2GB available memory
+- **SSL**: Valid SSL certificates for production use
+- **Monitoring**: Centralized logging and monitoring setup
 
 ## 🤝 Contributing
 
-We welcome contributions! Please see:
-- [Contributing Guidelines](CONTRIBUTING.md)
-- [Code of Conduct](CODE_OF_CONDUCT.md)
-- [Development Setup](docs/development/)
-
-### Report Issues
-Found a bug? [Open an issue](https://github.com/gensecaihq/Wazuh-MCP-Server/issues)
-
----
-
-## 📈 Roadmap
-
-### Current: v2.0.0 (main) ✅
-- Simplified, production-ready MCP stdio server
-- Cross-platform compatibility  
-- 26 comprehensive security tools
-- Bug fixes for all reported issues
-
-### Enhanced STDIO: v2-fastmcp 🧪 ⚠️ **TESTING NEEDED**
-- FastMCP 2.10.6+ framework integration for stdio transport
-- Modern async architecture with improved performance
-- Same stdio compatibility as main branch for Claude Desktop
-- Enhanced error handling and resource management
-- **⚠️ NOT STABLE** - Requires extensive testing before production use
-
-### Remote HTTP Server: v3-fastmcp-remote 🧪 **EXPERIMENTAL**
-- Remote MCP server accessible over HTTP transport  
-- Docker deployment with docker compose for easy scaling
-- Enterprise security with JWT authentication and rate limiting
-- Multi-client support for team environments
-- **🧪 EXPERIMENTAL** - Feature-complete but requires extensive testing
-
-### Future: v2.1.0
-- Merge successful v3-fastmcp-remote features into main
-- Enhanced tool capabilities
-- Performance optimizations
-- Additional Wazuh integrations
-- Extended documentation
-
----
+1. Fork the repository
+2. Create a feature branch (`git checkout -b feature/amazing-feature`)
+3. Commit your changes (`git commit -m 'Add amazing feature'`)
+4. Push to the branch (`git push origin feature/amazing-feature`)
+5. Open a Pull Request
 
 ## 📄 License
 
 This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
 
----
+## 🆘 Support
 
-## 🙏 Acknowledgments
-
-- **Wazuh Team** - For the excellent SIEM platform
-- **Anthropic** - For Claude and the MCP protocol
-- **Contributors** - For bug reports and improvements
-- **Community** - For testing and feedback
-
----
-
-## 📞 Support
-
-- **Documentation**: This README and [docs/](docs/)
+- **Documentation**: [Complete documentation](docs/)
 - **Issues**: [GitHub Issues](https://github.com/gensecaihq/Wazuh-MCP-Server/issues)
 - **Discussions**: [GitHub Discussions](https://github.com/gensecaihq/Wazuh-MCP-Server/discussions)
 
+## 🏆 Production Ready
+
+This software has been designed for **enterprise production use** with:
+
+- ✅ Comprehensive error handling and recovery
+- ✅ Production-grade logging and monitoring
+- ✅ Security hardening and validation
+- ✅ Cross-platform compatibility
+- ✅ Extensive documentation and support
+- ✅ Full test coverage and validation
+
 ---
 
-**🎉 Ready to enhance your security operations with AI? Install now and start querying your Wazuh data through Claude!**
+**Made with ❤️ for the cybersecurity community**

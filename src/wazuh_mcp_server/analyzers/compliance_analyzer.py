@@ -53,8 +53,9 @@ class ComplianceReport:
 class ComplianceAnalyzer:
     """Comprehensive compliance analysis engine."""
     
-    def __init__(self):
+    def __init__(self, client_manager=None):
         self.logger = get_logger(__name__)
+        self.client_manager = client_manager
         self.framework_requirements = self._initialize_requirements()
     
     def _initialize_requirements(self) -> Dict[ComplianceFramework, List[Dict[str, Any]]]:
@@ -663,3 +664,274 @@ class ComplianceAnalyzer:
                 ]
             }
         ]
+    
+    # Async methods required by FastMCP server
+    
+    async def run_compliance_check(self, framework: str = "PCI-DSS", agent_id: Optional[str] = None) -> Dict[str, Any]:
+        """Run compliance check against security frameworks."""
+        try:
+            # Map string to ComplianceFramework enum
+            framework_map = {
+                "PCI-DSS": ComplianceFramework.PCI_DSS,
+                "HIPAA": ComplianceFramework.HIPAA,
+                "SOX": ComplianceFramework.SOX,
+                "GDPR": ComplianceFramework.GDPR,
+                "NIST": ComplianceFramework.NIST,
+                "ISO27001": ComplianceFramework.ISO27001
+            }
+            
+            framework_enum = framework_map.get(framework, ComplianceFramework.PCI_DSS)
+            
+            if not self.client_manager:
+                return {
+                    "framework": framework,
+                    "agent_id": agent_id,
+                    "error": "No client manager available",
+                    "status": "error"
+                }
+            
+            # Get requirements for the framework
+            requirements = self.framework_requirements.get(framework_enum, [])
+            
+            if not requirements:
+                return {
+                    "framework": framework,
+                    "agent_id": agent_id,
+                    "error": f"No requirements defined for framework {framework}",
+                    "status": "error"
+                }
+            
+            # Collect data for compliance assessment
+            alerts_data = await self.client_manager.get_alerts(
+                agent_id=agent_id,
+                limit=5000
+            ) if agent_id else await self.client_manager.get_alerts(limit=5000)
+            
+            agents_data = await self.client_manager.get_agents()
+            vulns_data = await self.client_manager.search_vulnerabilities(limit=1000)
+            
+            alerts = alerts_data.get('data', {}).get('affected_items', [])
+            agents = agents_data.get('data', {}).get('affected_items', [])
+            vulnerabilities = vulns_data.get('data', {}).get('affected_items', [])
+            
+            # Assess each requirement
+            assessed_requirements = []
+            total_score = 0
+            
+            for req in requirements:
+                assessment = self._assess_requirement(req, alerts, agents, vulnerabilities, agent_id)
+                assessed_requirements.append(assessment)
+                total_score += assessment["score"]
+            
+            # Calculate overall compliance
+            overall_score = total_score / len(requirements) if requirements else 0
+            compliance_status = self._determine_compliance_status(overall_score)
+            
+            # Generate recommendations
+            recommendations = []
+            for req in assessed_requirements:
+                if req["status"] != "compliant":
+                    recommendations.extend(req.get("recommendations", []))
+            
+            return {
+                "framework": framework,
+                "agent_id": agent_id,
+                "overall_score": round(overall_score, 2),
+                "status": compliance_status,
+                "requirements": assessed_requirements,
+                "recommendations": list(set(recommendations)),  # Remove duplicates
+                "summary": {
+                    "total_requirements": len(requirements),
+                    "compliant": len([r for r in assessed_requirements if r["status"] == "compliant"]),
+                    "non_compliant": len([r for r in assessed_requirements if r["status"] == "non_compliant"]),
+                    "partially_compliant": len([r for r in assessed_requirements if r["status"] == "partially_compliant"])
+                },
+                "timestamp": datetime.now().isoformat()
+            }
+            
+        except Exception as e:
+            self.logger.error(f"Error running compliance check: {e}")
+            return {
+                "framework": framework,
+                "agent_id": agent_id,
+                "error": str(e),
+                "status": "error"
+            }
+    
+    def _assess_requirement(self, req: Dict[str, Any], alerts: List[Dict[str, Any]], 
+                          agents: List[Dict[str, Any]], vulnerabilities: List[Dict[str, Any]],
+                          agent_id: Optional[str] = None) -> Dict[str, Any]:
+        """Assess a single compliance requirement."""
+        try:
+            method = req.get("assessment_method", "combined_analysis")
+            criteria = req.get("criteria", {})
+            
+            if method == "alert_analysis":
+                score, status, evidence = self._assess_alert_based(alerts, criteria)
+            elif method == "agent_analysis":
+                score, status, evidence = self._assess_agent_based(agents, criteria, agent_id)
+            elif method == "vulnerability_analysis":
+                score, status, evidence = self._assess_vulnerability_based(vulnerabilities, criteria)
+            else:  # combined_analysis
+                score, status, evidence = self._assess_combined(alerts, agents, vulnerabilities, criteria)
+            
+            return {
+                "id": req["id"],
+                "title": req["title"],
+                "description": req["description"],
+                "score": score,
+                "status": status,
+                "evidence": evidence,
+                "recommendations": req.get("recommendations", [])
+            }
+            
+        except Exception as e:
+            self.logger.error(f"Error assessing requirement {req.get('id', 'unknown')}: {e}")
+            return {
+                "id": req.get("id", "unknown"),
+                "title": req.get("title", "Unknown"),
+                "description": req.get("description", "Unknown"),
+                "score": 0,
+                "status": "unknown",
+                "evidence": [f"Error: {str(e)}"],
+                "recommendations": req.get("recommendations", [])
+            }
+    
+    def _assess_alert_based(self, alerts: List[Dict[str, Any]], criteria: Dict[str, Any]) -> tuple:
+        """Assess compliance based on alert patterns."""
+        required_monitoring = criteria.get("required_monitoring", [])
+        forbidden_rules = criteria.get("forbidden_rules", [])
+        
+        evidence = []
+        score = 100  # Start with perfect score
+        
+        # Check for required monitoring
+        if required_monitoring:
+            found_rules = set()
+            for alert in alerts:
+                rule_id = str(alert.get('rule', {}).get('id', ''))
+                if rule_id in required_monitoring:
+                    found_rules.add(rule_id)
+            
+            missing_rules = set(required_monitoring) - found_rules
+            if missing_rules:
+                score -= (len(missing_rules) / len(required_monitoring)) * 50
+                evidence.append(f"Missing monitoring for rules: {list(missing_rules)}")
+            else:
+                evidence.append(f"All required monitoring rules present: {required_monitoring}")
+        
+        # Check for forbidden patterns
+        if forbidden_rules:
+            found_forbidden = []
+            for alert in alerts:
+                rule_id = str(alert.get('rule', {}).get('id', ''))
+                if rule_id in forbidden_rules:
+                    found_forbidden.append(rule_id)
+            
+            if found_forbidden:
+                score -= len(found_forbidden) * 10  # -10 per forbidden rule violation
+                evidence.append(f"Forbidden rule violations found: {found_forbidden}")
+        
+        # Determine status
+        if score >= 90:
+            status = "compliant"
+        elif score >= 60:
+            status = "partially_compliant"
+        else:
+            status = "non_compliant"
+        
+        return max(0, score), status, evidence
+    
+    def _assess_agent_based(self, agents: List[Dict[str, Any]], criteria: Dict[str, Any], 
+                          agent_id: Optional[str] = None) -> tuple:
+        """Assess compliance based on agent status."""
+        if agent_id:
+            relevant_agents = [a for a in agents if a.get('id') == agent_id]
+        else:
+            relevant_agents = agents
+        
+        if not relevant_agents:
+            return 0, "unknown", ["No agents found for assessment"]
+        
+        active_agents = len([a for a in relevant_agents if a.get('status') == 'active'])
+        total_agents = len(relevant_agents)
+        
+        score = (active_agents / total_agents) * 100 if total_agents > 0 else 0
+        
+        evidence = [
+            f"Active agents: {active_agents}/{total_agents}",
+            f"Agent availability: {score:.1f}%"
+        ]
+        
+        if score >= 95:
+            status = "compliant"
+        elif score >= 80:
+            status = "partially_compliant"
+        else:
+            status = "non_compliant"
+        
+        return score, status, evidence
+    
+    def _assess_vulnerability_based(self, vulnerabilities: List[Dict[str, Any]], criteria: Dict[str, Any]) -> tuple:
+        """Assess compliance based on vulnerability management."""
+        if not vulnerabilities:
+            return 100, "compliant", ["No vulnerabilities found"]
+        
+        critical_vulns = len([v for v in vulnerabilities if v.get('severity', '').lower() == 'critical'])
+        high_vulns = len([v for v in vulnerabilities if v.get('severity', '').lower() == 'high'])
+        total_vulns = len(vulnerabilities)
+        
+        # Score based on vulnerability severity distribution
+        score = 100
+        if critical_vulns > 0:
+            score -= critical_vulns * 20  # -20 per critical vulnerability
+        if high_vulns > 0:
+            score -= high_vulns * 5   # -5 per high vulnerability
+        
+        score = max(0, score)
+        
+        evidence = [
+            f"Total vulnerabilities: {total_vulns}",
+            f"Critical vulnerabilities: {critical_vulns}",
+            f"High vulnerabilities: {high_vulns}"
+        ]
+        
+        if score >= 90:
+            status = "compliant"
+        elif score >= 70:
+            status = "partially_compliant"
+        else:
+            status = "non_compliant"
+        
+        return score, status, evidence
+    
+    def _assess_combined(self, alerts: List[Dict[str, Any]], agents: List[Dict[str, Any]], 
+                       vulnerabilities: List[Dict[str, Any]], criteria: Dict[str, Any]) -> tuple:
+        """Assess compliance using combined analysis of all data sources."""
+        # Weighted assessment of all components
+        alert_score, _, alert_evidence = self._assess_alert_based(alerts, criteria)
+        agent_score, _, agent_evidence = self._assess_agent_based(agents, criteria)
+        vuln_score, _, vuln_evidence = self._assess_vulnerability_based(vulnerabilities, criteria)
+        
+        # Weighted average (alerts 40%, agents 30%, vulnerabilities 30%)
+        combined_score = (alert_score * 0.4) + (agent_score * 0.3) + (vuln_score * 0.3)
+        
+        evidence = alert_evidence + agent_evidence + vuln_evidence
+        
+        if combined_score >= 85:
+            status = "compliant"
+        elif combined_score >= 65:
+            status = "partially_compliant"
+        else:
+            status = "non_compliant"
+        
+        return combined_score, status, evidence
+    
+    def _determine_compliance_status(self, overall_score: float) -> str:
+        """Determine overall compliance status based on score."""
+        if overall_score >= 90:
+            return "compliant"
+        elif overall_score >= 70:
+            return "partially_compliant"
+        else:
+            return "non_compliant"

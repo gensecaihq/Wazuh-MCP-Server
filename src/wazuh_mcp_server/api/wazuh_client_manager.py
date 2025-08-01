@@ -3,6 +3,7 @@
 import re
 from typing import Dict, Any, Optional, List
 from packaging import version
+from datetime import datetime
 
 # Clean absolute imports within the package
 from wazuh_mcp_server.config import WazuhConfig
@@ -266,3 +267,299 @@ class WazuhClientManager:
             metrics["indexer_api"] = self.indexer_client.get_metrics()
         
         return metrics
+    
+    # Additional methods required by FastMCP server
+    
+    async def get_vulnerabilities(self, query_params: Dict[str, Any]) -> Dict[str, Any]:
+        """Get vulnerabilities with query parameters."""
+        agent_id = query_params.get('agent_id')
+        severity = query_params.get('severity')
+        limit = query_params.get('limit', 100)
+        
+        if agent_id:
+            return await self.get_agent_vulnerabilities(agent_id)
+        else:
+            return await self.search_vulnerabilities(severity=severity, limit=limit)
+    
+    async def get_alert_summary(self, time_range: str = "24h", group_by: str = "rule.level") -> Dict[str, Any]:
+        """Get alert summary grouped by specified field."""
+        try:
+            # Calculate time range
+            hours = {"1h": 1, "6h": 6, "24h": 24, "7d": 168}.get(time_range, 24)
+            
+            # Get alerts from the specified time range
+            alerts_data = await self.get_alerts(
+                timestamp_gte=f"now-{hours}h",
+                limit=1000
+            )
+            
+            # Summarize alerts by group_by field
+            summary = {}
+            alerts = alerts_data.get('data', {}).get('affected_items', [])
+            
+            for alert in alerts:
+                key = self._get_nested_value(alert, group_by) or "unknown"
+                if key not in summary:
+                    summary[key] = {"count": 0, "alerts": []}
+                summary[key]["count"] += 1
+                summary[key]["alerts"].append(alert)
+            
+            return {
+                "data": {
+                    "summary": summary,
+                    "total_alerts": len(alerts),
+                    "time_range": time_range,
+                    "group_by": group_by
+                }
+            }
+        except Exception as e:
+            logger.error(f"Error getting alert summary: {e}")
+            return {"error": str(e)}
+    
+    async def get_running_agents(self) -> Dict[str, Any]:
+        """Get list of active/running agents."""
+        return await self.get_agents(status="active")
+    
+    async def get_cluster_health(self) -> Dict[str, Any]:
+        """Get cluster health information."""
+        try:
+            cluster_info = await self.get_cluster_info()
+            nodes_info = await self.get_cluster_nodes()
+            
+            return {
+                "data": {
+                    "cluster_info": cluster_info,
+                    "nodes": nodes_info,
+                    "status": "healthy" if cluster_info.get("data") else "unknown"
+                }
+            }
+        except Exception as e:
+            logger.error(f"Error getting cluster health: {e}")
+            return {"error": str(e)}
+    
+    async def get_rules_summary(self) -> Dict[str, Any]:
+        """Get rules summary and effectiveness."""
+        try:
+            rules_data = await self.get_rules(limit=1000)
+            
+            # Get recent alerts to analyze rule effectiveness
+            alerts_data = await self.get_alerts(limit=1000)
+            alerts = alerts_data.get('data', {}).get('affected_items', [])
+            
+            # Count rule usage
+            rule_usage = {}
+            for alert in alerts:
+                rule_id = alert.get('rule', {}).get('id')
+                if rule_id:
+                    rule_usage[rule_id] = rule_usage.get(rule_id, 0) + 1
+            
+            rules = rules_data.get('data', {}).get('affected_items', [])
+            for rule in rules:
+                rule_id = str(rule.get('id'))
+                rule['usage_count'] = rule_usage.get(rule_id, 0)
+            
+            return {
+                "data": {
+                    "rules": rules,
+                    "total_rules": len(rules),
+                    "active_rules": len([r for r in rules if r.get('usage_count', 0) > 0])
+                }
+            }
+        except Exception as e:
+            logger.error(f"Error getting rules summary: {e}")
+            return {"error": str(e)}
+    
+    async def get_weekly_stats(self) -> Dict[str, Any]:
+        """Get weekly statistics."""
+        try:
+            # Get alerts from last 7 days
+            alerts_data = await self.get_alerts(
+                timestamp_gte="now-7d",
+                limit=5000
+            )
+            
+            # Get agent stats
+            agents_data = await self.get_agents()
+            
+            alerts = alerts_data.get('data', {}).get('affected_items', [])
+            agents = agents_data.get('data', {}).get('affected_items', [])
+            
+            # Calculate statistics
+            active_agents = len([a for a in agents if a.get('status') == 'active'])
+            total_alerts = len(alerts)
+            critical_alerts = len([a for a in alerts if int(a.get('rule', {}).get('level', 0)) >= 12])
+            
+            return {
+                "data": {
+                    "total_alerts": total_alerts,
+                    "critical_alerts": critical_alerts,
+                    "active_agents": active_agents,
+                    "total_agents": len(agents),
+                    "period": "7 days"
+                }
+            }
+        except Exception as e:
+            logger.error(f"Error getting weekly stats: {e}")
+            return {"error": str(e)}
+    
+    async def search_manager_logs(self, query: str, limit: int = 100) -> Dict[str, Any]:
+        """Search manager logs."""
+        return await self.search_wazuh_logs("manager", query, limit)
+    
+    async def get_critical_vulnerabilities(self, limit: int = 50) -> Dict[str, Any]:
+        """Get critical vulnerabilities."""
+        return await self.search_vulnerabilities(severity="critical", limit=limit)
+    
+    async def get_vulnerability_summary(self, time_range: str = "7d") -> Dict[str, Any]:
+        """Get vulnerability summary."""
+        try:
+            vulns_data = await self.search_vulnerabilities(limit=1000)
+            vulnerabilities = vulns_data.get('data', {}).get('affected_items', [])
+            
+            # Summarize by severity
+            severity_count = {}
+            for vuln in vulnerabilities:
+                severity = vuln.get('severity', 'unknown')
+                severity_count[severity] = severity_count.get(severity, 0) + 1
+            
+            return {
+                "data": {
+                    "summary": severity_count,
+                    "total_vulnerabilities": len(vulnerabilities),
+                    "time_range": time_range
+                }
+            }
+        except Exception as e:
+            logger.error(f"Error getting vulnerability summary: {e}")
+            return {"error": str(e)}
+    
+    async def get_remoted_stats(self) -> Dict[str, Any]:
+        """Get remoted daemon statistics."""
+        return await self.get_wazuh_stats("remoted", "stats")
+    
+    async def get_log_collector_stats(self) -> Dict[str, Any]:
+        """Get log collector statistics."""
+        return await self.get_wazuh_stats("logcollector", "stats")
+    
+    async def get_manager_error_logs(self, limit: int = 100) -> Dict[str, Any]:
+        """Get manager error logs."""
+        return await self.search_wazuh_logs("manager", "ERROR", limit)
+    
+    async def check_agent_health(self, agent_id: str) -> Dict[str, Any]:
+        """Check agent health status."""
+        try:
+            agent_data = await self.get_agents(agents_list=[agent_id])
+            agents = agent_data.get('data', {}).get('affected_items', [])
+            
+            if not agents:
+                return {"error": f"Agent {agent_id} not found"}
+            
+            agent = agents[0]
+            status = agent.get('status', 'unknown')
+            last_keep_alive = agent.get('lastKeepAlive')
+            
+            health_status = "healthy" if status == "active" else "unhealthy"
+            
+            return {
+                "data": {
+                    "agent_id": agent_id,
+                    "status": status,
+                    "health": health_status,
+                    "last_keep_alive": last_keep_alive,
+                    "details": agent
+                }
+            }
+        except Exception as e:
+            logger.error(f"Error checking agent health: {e}")
+            return {"error": str(e)}
+    
+    async def get_wazuh_statistics(self) -> Dict[str, Any]:
+        """Get comprehensive Wazuh statistics."""
+        try:
+            # Get various statistics
+            agents_data = await self.get_agents()
+            alerts_data = await self.get_alerts(limit=1000)
+            cluster_info = await self.get_cluster_info()
+            
+            agents = agents_data.get('data', {}).get('affected_items', [])
+            alerts = alerts_data.get('data', {}).get('affected_items', [])
+            
+            stats = {
+                "agents": {
+                    "total": len(agents),
+                    "active": len([a for a in agents if a.get('status') == 'active']),
+                    "disconnected": len([a for a in agents if a.get('status') == 'disconnected'])
+                },
+                "alerts": {
+                    "total": len(alerts),
+                    "critical": len([a for a in alerts if int(a.get('rule', {}).get('level', 0)) >= 12])
+                },
+                "cluster": cluster_info.get('data', {})
+            }
+            
+            return {"data": stats}
+        except Exception as e:
+            logger.error(f"Error getting Wazuh statistics: {e}")
+            return {"error": str(e)}
+    
+    async def search_security_events(self, query: str, time_range: str = "24h", limit: int = 100) -> Dict[str, Any]:
+        """Search for security events."""
+        try:
+            hours = {"1h": 1, "6h": 6, "24h": 24, "7d": 168}.get(time_range, 24)
+            
+            # Search in alerts
+            alerts_data = await self.get_alerts(
+                query=query,
+                timestamp_gte=f"now-{hours}h",
+                limit=limit
+            )
+            
+            return alerts_data
+        except Exception as e:
+            logger.error(f"Error searching security events: {e}")
+            return {"error": str(e)}
+    
+    async def get_agent_configuration(self, agent_id: str) -> Dict[str, Any]:
+        """Get agent configuration."""
+        try:
+            # Use the server client to get agent configuration
+            return await self.server_client.get_agent_config(agent_id)
+        except Exception as e:
+            logger.error(f"Error getting agent configuration: {e}")
+            return {"error": str(e)}
+    
+    async def validate_connection(self) -> Dict[str, Any]:
+        """Validate connection to Wazuh server."""
+        try:
+            # Test server connection
+            health_result = await self.health_check()
+            
+            # Test basic API call
+            info_result = await self.server_client.get("/")
+            
+            return {
+                "data": {
+                    "status": "connected",
+                    "server_health": health_result,
+                    "api_info": info_result,
+                    "timestamp": datetime.now().isoformat()
+                }
+            }
+        except Exception as e:
+            logger.error(f"Connection validation failed: {e}")
+            return {
+                "error": str(e),
+                "status": "disconnected",
+                "timestamp": datetime.now().isoformat()
+            }
+    
+    def _get_nested_value(self, data: Dict[str, Any], key_path: str) -> Any:
+        """Get nested value from dictionary using dot notation."""
+        keys = key_path.split('.')
+        value = data
+        for key in keys:
+            if isinstance(value, dict) and key in value:
+                value = value[key]
+            else:
+                return None
+        return value
