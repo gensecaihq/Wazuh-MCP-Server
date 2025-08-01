@@ -25,7 +25,8 @@ cd Wazuh-MCP-Server
 docker compose up -d
 ```
 
-**Your MCP server is now running at:** `http://localhost:3000`
+**Your MCP server is now configured and running.**
+**Mode:** Local (STDIO) by default, or Remote (HTTP/SSE) if chosen
 
 ## ⚙️ Configuration
 
@@ -60,34 +61,46 @@ WAZUH_PASS=secure-password
 
 ## 🔌 Client Integration
 
-### Claude Desktop Integration
+### Claude Desktop Direct Integration (Recommended)
 
-1. Set STDIO mode:
-```bash
-echo "MCP_TRANSPORT=stdio" >> config/wazuh.env
-docker compose restart
-```
+**Default mode** - Standard MCP over STDIO/JSON:
 
-2. Add to Claude Desktop config:
+The configuration script automatically sets up direct Claude Desktop integration. Add this to your `claude_desktop_config.json`:
+
 ```json
 {
   "mcpServers": {
     "wazuh": {
       "command": "docker",
       "args": ["compose", "exec", "wazuh-mcp-server", "./wazuh-mcp-server", "--stdio"],
-      "cwd": "/path/to/Wazuh-MCP-Server"
+      "cwd": "/absolute/path/to/Wazuh-MCP-Server"
     }
   }
 }
 ```
 
-### Web/HTTP Integration
+### Claude Desktop Custom Connector (Advanced)
 
-Default mode - access at `http://localhost:3000`
+For remote deployments, choose "Remote Mode" during configuration:
 
+1. **Get your bearer token:**
+   ```bash
+   grep MCP_AUTH_TOKEN .env.wazuh | cut -d'=' -f2
+   ```
+
+2. **Add Custom Connector in Claude Desktop:**
+   - Go to Settings > Connectors
+   - Click "Add Custom Connector" 
+   - Server URL: `http://localhost:3000` (or your custom URL)
+   - Authentication: Bearer Token
+   - Token: [Your token from step 1]
+
+### Legacy FastMCP Mode
+
+For FastMCP compatibility:
 ```bash
-# Already configured for HTTP mode
-docker compose up -d
+echo "MCP_TRANSPORT=http" >> .env.wazuh
+docker compose restart
 ```
 
 ## 🛠️ Available Tools
@@ -111,6 +124,41 @@ The MCP server provides **20 security tools**:
 ### Real-time Resources
 - `wazuh://status/server` - Live server health monitoring
 - `wazuh://dashboard/summary` - Security metrics dashboard
+
+## 🌐 Production Deployment
+
+### Reverse Proxy Setup
+
+For production deployment without showing ports, use a reverse proxy:
+
+#### Nginx Configuration Example
+```nginx
+server {
+    listen 443 ssl http2;
+    server_name wazuh.company.com;
+    
+    location / {
+        proxy_pass http://localhost:3000;
+        proxy_set_header Host $host;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        
+        # Required for SSE
+        proxy_buffering off;
+        proxy_cache off;
+        proxy_read_timeout 24h;
+    }
+}
+```
+
+#### Custom Path Configuration
+```bash
+# For URLs like https://server.com/wazuhsse
+export MCP_PUBLIC_URL=https://server.com/wazuhsse  
+export MCP_BASE_PATH=/wazuhsse
+docker compose up -d
+```
+
+See [docs/nginx-reverse-proxy.conf](docs/nginx-reverse-proxy.conf) for complete examples.
 
 ## 🐳 Container Management
 
@@ -156,25 +204,56 @@ docker compose exec wazuh-mcp-server python3 test-functionality.py
 | `WAZUH_USER` | *required* | Wazuh API username |
 | `WAZUH_PASS` | *required* | Wazuh API password |
 | `WAZUH_PORT` | `55000` | Wazuh API port |
-| `MCP_TRANSPORT` | `http` | Transport mode (`http` or `stdio`) |
-| `MCP_PORT` | `3000` | HTTP server port |
+| `MCP_TRANSPORT` | `stdio` | Transport mode (`stdio`, `remote`, or `http`) |
+| `MCP_PORT` | `3000` | Server port |
+| `MCP_AUTH_TOKEN` | *auto-generated* | Bearer token for authentication |
 | `VERIFY_SSL` | `true` | SSL certificate verification |
+
+### MCP Server Endpoints
+
+| Endpoint | Description | Authentication |
+|----------|-------------|----------------|
+| `/` | Server information | None |
+| `/health` | Health check | None |
+| `/sse` | Server-Sent Events for real-time MCP | Bearer token |
+| `/message` | MCP protocol messages | Bearer token |
+| `/capabilities` | Server capabilities | Bearer token |
+| `/.well-known/oauth-authorization-server` | OAuth metadata | None |
+
+### Production Deployment Options
+
+| Deployment Type | Example URL | Configuration |
+|-----------------|-------------|---------------|
+| **Domain (no port)** | `https://wazuh.company.com` | `MCP_PUBLIC_URL=https://wazuh.company.com` |
+| **IP with path** | `https://192.168.1.100/wazuhsse` | `MCP_PUBLIC_URL=https://192.168.1.100/wazuhsse`<br>`MCP_BASE_PATH=/wazuhsse` |
+| **Subdomain + path** | `https://mcp.company.com/api/wazuh` | `MCP_PUBLIC_URL=https://mcp.company.com/api/wazuh`<br>`MCP_BASE_PATH=/api/wazuh` |
 
 ### Transport Modes
 
-#### HTTP Mode (Default)
-- Best for web clients and remote access
-- Access URL: `http://localhost:3000`
-- Port: 3000 (configurable)
+#### STDIO Mode (Default, Recommended)
+- **Best for:** Direct Claude Desktop integration  
+- **Authentication:** None (local access)
+- **Transport:** Standard input/output (JSON-RPC)
+- **Performance:** Best performance and compatibility
+- **Setup:** Automatic via configuration script
 
-#### STDIO Mode  
-- Direct integration with Claude Desktop
-- No network ports required
-- Real-time communication
+#### Remote Mode (Advanced)
+- **Best for:** Claude Desktop Custom Connectors, production deployments
+- **Authentication:** Bearer token required
+- **Endpoints:** `/sse`, `/message`, `/capabilities`
+- **Compliance:** Full MCP remote server specification
+- **Features:** Reverse proxy support, custom domains
+
+#### FastMCP HTTP Mode (Legacy)
+- **Best for:** FastMCP-compatible clients
+- **Authentication:** None (legacy mode)
+- **Access:** `http://localhost:3000`
 
 ```bash
-# Switch to STDIO mode
-echo "MCP_TRANSPORT=stdio" >> config/wazuh.env
+# Switch modes manually (or use configure-wazuh.sh)
+echo "MCP_TRANSPORT=stdio" >> .env.wazuh   # Default (recommended)
+echo "MCP_TRANSPORT=remote" >> .env.wazuh  # Remote server
+echo "MCP_TRANSPORT=http" >> .env.wazuh    # Legacy FastMCP
 docker compose restart
 ```
 
@@ -277,8 +356,9 @@ Works on any OS with Docker:
 
 1. **Check the logs**: `docker compose logs -f`
 2. **Run health check**: `curl http://localhost:3000/health`
-3. **Verify configuration**: Review `config/wazuh.env`
-4. **Test connectivity**: Check network access to Wazuh Manager
+3. **Test remote MCP server**: `python3 test-remote-mcp.py`
+4. **Verify configuration**: Review `.env.wazuh`
+5. **Test connectivity**: Check network access to Wazuh Manager
 
 ### Reporting Issues
 

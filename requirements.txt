@@ -1,5 +1,6 @@
 # Core dependencies for Wazuh MCP Server
 fastmcp>=2.10.6
+fastapi>=0.115.0
 httpx>=0.28.0
 pydantic>=2.10.0
 python-dotenv>=1.0.0

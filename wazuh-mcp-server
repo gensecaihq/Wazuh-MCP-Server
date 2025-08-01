@@ -21,8 +21,9 @@ def parse_arguments():
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-  ./wazuh-mcp-server --http          # Start HTTP/SSE server (default)
-  ./wazuh-mcp-server --stdio         # Start STDIO server for Claude Desktop
+  ./wazuh-mcp-server --stdio         # Start STDIO server for Claude Desktop (recommended)
+  ./wazuh-mcp-server --remote        # Start remote MCP server for Custom Connectors
+  ./wazuh-mcp-server --http          # Start HTTP/SSE server using FastMCP (legacy)
   ./wazuh-mcp-server --version       # Show version information
   
 Environment Variables:
@@ -30,23 +31,28 @@ Environment Variables:
   WAZUH_USER        - Wazuh API username (required)
   WAZUH_PASS        - Wazuh API password (required)
   WAZUH_PORT        - Wazuh API port (default: 55000)
-  MCP_TRANSPORT     - Transport mode: http or stdio (default: http)
-  MCP_HOST          - HTTP server bind address (default: 0.0.0.0)
-  MCP_PORT          - HTTP server port (default: 3000)
+  MCP_TRANSPORT     - Transport mode: stdio, remote, or http (default: stdio)
+  MCP_HOST          - Server bind address (default: 0.0.0.0)
+  MCP_PORT          - Server port (default: 3000)
   VERIFY_SSL        - SSL verification (default: true)
 """
     )
     
     group = parser.add_mutually_exclusive_group()
     group.add_argument(
-        "--http", "--remote", "--server",
-        action="store_true",
-        help="Start HTTP/SSE server for web clients (default)"
-    )
-    group.add_argument(
         "--stdio", "--local",
         action="store_true", 
-        help="Start STDIO server for Claude Desktop integration"
+        help="Start STDIO server for Claude Desktop direct integration (recommended)"
+    )
+    group.add_argument(
+        "--remote", "--mcp-remote",
+        action="store_true",
+        help="Start remote MCP server for Claude Desktop Custom Connectors"
+    )
+    group.add_argument(
+        "--http", "--server",
+        action="store_true",
+        help="Start HTTP/SSE server using FastMCP (legacy mode)"
     )
     group.add_argument(
         "--version", "-v",
@@ -167,6 +173,57 @@ def start_http_server():
         print(f"❌ ERROR: Server startup failed: {e}")
         return False
 
+def start_remote_server():
+    """Start remote MCP server for Claude Desktop Custom Connectors."""
+    try:
+        import uvicorn
+        import asyncio
+        from wazuh_mcp_server.server import initialize_server
+        from wazuh_mcp_server.remote_server import remote_app
+        
+        # Initialize server components
+        print("🔍 Initializing remote MCP server...")
+        asyncio.run(initialize_server())
+        
+        # Get configuration
+        host = os.getenv("MCP_HOST", "0.0.0.0")
+        try:
+            port = int(os.getenv("MCP_PORT", "3000"))
+            if port < 1 or port > 65535:
+                raise ValueError("Port must be between 1 and 65535")
+        except ValueError as e:
+            print(f"❌ ERROR: Invalid MCP_PORT value '{os.getenv('MCP_PORT')}': {e}")
+            return False
+        
+        print(f"🚀 Starting Remote MCP Server on {host}:{port}")
+        print(f"🌐 Access URL: http://{host}:{port}")
+        print(f"🏥 Health Check: http://{host}:{port}/health")
+        print(f"📡 SSE Endpoint: http://{host}:{port}/sse")
+        print(f"💬 Message Endpoint: http://{host}:{port}/message")
+        print(f"🔑 Authentication: Bearer token required (Phase 1: use 'wazuh_test')")
+        print("   Press Ctrl+C to stop")
+        
+        # Start remote MCP server
+        uvicorn.run(
+            remote_app,
+            host=host,
+            port=port,
+            log_level="info",
+            access_log=True
+        )
+        return True
+        
+    except KeyboardInterrupt:
+        print("\n🛑 Server stopped by user")
+        return True
+    except ImportError as e:
+        print(f"❌ ERROR: Missing dependency: {e}")
+        print("   Please install required packages: pip install -r requirements.txt")
+        return False
+    except Exception as e:
+        print(f"❌ ERROR: Server startup failed: {e}")
+        return False
+
 def start_stdio_server():
     """Start STDIO server."""
     try:
@@ -219,23 +276,28 @@ def main():
     # Determine transport mode
     if args.stdio:
         transport = "stdio"
+    elif args.remote:
+        transport = "remote"
     elif args.http:
         transport = "http"
     else:
-        # Use environment variable or default to http
-        transport = os.getenv("MCP_TRANSPORT", "http").lower()
+        # Use environment variable or default to stdio
+        transport = os.getenv("MCP_TRANSPORT", "stdio").lower()
     
     # Start appropriate server
     success = False
-    if transport == "http":
-        os.environ["MCP_TRANSPORT"] = "http"
-        success = start_http_server()
-    elif transport == "stdio":
+    if transport == "stdio":
         os.environ["MCP_TRANSPORT"] = "stdio"
         success = start_stdio_server()
+    elif transport == "remote":
+        os.environ["MCP_TRANSPORT"] = "remote"
+        success = start_remote_server()
+    elif transport == "http":
+        os.environ["MCP_TRANSPORT"] = "http"
+        success = start_http_server()
     else:
         print(f"❌ ERROR: Invalid transport mode '{transport}'")
-        print("   Valid options: http, stdio")
+        print("   Valid options: stdio, remote, http")
         return 1
     
     return 0 if success else 1
