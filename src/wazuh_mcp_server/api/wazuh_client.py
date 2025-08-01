@@ -219,6 +219,131 @@ class WazuhClient:
             except httpx.TimeoutException:
                 raise ConnectionError(f"Request timeout to Wazuh server")
     
+    async def get_manager_info(self) -> Dict[str, Any]:
+        """Get Wazuh manager information."""
+        return await self._request("GET", "/")
+
+    async def get_alert_summary(self, time_range: str, group_by: str) -> Dict[str, Any]:
+        """Get alert summary grouped by field."""
+        params = {"time_range": time_range, "group_by": group_by}
+        return await self._request("GET", "/alerts/summary", params=params)
+
+    async def analyze_alert_patterns(self, time_range: str, min_frequency: int) -> Dict[str, Any]:
+        """Analyze alert patterns."""
+        params = {"time_range": time_range, "min_frequency": min_frequency}
+        return await self._request("GET", "/alerts/patterns", params=params)
+
+    async def search_security_events(self, query: str, time_range: str, limit: int) -> Dict[str, Any]:
+        """Search security events."""
+        params = {"q": query, "time_range": time_range, "limit": limit}
+        return await self._request("GET", "/security/events", params=params)
+
+    async def get_running_agents(self) -> Dict[str, Any]:
+        """Get running agents."""
+        return await self._request("GET", "/agents", params={"status": "active"})
+
+    async def check_agent_health(self, agent_id: str) -> Dict[str, Any]:
+        """Check agent health."""
+        return await self._request("GET", f"/agents/{agent_id}/health")
+
+    async def get_agent_processes(self, agent_id: str, limit: int) -> Dict[str, Any]:
+        """Get agent processes."""
+        return await self._request("GET", f"/syscollector/{agent_id}/processes", params={"limit": limit})
+
+    async def get_agent_ports(self, agent_id: str, limit: int) -> Dict[str, Any]:
+        """Get agent ports."""
+        return await self._request("GET", f"/syscollector/{agent_id}/ports", params={"limit": limit})
+
+    async def get_agent_configuration(self, agent_id: str) -> Dict[str, Any]:
+        """Get agent configuration."""
+        return await self._request("GET", f"/agents/{agent_id}/config")
+
+    async def get_critical_vulnerabilities(self, limit: int) -> Dict[str, Any]:
+        """Get critical vulnerabilities."""
+        return await self._request("GET", "/vulnerability/agents", params={"severity": "critical", "limit": limit})
+
+    async def get_vulnerability_summary(self, time_range: str) -> Dict[str, Any]:
+        """Get vulnerability summary."""
+        return await self._request("GET", "/vulnerability/summary", params={"time_range": time_range})
+
+    async def analyze_security_threat(self, indicator: str, indicator_type: str) -> Dict[str, Any]:
+        """Analyze security threat."""
+        data = {"indicator": indicator, "type": indicator_type}
+        return await self._request("POST", "/security/threat/analyze", json=data)
+
+    async def check_ioc_reputation(self, indicator: str, indicator_type: str) -> Dict[str, Any]:
+        """Check IoC reputation."""
+        params = {"indicator": indicator, "type": indicator_type}
+        return await self._request("GET", "/security/ioc/reputation", params=params)
+
+    async def perform_risk_assessment(self, agent_id: str = None) -> Dict[str, Any]:
+        """Perform risk assessment."""
+        endpoint = f"/security/risk/{agent_id}" if agent_id else "/security/risk"
+        return await self._request("GET", endpoint)
+
+    async def get_top_security_threats(self, limit: int, time_range: str) -> Dict[str, Any]:
+        """Get top security threats."""
+        params = {"limit": limit, "time_range": time_range}
+        return await self._request("GET", "/security/threats/top", params=params)
+
+    async def generate_security_report(self, report_type: str, include_recommendations: bool) -> Dict[str, Any]:
+        """Generate security report."""
+        data = {"type": report_type, "include_recommendations": include_recommendations}
+        return await self._request("POST", "/security/reports/generate", json=data)
+
+    async def run_compliance_check(self, framework: str, agent_id: str = None) -> Dict[str, Any]:
+        """Run compliance check."""
+        data = {"framework": framework}
+        if agent_id:
+            data["agent_id"] = agent_id
+        return await self._request("POST", "/security/compliance/check", json=data)
+
+    async def get_wazuh_statistics(self) -> Dict[str, Any]:
+        """Get Wazuh statistics."""
+        return await self._request("GET", "/manager/stats/all")
+
+    async def get_weekly_stats(self) -> Dict[str, Any]:
+        """Get weekly statistics."""
+        return await self._request("GET", "/manager/stats/weekly")
+
+    async def get_cluster_health(self) -> Dict[str, Any]:
+        """Get cluster health."""
+        return await self._request("GET", "/cluster/health")
+
+    async def get_cluster_nodes(self) -> Dict[str, Any]:
+        """Get cluster nodes."""
+        return await self._request("GET", "/cluster/nodes")
+
+    async def get_rules_summary(self) -> Dict[str, Any]:
+        """Get rules summary."""
+        return await self._request("GET", "/rules/summary")
+
+    async def get_remoted_stats(self) -> Dict[str, Any]:
+        """Get remoted statistics."""
+        return await self._request("GET", "/manager/stats/remoted")
+
+    async def get_log_collector_stats(self) -> Dict[str, Any]:
+        """Get log collector statistics."""
+        return await self._request("GET", "/manager/stats/logcollector")
+
+    async def search_manager_logs(self, query: str, limit: int) -> Dict[str, Any]:
+        """Search manager logs."""
+        params = {"q": query, "limit": limit}
+        return await self._request("GET", "/manager/logs", params=params)
+
+    async def get_manager_error_logs(self, limit: int) -> Dict[str, Any]:
+        """Get manager error logs."""
+        params = {"level": "error", "limit": limit}
+        return await self._request("GET", "/manager/logs", params=params)
+
+    async def validate_connection(self) -> Dict[str, Any]:
+        """Validate Wazuh connection."""
+        try:
+            result = await self._request("GET", "/")
+            return {"status": "connected", "details": result}
+        except Exception as e:
+            return {"status": "failed", "error": str(e)}
+    
     async def close(self):
         """Close the HTTP client."""
         if self.client:

@@ -1,45 +1,104 @@
-# Modern Docker Compose V2+ configuration
-# Uses compose.yml as per current Docker standards
-# Run with: docker compose up -d
+# Wazuh MCP Server - Docker Compose v2 Latest
+# MCP-compliant remote server with production-grade configuration
+# Uses Docker Compose v2 latest format with compose.yml naming convention
 
 name: wazuh-mcp-server
 
 services:
   wazuh-mcp-server:
-    build: .
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        BUILD_DATE: ${BUILD_DATE}
+        PYTHON_VERSION: ${PYTHON_VERSION:-3.13}
+        VERSION: ${VERSION:-4.0.0}
+      platforms:
+        - linux/amd64
+        - linux/arm64/v8
+      target: production
+    
+    image: wazuh-mcp-server:${VERSION:-4.0.0}
     container_name: wazuh-mcp-server
+    hostname: wazuh-mcp-server
+    
     restart: unless-stopped
     init: true
     
-    # Load configuration from file (created by configure-wazuh.sh)
-    # If file doesn't exist, use environment variables or defaults
-    env_file:
-      - .env.wazuh
-    
-    # Transport mode - defaults to HTTP/SSE
+    env_file: 
+      - .env
     environment:
-      MCP_TRANSPORT: ${MCP_TRANSPORT:-http}
-      MCP_HOST: ${MCP_HOST:-0.0.0.0}
-      MCP_PORT: ${MCP_PORT:-3000}
-    
-    # Port mapping for HTTP/SSE mode (default)
+      # Runtime overrides
+      MCP_HOST: 0.0.0.0
+      MCP_PORT: 3000
+      ENVIRONMENT: production
+      
     ports:
       - "${MCP_PORT:-3000}:3000"
     
-    # Health check
+    # Modern health check with curl
     healthcheck:
-      test: ["CMD", "python3", "-c", "from src.wazuh_mcp_server.config import WazuhConfig; WazuhConfig.from_env()"]
-      interval: 30s
-      timeout: 10s
+      test: ["CMD", "curl", "-f", "--max-time", "5", "http://localhost:3000/health"]
+      interval: 15s
+      timeout: 5s
       retries: 3
-    
-    # Resource limits
+      start_period: 45s
+      
+    # Resource management
     deploy:
       resources:
         limits:
+          cpus: '1.0'
           memory: 512M
-          cpus: '0.5'
+        reservations:
+          cpus: '0.25'
+          memory: 128M
     
-    # For STDIO mode (when MCP_TRANSPORT=stdio)
-    stdin_open: true
-    tty: true
+    # Security hardening
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    cap_add:
+      - NET_BIND_SERVICE
+    read_only: true
+    
+    # Writable directories
+    tmpfs:
+      - /tmp:noexec,nosuid,size=64m
+      - /app/logs:noexec,nosuid,size=128m
+    
+    # Structured logging
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+        labels: "service=wazuh-mcp-server"
+    
+    # Service labels
+    labels:
+      - "com.docker.compose.service=wazuh-mcp-server"
+      - "org.opencontainers.image.title=Wazuh MCP Server"
+      - "org.opencontainers.image.description=MCP-compliant remote server for Wazuh SIEM"
+      - "monitoring.prometheus.scrape=true"
+      - "monitoring.prometheus.port=3000"
+      - "monitoring.prometheus.path=/metrics"
+
+# Network configuration
+networks:
+  default:
+    name: wazuh-mcp-network
+    driver: bridge
+    ipam:
+      driver: default
+      config:
+        - subnet: 172.20.0.0/16
+    driver_opts:
+      com.docker.network.bridge.name: br-wazuh-mcp
+
+# Persistent volumes (if needed)
+volumes:
+  wazuh-mcp-data:
+    name: wazuh-mcp-data
+    driver: local

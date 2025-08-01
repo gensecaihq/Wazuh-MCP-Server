@@ -102,3 +102,66 @@ class WazuhConfig:
     def base_url(self) -> str:
         """Get the base URL for Wazuh API."""
         return f"https://{self.wazuh_host}:{self.wazuh_port}"
+
+
+@dataclass
+class ServerConfig:
+    """Server configuration for MCP Server."""
+    # MCP Server settings
+    MCP_HOST: str = "0.0.0.0"
+    MCP_PORT: int = 3000
+    
+    # Authentication settings
+    AUTH_SECRET_KEY: str = ""
+    TOKEN_LIFETIME_HOURS: int = 24
+    
+    # CORS settings
+    ALLOWED_ORIGINS: str = "https://claude.ai,http://localhost:*"
+    
+    # Wazuh connection settings
+    WAZUH_HOST: str = ""
+    WAZUH_USER: str = ""
+    WAZUH_PASS: str = ""
+    WAZUH_PORT: int = 55000
+    WAZUH_VERIFY_SSL: bool = False
+    WAZUH_ALLOW_SELF_SIGNED: bool = True
+    
+    # Logging
+    LOG_LEVEL: str = "INFO"
+    
+    @classmethod
+    def from_env(cls) -> 'ServerConfig':
+        """Create configuration from environment variables."""
+        import secrets
+        
+        # Generate secure secret key if not provided
+        auth_secret = os.getenv("AUTH_SECRET_KEY", "")
+        if not auth_secret:
+            auth_secret = secrets.token_hex(32)
+            
+        return cls(
+            MCP_HOST=os.getenv("MCP_HOST", "0.0.0.0"),
+            MCP_PORT=int(os.getenv("MCP_PORT", "3000")),
+            AUTH_SECRET_KEY=auth_secret,
+            TOKEN_LIFETIME_HOURS=int(os.getenv("TOKEN_LIFETIME_HOURS", "24")),
+            ALLOWED_ORIGINS=os.getenv("ALLOWED_ORIGINS", "https://claude.ai,http://localhost:*"),
+            WAZUH_HOST=os.getenv("WAZUH_HOST", ""),
+            WAZUH_USER=os.getenv("WAZUH_USER", ""),
+            WAZUH_PASS=os.getenv("WAZUH_PASS", ""),
+            WAZUH_PORT=int(os.getenv("WAZUH_PORT", "55000")),
+            WAZUH_VERIFY_SSL=os.getenv("WAZUH_VERIFY_SSL", "false").lower() == "true",
+            WAZUH_ALLOW_SELF_SIGNED=os.getenv("WAZUH_ALLOW_SELF_SIGNED", "true").lower() == "true",
+            LOG_LEVEL=os.getenv("LOG_LEVEL", "INFO").upper()
+        )
+
+
+# Global configuration instance
+_config: Optional[ServerConfig] = None
+
+
+def get_config() -> ServerConfig:
+    """Get or create server configuration."""
+    global _config
+    if _config is None:
+        _config = ServerConfig.from_env()
+    return _config

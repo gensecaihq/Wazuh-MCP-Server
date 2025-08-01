@@ -1,0 +1,61 @@
+# Wazuh MCP Server - Development Docker Compose v2 Latest
+# Optimized for development with hot reload and debug features
+# Uses Docker Compose v2 latest format with compose.dev.yml naming convention
+
+name: wazuh-mcp-server-dev
+
+services:
+  wazuh-mcp-server-dev:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: builder
+      args:
+        BUILD_DATE: ${BUILD_DATE}
+        PYTHON_VERSION: ${PYTHON_VERSION:-3.13}
+        VERSION: ${VERSION:-dev}
+    
+    image: wazuh-mcp-server:dev
+    container_name: wazuh-mcp-server-dev
+    hostname: wazuh-mcp-server-dev
+    
+    restart: unless-stopped
+    
+    env_file: 
+      - .env
+    environment:
+      # Development overrides
+      MCP_HOST: 0.0.0.0
+      MCP_PORT: 3000
+      ENVIRONMENT: development
+      LOG_LEVEL: DEBUG
+      PYTHONUNBUFFERED: 1
+      
+    ports:
+      - "${MCP_PORT:-3000}:3000"
+    
+    # Development volume mounts for hot reload
+    volumes:
+      - ./src:/app/src:ro
+      - ./requirements.txt:/app/requirements.txt:ro
+    
+    # Simplified health check for development
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 2
+      start_period: 30s
+      
+    # Development logging
+    logging:
+      driver: json-file
+      options:
+        max-size: "1m"
+        max-file: "1"
+    
+    # Development labels
+    labels:
+      - "com.docker.compose.service=wazuh-mcp-server-dev"
+      - "org.opencontainers.image.title=Wazuh MCP Server (Development)"
+      - "development.hot-reload=enabled"

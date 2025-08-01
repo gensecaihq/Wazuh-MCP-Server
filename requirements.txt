@@ -1,7 +1,33 @@
-# Core dependencies for Wazuh MCP Server
+# Wazuh MCP SSE Server v3.0.0 - Production Grade
+# MCP-compliant remote server with comprehensive monitoring
+
+# Core MCP framework
 fastmcp>=2.10.6
+
+# Web framework for SSE endpoints
 fastapi>=0.115.0
+uvicorn[standard]>=0.32.0
+
+# HTTP client for Wazuh API with connection pooling
 httpx>=0.28.0
+
+# Data validation
 pydantic>=2.10.0
+
+# Environment configuration
 python-dotenv>=1.0.0
-uvicorn>=0.32.0
+
+# Authentication and security
+python-jose[cryptography]>=3.3.0
+passlib[bcrypt]>=1.7.4
+
+# Monitoring and metrics
+prometheus-client>=0.20.0
+psutil>=5.9.0
+
+# Performance and reliability
+tenacity>=8.2.0  # Retry logic
+aiofiles>=23.0.0  # Async file operations
+
+# Security and encryption
+cryptography>=41.0.0  # Encryption for secrets
