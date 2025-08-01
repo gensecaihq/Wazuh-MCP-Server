@@ -1,21 +1,39 @@
-# Wazuh MCP Server
+# Wazuh MCP Remote Server
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Docker](https://img.shields.io/badge/Docker-Supported-blue.svg)](https://hub.docker.com/)
 [![Python 3.13+](https://img.shields.io/badge/Python-3.13+-blue.svg)](https://www.python.org/downloads/)
 [![MCP Compliant](https://img.shields.io/badge/MCP-Compliant-green.svg)](https://modelcontextprotocol.io/)
+[![Branch: mcp-remote](https://img.shields.io/badge/Branch-mcp--remote-success.svg)](https://github.com/your-org/Wazuh-MCP-Server/tree/mcp-remote)
 
 A production-ready, MCP-compliant remote server that provides seamless integration between AI assistants and Wazuh SIEM platform through the Model Context Protocol (MCP) with Server-Sent Events (SSE) transport.
+
+> **Branch**: `mcp-remote` - Production-ready remote MCP server implementation
 
 ## 🌟 Features
 
 ### Core Capabilities
 - **🔗 MCP-Compliant Remote Server**: Full compliance with MCP 2025-03-26 specification
-- **⚡ SSE Transport**: Real-time streaming with Server-Sent Events
+- **⚡ Official SSE Endpoint**: Standard `/sse` endpoint following Anthropic's requirements
+- **🔐 Bearer Token Authentication**: JWT-based authentication for secure remote access
 - **🛡️ Production Security**: Rate limiting, input validation, CORS protection
 - **📊 Comprehensive Monitoring**: Prometheus metrics, health checks, logging
 - **🐳 Docker Native**: Multi-platform container support (AMD64/ARM64)
 - **🔄 High Availability**: Circuit breakers, retry logic, graceful shutdown
+
+### Remote MCP Server Standards Compliance
+
+This implementation follows the **official Anthropic standards** for remote MCP servers:
+
+✅ **URL Format**: `https://<server_address>/sse` (mandatory `/sse` endpoint)  
+✅ **Transport**: Server-Sent Events (SSE) protocol  
+✅ **Authentication**: Bearer token authentication required  
+✅ **Security**: HTTPS required for production deployments  
+✅ **Origin Validation**: Proper CORS handling with origin validation  
+
+**Reference**: [Anthropic's MCP Server Guidelines](https://github.blog/ai-and-ml/generative-ai/how-to-build-secure-and-scalable-remote-mcp-servers/)
+
+📋 **[View Full Compliance Verification →](MCP_COMPLIANCE_VERIFICATION.md)**
 
 ### Wazuh Integration
 - **🔍 Advanced Security Monitoring**: Real-time alert analysis and threat detection
@@ -77,6 +95,7 @@ Comprehensive toolkit for security operations including:
 ```bash
 git clone <your-repository-url>
 cd Wazuh-MCP-Server
+git checkout mcp-remote
 ```
 
 ### 2. Configure Environment
@@ -293,10 +312,14 @@ docker stats wazuh-mcp-server --format "table {{.Name}}\t{{.CPUPerc}}\t{{.MemUsa
 
 | Endpoint | Method | Description |
 |----------|--------|-------------|
-| `/` | GET/POST | MCP protocol endpoint (SSE/JSON-RPC) |
+| `/sse` | GET | **Official MCP SSE endpoint** (required for Claude Desktop) |
+| `/` | POST | JSON-RPC 2.0 endpoint (alternative API access) |
+| `/auth/token` | POST | Authentication token generation |
 | `/health` | GET | Health check and status |
 | `/metrics` | GET | Prometheus metrics |
 | `/docs` | GET | OpenAPI documentation |
+
+> **Important**: Claude Desktop **must** use the `/sse` endpoint with Bearer authentication
 
 ### Authentication
 ```bash
@@ -312,34 +335,110 @@ curl -H "Authorization: Bearer <token>" http://localhost:3000/
 ## 🤝 Integration
 
 ### Claude Desktop Integration
-Add to your Claude Desktop configuration:
+
+**For Remote MCP Server (Production Deployment):**
 ```json
 {
   "mcpServers": {
-    "wazuh": {
-      "command": "npx",
-      "args": [
-        "@modelcontextprotocol/server-fetch",
-        "http://localhost:3000"
-      ],
-      "env": {
-        "MCP_API_KEY": "your-api-key"
+    "wazuh-remote": {
+      "url": "https://your-server-domain.com/sse",
+      "headers": {
+        "Authorization": "Bearer your-jwt-token-here"
       }
     }
   }
 }
 ```
 
+**For Local Development:**
+```json
+{
+  "mcpServers": {
+    "wazuh-remote": {
+      "url": "http://localhost:3000/sse",
+      "headers": {
+        "Authorization": "Bearer your-jwt-token-here"
+      }
+    }
+  }
+}
+```
+
+> **Important**: 
+> - Remote MCP servers **must** use the `/sse` endpoint as per Anthropic standards
+> - Authentication is **required** using Bearer tokens
+> - Get your JWT token from: `POST http://localhost:3000/auth/token`
+
+### Getting Authentication Token
+
+```bash
+# Get your JWT token
+curl -X POST http://localhost:3000/auth/token \
+  -H "Content-Type: application/json" \
+  -d '{"api_key": "your-api-key"}'
+
+# Response will include the bearer token
+{
+  "access_token": "eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9...",
+  "token_type": "bearer",
+  "expires_in": 86400
+}
+```
+
 ### Programmatic Access
+
+**Using the official /sse endpoint:**
+```python
+import httpx
+import asyncio
+
+async def connect_to_mcp_sse():
+    """Connect to MCP server using SSE endpoint."""
+    async with httpx.AsyncClient() as client:
+        # Get authentication token first
+        auth_response = await client.post(
+            "http://localhost:3000/auth/token",
+            json={"api_key": "your-api-key"}
+        )
+        token = auth_response.json()["access_token"]
+        
+        # Connect to SSE endpoint
+        async with client.stream(
+            "GET",
+            "http://localhost:3000/sse",
+            headers={
+                "Authorization": f"Bearer {token}",
+                "Accept": "text/event-stream",
+                "Origin": "http://localhost"
+            }
+        ) as response:
+            async for chunk in response.aiter_text():
+                print(f"Received: {chunk}")
+
+# Run the SSE client
+asyncio.run(connect_to_mcp_sse())
+```
+
+**Using JSON-RPC endpoint (alternative):**
 ```python
 import httpx
 
 async def query_wazuh_mcp():
     async with httpx.AsyncClient() as client:
-        # Initialize MCP session
+        # Get authentication token
+        auth_response = await client.post(
+            "http://localhost:3000/auth/token",
+            json={"api_key": "your-api-key"}
+        )
+        token = auth_response.json()["access_token"]
+        
+        # Make JSON-RPC request
         response = await client.post(
             "http://localhost:3000/",
-            headers={"Authorization": "Bearer <token>"},
+            headers={
+                "Authorization": f"Bearer {token}",
+                "Origin": "http://localhost"
+            },
             json={
                 "jsonrpc": "2.0",
                 "id": "1",
@@ -398,3 +497,18 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 ---
 
 **Built for the security community with production-ready MCP compliance.**
+
+---
+
+## 🌐 Branch Information
+
+This is the **`mcp-remote`** branch - the production-ready remote MCP server implementation with:
+- ✅ Full MCP protocol compliance (2025-03-26 specification)
+- ✅ 29 specialized security tools
+- ✅ Production-grade security hardening
+- ✅ Enterprise deployment readiness
+- ✅ Comprehensive monitoring and observability
+
+For other implementations, see:
+- **`main`** branch: FastMCP STDIO implementation
+- **`mcp-remote`** branch: Remote MCP server (current)

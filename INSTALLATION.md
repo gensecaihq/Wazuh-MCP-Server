@@ -1,6 +1,17 @@
-# Wazuh MCP Server - Complete Installation Guide
+# Wazuh MCP Remote Server - Complete Installation Guide
 
-A comprehensive, step-by-step guide for deploying the Wazuh MCP Server with complete OS-agnostic Docker support.
+A comprehensive, step-by-step guide for deploying the Wazuh MCP Remote Server with complete OS-agnostic Docker support.
+
+> **Branch**: `mcp-remote` - Production-ready remote MCP server implementation
+
+## 🌐 Branch Information
+
+This installation guide is for the **`mcp-remote`** branch, which provides:
+- ✅ Full MCP protocol compliance (2025-03-26 specification)
+- ✅ Remote server with SSE transport
+- ✅ 29 specialized security tools
+- ✅ Production-grade security hardening
+- ✅ Enterprise deployment readiness
 
 ## 📋 Table of Contents
 
@@ -56,6 +67,9 @@ A comprehensive, step-by-step guide for deploying the Wazuh MCP Server with comp
 # Clone the repository
 git clone https://github.com/gensecaihq/Wazuh-MCP-Server.git
 cd Wazuh-MCP-Server
+
+# Switch to mcp-remote branch
+git checkout mcp-remote
 
 # Make installer executable
 chmod +x install.sh
@@ -403,14 +417,48 @@ open ~/Library/Application\ Support/Claude/claude_desktop_config.json
 ```json
 {
   "mcpServers": {
-    "wazuh-mcp-server": {
-      "command": "npx",
-      "args": [
-        "@modelcontextprotocol/server-fetch",
-        "http://localhost:3000"
-      ],
-      "env": {
-        "MCP_API_KEY": "your-api-key-from-api_key-file"
+    "wazuh-remote": {
+      "url": "http://localhost:3000/sse",
+      "headers": {
+        "Authorization": "Bearer your-jwt-token-here"
+      }
+    }
+  }
+}
+```
+
+> **Important**: 
+> - Remote MCP servers **must** use the `/sse` endpoint as per Anthropic standards
+> - The URL **must** end with `/sse` for proper SSE transport
+> - Authentication is **required** using Bearer tokens
+> - Get your JWT token from: `POST http://localhost:3000/auth/token`
+
+### Getting Your Authentication Token
+
+Before configuring Claude Desktop, get your authentication token:
+
+```bash
+# Get your JWT token
+curl -X POST http://localhost:3000/auth/token \
+  -H "Content-Type: application/json" \
+  -d '{"api_key": "your-api-key-from-server-logs"}'
+
+# Response will include the bearer token
+{
+  "access_token": "eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9...",
+  "token_type": "bearer",
+  "expires_in": 86400
+}
+```
+
+**For Production Deployment:**
+```json
+{
+  "mcpServers": {
+    "wazuh-remote": {
+      "url": "https://your-server-domain.com/sse",
+      "headers": {
+        "Authorization": "Bearer your-jwt-token-here"
       }
     }
   }

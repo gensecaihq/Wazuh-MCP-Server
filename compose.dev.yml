@@ -1,11 +1,12 @@
-# Wazuh MCP Server - Development Docker Compose v2 Latest
+# Wazuh MCP Remote Server - Development Docker Compose v2 Latest
+# Branch: mcp-remote - Development environment for remote MCP server
 # Optimized for development with hot reload and debug features
 # Uses Docker Compose v2 latest format with compose.dev.yml naming convention
 
-name: wazuh-mcp-server-dev
+name: wazuh-mcp-remote-server-dev
 
 services:
-  wazuh-mcp-server-dev:
+  wazuh-mcp-remote-server-dev:
     build:
       context: .
       dockerfile: Dockerfile
@@ -15,9 +16,9 @@ services:
         PYTHON_VERSION: ${PYTHON_VERSION:-3.13}
         VERSION: ${VERSION:-dev}
     
-    image: wazuh-mcp-server:dev
-    container_name: wazuh-mcp-server-dev
-    hostname: wazuh-mcp-server-dev
+    image: wazuh-mcp-remote-server:dev
+    container_name: wazuh-mcp-remote-server-dev
+    hostname: wazuh-mcp-remote-server-dev
     
     restart: unless-stopped
     
@@ -56,6 +57,7 @@ services:
     
     # Development labels
     labels:
-      - "com.docker.compose.service=wazuh-mcp-server-dev"
-      - "org.opencontainers.image.title=Wazuh MCP Server (Development)"
+      - "com.docker.compose.service=wazuh-mcp-remote-server-dev"
+      - "org.opencontainers.image.title=Wazuh MCP Remote Server (Development)"
       - "development.hot-reload=enabled"
+      - "branch=mcp-remote"

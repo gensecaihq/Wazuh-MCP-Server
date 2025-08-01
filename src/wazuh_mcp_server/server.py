@@ -1047,6 +1047,96 @@ async def mcp_endpoint(
     finally:
         ACTIVE_CONNECTIONS.dec()
 
+# Official MCP Remote Server SSE endpoint - as per Anthropic standards
+@app.get("/sse")
+async def mcp_sse_endpoint(
+    request: Request,
+    authorization: str = Header(None),
+    origin: Optional[str] = Header(None),
+    mcp_session_id: Optional[str] = Header(None, alias="Mcp-Session-Id"),
+    last_event_id: Optional[str] = Header(None, alias="Last-Event-ID")
+):
+    """
+    Official MCP SSE endpoint following Anthropic standards.
+    URL format: https://<server_address>/sse
+    This is the standard endpoint that Claude Desktop connects to.
+    """
+    # Authentication required for remote MCP servers
+    if not authorization:
+        raise HTTPException(
+            status_code=401, 
+            detail="Authorization header required for remote MCP server",
+            headers={"WWW-Authenticate": "Bearer"}
+        )
+    
+    try:
+        # Verify bearer token
+        from wazuh_mcp_server.auth import verify_bearer_token
+        token_obj = await verify_bearer_token(authorization)
+    except ValueError as e:
+        raise HTTPException(
+            status_code=401, 
+            detail=str(e),
+            headers={"WWW-Authenticate": "Bearer"}
+        )
+    
+    # Origin validation for security
+    if not origin:
+        raise HTTPException(status_code=403, detail="Origin header required")
+    
+    # Validate origin against allowed list
+    allowed_origins_list = config.ALLOWED_ORIGINS.split(",") if config.ALLOWED_ORIGINS else []
+    if allowed_origins_list and origin not in allowed_origins_list:
+        # Check for wildcard patterns
+        origin_allowed = False
+        for allowed in allowed_origins_list:
+            if allowed == "*" or allowed == origin:
+                origin_allowed = True
+                break
+            elif allowed.startswith("*") and origin.endswith(allowed[1:]):
+                origin_allowed = True
+                break
+            elif "localhost" in allowed and "localhost" in origin:
+                origin_allowed = True
+                break
+        
+        if not origin_allowed:
+            raise HTTPException(status_code=403, detail="Origin not allowed")
+    
+    # Rate limiting
+    client_ip = request.client.host if request.client else "unknown"
+    if not rate_limiter.allow_request(client_ip):
+        raise HTTPException(status_code=429, detail="Rate limit exceeded")
+    
+    # Track metrics
+    REQUEST_COUNT.labels(method="GET", endpoint="/sse", status_code=200).inc()
+    ACTIVE_CONNECTIONS.inc()
+    
+    try:
+        # Get or create session
+        session = get_or_create_session(mcp_session_id, origin)
+        session.authenticated = True  # Mark as authenticated via bearer token
+        
+        # Return SSE stream
+        response = StreamingResponse(
+            generate_sse_events(session),
+            media_type="text/event-stream",
+            headers={
+                "Cache-Control": "no-cache",
+                "Connection": "keep-alive",
+                "Mcp-Session-Id": session.session_id,
+                "Access-Control-Expose-Headers": "Mcp-Session-Id"
+            }
+        )
+        return response
+        
+    except Exception as e:
+        logger.error(f"SSE endpoint error: {e}")
+        raise HTTPException(status_code=500, detail="SSE stream error")
+    
+    finally:
+        ACTIVE_CONNECTIONS.dec()
+
 @app.get("/health")
 async def health_check():
     """Health check endpoint with detailed status."""

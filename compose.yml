@@ -1,11 +1,12 @@
-# Wazuh MCP Server - Docker Compose v2 Latest
+# Wazuh MCP Remote Server - Docker Compose v2 Latest
 # MCP-compliant remote server with production-grade configuration
+# Branch: mcp-remote - Production-ready remote MCP server
 # Uses Docker Compose v2 latest format with compose.yml naming convention
 
-name: wazuh-mcp-server
+name: wazuh-mcp-remote-server
 
 services:
-  wazuh-mcp-server:
+  wazuh-mcp-remote-server:
     build:
       context: .
       dockerfile: Dockerfile
@@ -18,9 +19,9 @@ services:
         - linux/arm64/v8
       target: production
     
-    image: wazuh-mcp-server:${VERSION:-4.0.0}
-    container_name: wazuh-mcp-server
-    hostname: wazuh-mcp-server
+    image: wazuh-mcp-remote-server:${VERSION:-4.0.0}
+    container_name: wazuh-mcp-remote-server
+    hostname: wazuh-mcp-remote-server
     
     restart: unless-stopped
     init: true
@@ -74,31 +75,32 @@ services:
       options:
         max-size: "10m"
         max-file: "3"
-        labels: "service=wazuh-mcp-server"
+        labels: "service=wazuh-mcp-remote-server"
     
     # Service labels
     labels:
-      - "com.docker.compose.service=wazuh-mcp-server"
-      - "org.opencontainers.image.title=Wazuh MCP Server"
-      - "org.opencontainers.image.description=MCP-compliant remote server for Wazuh SIEM"
+      - "com.docker.compose.service=wazuh-mcp-remote-server"
+      - "org.opencontainers.image.title=Wazuh MCP Remote Server"
+      - "org.opencontainers.image.description=MCP-compliant remote server for Wazuh SIEM (mcp-remote branch)"
       - "monitoring.prometheus.scrape=true"
       - "monitoring.prometheus.port=3000"
       - "monitoring.prometheus.path=/metrics"
+      - "branch=mcp-remote"
 
 # Network configuration
 networks:
   default:
-    name: wazuh-mcp-network
+    name: wazuh-mcp-remote-network
     driver: bridge
     ipam:
       driver: default
       config:
         - subnet: 172.20.0.0/16
     driver_opts:
-      com.docker.network.bridge.name: br-wazuh-mcp
+      com.docker.network.bridge.name: br-wazuh-mcp-remote
 
 # Persistent volumes (if needed)
 volumes:
-  wazuh-mcp-data:
-    name: wazuh-mcp-data
+  wazuh-mcp-remote-data:
+    name: wazuh-mcp-remote-data
     driver: local

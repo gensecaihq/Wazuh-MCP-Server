@@ -139,17 +139,17 @@ HEALTHCHECK --interval=15s --timeout=10s --start-period=45s --retries=5 \
 EXPOSE 3000
 
 # OCI-compliant metadata labels (latest spec)
-LABEL org.opencontainers.image.title="Wazuh MCP Server" \
-      org.opencontainers.image.description="MCP-compliant remote server for Wazuh SIEM integration with SSE transport" \
+LABEL org.opencontainers.image.title="Wazuh MCP Remote Server" \
+      org.opencontainers.image.description="MCP-compliant remote server for Wazuh SIEM integration with SSE transport (mcp-remote branch)" \
       org.opencontainers.image.version="${VERSION}" \
       org.opencontainers.image.created="${BUILD_DATE}" \
-      org.opencontainers.image.source="https://github.com/gensecaihq/Wazuh-MCP-Server" \
-      org.opencontainers.image.url="https://github.com/gensecaihq/Wazuh-MCP-Server" \
-      org.opencontainers.image.documentation="https://github.com/gensecaihq/Wazuh-MCP-Server/blob/main/README.md" \
+      org.opencontainers.image.source="https://github.com/gensecaihq/Wazuh-MCP-Server/tree/mcp-remote" \
+      org.opencontainers.image.url="https://github.com/gensecaihq/Wazuh-MCP-Server/tree/mcp-remote" \
+      org.opencontainers.image.documentation="https://github.com/gensecaihq/Wazuh-MCP-Server/blob/mcp-remote/README.md" \
       org.opencontainers.image.licenses="MIT" \
       org.opencontainers.image.vendor="GenSec AI" \
       org.opencontainers.image.authors="GenSec AI <info@gensecai.com>" \
-      org.opencontainers.image.ref.name="wazuh-mcp-server" \
+      org.opencontainers.image.ref.name="wazuh-mcp-remote-server" \
       org.opencontainers.image.base.name="python:3.13-alpine"
 
 # Use tini for proper signal handling

@@ -1,6 +1,7 @@
 #!/bin/bash
-# Wazuh MCP Server - Intelligent Installer & Configurator
+# Wazuh MCP Remote Server - Intelligent Installer & Configurator
 # OS-agnostic automated setup for production deployment
+# Branch: mcp-remote - Production-ready remote MCP server
 # Supports: Linux (Ubuntu, CentOS, RHEL, Debian, Alpine), macOS, Windows (WSL)
 
 set -euo pipefail

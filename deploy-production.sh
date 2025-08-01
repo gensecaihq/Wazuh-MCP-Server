@@ -1,7 +1,8 @@
 #!/bin/bash
-# Production deployment script for Wazuh MCP Server v4.0
+# Production deployment script for Wazuh MCP Remote Server v4.0
 # MCP-compliant remote server with Docker Compose v3.9
 # OS-agnostic deployment with security hardening and monitoring
+# Branch: mcp-remote
 
 set -euo pipefail
 
@@ -15,8 +16,8 @@ NC='\033[0m'
 
 print_header() {
     echo -e "${CYAN}================================================================${NC}"
-    echo -e "${CYAN}   WAZUH MCP SERVER - PRODUCTION DEPLOYMENT${NC}"
-    echo -e "${CYAN}   MCP-Compliant Remote Server${NC}"
+    echo -e "${CYAN}   WAZUH MCP REMOTE SERVER - PRODUCTION DEPLOYMENT${NC}"
+    echo -e "${CYAN}   Branch: mcp-remote | MCP-Compliant Remote Server${NC}"
     echo -e "${CYAN}================================================================${NC}"
     echo
 }
