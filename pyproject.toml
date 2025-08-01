@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "wazuh-mcp-server"
-version = "2.0.0"
+version = "3.0.0"
 description = "Production-grade FastMCP server for Wazuh SIEM integration"
 readme = "README.md"
 license = {text = "MIT"}
