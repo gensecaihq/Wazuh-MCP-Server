@@ -116,3 +116,6 @@ test_env/
 *_STATUS.md
 CURRENT_STATUS.md
 
+# Sensitive documentation (maintainer-only content)
+MAINTAINER_MANUAL.md
+
