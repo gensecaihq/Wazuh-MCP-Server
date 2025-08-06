@@ -11,7 +11,7 @@
 
 A **production-ready, enterprise-grade** MCP-compliant remote server that provides seamless integration between Claude Desktop and Wazuh SIEM platform. Fully compliant with **Anthropic's official standards** for remote MCP servers.
 
-> **🖥️ STDIO Edition**: Need direct Claude Desktop integration? Check out [**v2.1.0 STDIO Edition**](https://github.com/gensecaihq/Wazuh-MCP-Server/tree/main) with pip installation and local STDIO transport.
+> **🖥️ STDIO Edition**: Need direct Claude Desktop integration? Check out [**v2.1.0 STDIO Edition**](https://github.com/gensecaihq/Wazuh-MCP-Server/tree/main) with source installation and local STDIO transport.
 
 > **Branch**: `mcp-remote` - Production-ready remote MCP server with official `/sse` endpoint
 > 
@@ -619,7 +619,7 @@ This implementation is **immediately deployable** in production environments and
 For direct Claude Desktop integration without network setup, check out our **STDIO Edition**:
 
 - **🖥️ Direct Integration**: STDIO transport for seamless Claude Desktop connection
-- **📦 Simple Installation**: pip install, no Docker required
+- **📦 Simple Installation**: Source install, no Docker required
 - **🔒 Local Security**: No network exposure, secure local communication
 - **⚡ Lightweight**: Minimal resource usage and fast startup
 - **📱 Cross-Platform**: Windows, macOS, and Linux support
@@ -632,7 +632,7 @@ For direct Claude Desktop integration without network setup, check out our **STD
 | Feature | v3.0.0 (Remote) | v2.1.0 (STDIO) |
 |---------|-----------------|-----------------|
 | **Transport** | HTTP/SSE (remote) | STDIO (local) |
-| **Deployment** | Docker containers | pip install |
+| **Deployment** | Docker containers | Source install |
 | **Authentication** | JWT Bearer tokens | Local integration |
 | **Best For** | Enterprise/Cloud | Direct Claude Desktop |
 | **Network Setup** | Required | None |
