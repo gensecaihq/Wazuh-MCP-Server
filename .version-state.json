@@ -1,0 +1,16 @@
+{
+  "last_update": "Wed Aug  6 17:15:43 IST 2025",
+  "current_branch": "main",
+  "branches": {
+    "main": {
+      "version": "2.1.0",
+      "transport": "stdio",
+      "pyproject_path": "pyproject.toml"
+    },
+    "mcp-remote": {
+      "version": "3.0.0",
+      "transport": "remote",
+      "pyproject_path": "pyproject.toml"
+    }
+  }
+}

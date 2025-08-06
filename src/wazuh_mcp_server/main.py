@@ -192,10 +192,13 @@ def run_connection_check() -> None:
     
     try:
         # Import and run connection validator
-        from wazuh_mcp_server.scripts.connection_validator import validate_connection
+        from wazuh_mcp_server.scripts.connection_validator import ConnectionValidator
+        from wazuh_mcp_server.config import WazuhConfig
         
         async def check():
-            result = await validate_connection()
+            config = WazuhConfig()
+            validator = ConnectionValidator(config)
+            result = await validator.validate_all_connections()
             if result.get('status') == 'success':
                 print("✅ Configuration and connectivity check passed!")
                 return True
