@@ -1,4 +1,4 @@
-# Wazuh MCP Server [ UPDATED ] To be Released as v2.1.0
+# Wazuh MCP Server v2.1.0
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
