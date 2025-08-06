@@ -59,3 +59,6 @@ secrets/
 # OS
 Thumbs.db
 .DS_Store
+
+# Sensitive documentation (maintainer-only content)
+MAINTAINER_MANUAL.md
