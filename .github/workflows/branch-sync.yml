@@ -1,0 +1,99 @@
+name: Branch Synchronization
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+    inputs:
+      sync_direction:
+        description: 'Sync direction'
+        required: true
+        default: 'main-to-remote'
+        type: choice
+        options:
+          - main-to-remote
+          - remote-to-main
+          - bidirectional
+
+jobs:
+  sync-branches:
+    name: Sync Branches
+    runs-on: ubuntu-latest
+    if: github.repository_owner == 'gensecaihq'
+    
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+        token: ${{ secrets.GITHUB_TOKEN }}
+    
+    - name: Set up Git
+      run: |
+        git config --global user.name 'GitHub Actions'
+        git config --global user.email 'actions@github.com'
+    
+    - name: Fetch all branches
+      run: |
+        git fetch origin main:main
+        git fetch origin mcp-remote:mcp-remote
+    
+    - name: Check for version management tools
+      run: |
+        if [ -f tools/branch-sync.py ]; then
+          echo "Version management tools found"
+          python3 tools/branch-sync.py status
+        else
+          echo "Version management tools not found"
+        fi
+    
+    - name: Create sync report
+      run: |
+        echo "# Branch Sync Report" >> $GITHUB_STEP_SUMMARY
+        echo "## Current Status" >> $GITHUB_STEP_SUMMARY
+        echo "- Main branch: $(git rev-parse --short main)" >> $GITHUB_STEP_SUMMARY
+        echo "- MCP-Remote branch: $(git rev-parse --short mcp-remote)" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        
+        echo "## Differences" >> $GITHUB_STEP_SUMMARY
+        echo "### Main → MCP-Remote" >> $GITHUB_STEP_SUMMARY
+        echo '```' >> $GITHUB_STEP_SUMMARY
+        git log main..mcp-remote --oneline | head -10 >> $GITHUB_STEP_SUMMARY || echo "No differences" >> $GITHUB_STEP_SUMMARY
+        echo '```' >> $GITHUB_STEP_SUMMARY
+        
+        echo "### MCP-Remote → Main" >> $GITHUB_STEP_SUMMARY
+        echo '```' >> $GITHUB_STEP_SUMMARY
+        git log mcp-remote..main --oneline | head -10 >> $GITHUB_STEP_SUMMARY || echo "No differences" >> $GITHUB_STEP_SUMMARY
+        echo '```' >> $GITHUB_STEP_SUMMARY
+    
+    - name: Sync based on input
+      if: github.event_name == 'workflow_dispatch'
+      run: |
+        case "${{ github.event.inputs.sync_direction }}" in
+          main-to-remote)
+            echo "Syncing main → mcp-remote (shared components only)"
+            # Cherry-pick specific commits or merge shared components
+            ;;
+          remote-to-main)
+            echo "Syncing mcp-remote → main (STDIO-compatible changes only)"
+            # Cherry-pick STDIO-compatible changes
+            ;;
+          bidirectional)
+            echo "Bidirectional sync (careful merge)"
+            # Merge compatible changes both ways
+            ;;
+        esac
+    
+    - name: Version check
+      run: |
+        echo "## Version Information" >> $GITHUB_STEP_SUMMARY
+        echo "### Main Branch" >> $GITHUB_STEP_SUMMARY
+        git checkout main
+        if [ -f pyproject.toml ]; then
+          echo "Version: $(grep '^version' pyproject.toml | cut -d'"' -f2)" >> $GITHUB_STEP_SUMMARY
+        fi
+        
+        echo "### MCP-Remote Branch" >> $GITHUB_STEP_SUMMARY
+        git checkout mcp-remote
+        if [ -f pyproject.toml ]; then
+          echo "Version: $(grep '^version' pyproject.toml | cut -d'"' -f2)" >> $GITHUB_STEP_SUMMARY
+        fi
