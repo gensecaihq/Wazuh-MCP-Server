@@ -20,23 +20,7 @@ A **production-ready FastMCP server** that connects Wazuh SIEM with Claude Deskt
 
 ## 🚀 Quick Start
 
-### Method 1: Package Installation (Recommended)
-
-```bash
-# Install the package
-pip install wazuh-mcp-server
-
-# Create configuration file
-cp .env.example .env
-# Edit .env with your Wazuh server details
-
-# Validate configuration
-wazuh-mcp-server --check
-
-# The server is now ready for Claude Desktop integration
-```
-
-### Method 2: Development Installation
+### Installation
 
 ```bash
 # Clone the repository
@@ -299,7 +283,7 @@ For enterprise deployments requiring remote access, check out our **Remote Serve
 | Feature | v2.1.0 (STDIO) | v3.0.0 (Remote) |
 |---------|----------------|-----------------|
 | **Transport** | STDIO (local) | HTTP/SSE (remote) |
-| **Deployment** | pip install | Docker containers |
+| **Deployment** | Source install | Docker containers |
 | **Authentication** | Local integration | JWT Bearer tokens |
 | **Best For** | Direct Claude Desktop | Enterprise/Cloud |
 
