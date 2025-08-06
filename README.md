@@ -7,6 +7,8 @@
 
 A **production-ready FastMCP server** that connects Wazuh SIEM with Claude Desktop for AI-powered security operations using **STDIO transport only**.
 
+> **🌐 Remote Server Edition**: Looking for enterprise remote access? Check out [**v3.0.0 Remote Server Edition**](https://github.com/gensecaihq/Wazuh-MCP-Server/tree/mcp-remote) with HTTP/SSE transport, Docker deployment, and JWT authentication.
+
 ## ✨ Key Features
 
 - 🔍 **29 Security Tools**: Complete FastMCP tool suite for Wazuh integration
@@ -276,6 +278,30 @@ This software has been designed for **enterprise production use** with:
 - ✅ Cross-platform compatibility
 - ✅ Extensive documentation and support
 - ✅ Full test coverage and validation
+
+## 🚀 **Other Editions**
+
+### **Wazuh MCP Remote Server v3.0.0**
+
+For enterprise deployments requiring remote access, check out our **Remote Server Edition**:
+
+- **🌐 Remote Access**: HTTP/SSE transport for cloud and distributed environments
+- **🔐 JWT Authentication**: Enterprise-grade Bearer token authentication
+- **🐳 Docker Native**: Multi-platform container deployment
+- **📊 Full Monitoring**: Prometheus metrics, health checks, and observability
+- **⚡ High Availability**: Circuit breakers, retry logic, and load balancing ready
+- **🏢 Enterprise Ready**: Perfect for corporate and cloud deployments
+
+**[→ View Remote Server Edition](https://github.com/gensecaihq/Wazuh-MCP-Server/tree/mcp-remote)**
+
+### **Comparison**
+
+| Feature | v2.1.0 (STDIO) | v3.0.0 (Remote) |
+|---------|----------------|-----------------|
+| **Transport** | STDIO (local) | HTTP/SSE (remote) |
+| **Deployment** | pip install | Docker containers |
+| **Authentication** | Local integration | JWT Bearer tokens |
+| **Best For** | Direct Claude Desktop | Enterprise/Cloud |
 
 ---
 
