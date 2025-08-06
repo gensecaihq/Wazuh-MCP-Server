@@ -1,4 +1,5 @@
-# Wazuh MCP Remote Server
+# Wazuh MCP Remote Server with [ SSE Transport ] to be released as v3.x.x  
+
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Docker](https://img.shields.io/badge/Docker-Supported-blue.svg)](https://hub.docker.com/)
