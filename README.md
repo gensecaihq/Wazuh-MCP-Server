@@ -1,4 +1,4 @@
-# Wazuh MCP Remote Server with [ SSE Transport ] to be released as v3.x.x  
+# Wazuh MCP Remote Server v3.0.0  
 
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
