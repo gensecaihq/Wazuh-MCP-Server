@@ -62,12 +62,12 @@ def main():
     
     # Import and run the FastMCP server
     try:
-        from wazuh_mcp_server.server import mcp, startup_server
+        from wazuh_mcp_server.server import mcp, initialize_server
         
         print("🚀 Starting Wazuh MCP Server v2.1.0 with FastMCP (STDIO mode)...", file=sys.stderr)
         
         # Initialize server components first with comprehensive health checks
-        asyncio.run(startup_server())
+        asyncio.run(initialize_server())
         
         print("✅ Server initialization completed - ready for connections", file=sys.stderr)
         

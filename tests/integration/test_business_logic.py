@@ -19,11 +19,11 @@ async def test_fastmcp_server():
     print("🧪 Testing FastMCP Server Components...")
     
     try:
-        from wazuh_mcp_server.server import mcp, startup_server
+        from wazuh_mcp_server.server import mcp, initialize_server
         print("✅ FastMCP server import successful")
         
         # Test server initialization
-        await startup_server()
+        await initialize_server()
         print("✅ Server initialization successful")
         
         # Count tools
