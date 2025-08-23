@@ -1,8 +1,8 @@
 # Wazuh MCP Server v2.1.2 - FastMCP STDIO Only
 # Updated dependencies with latest secure versions (Aug 2025)
 
-# Core FastMCP framework - Compatible with Python 3.10+
-fastmcp>=0.1.0
+# Core FastMCP framework - Optional (requires Python 3.10+)
+# fastmcp>=0.1.0  # Uncomment if using Python 3.10+
 
 # HTTP client for Wazuh API (async) - Updated for Snyk security fixes
 aiohttp>=3.12.14,<4.0.0

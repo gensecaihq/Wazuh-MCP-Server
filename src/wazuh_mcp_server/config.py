@@ -7,7 +7,12 @@ from enum import Enum
 from typing import Optional
 from pathlib import Path
 from .utils.pydantic_compat import BaseModel, Field, validator
-from dotenv import load_dotenv
+try:
+    from dotenv import load_dotenv
+except ImportError:
+    # Fallback if python-dotenv not installed
+    def load_dotenv(*args, **kwargs):
+        pass
 
 # Import cross-platform utilities
 try:

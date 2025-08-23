@@ -30,9 +30,10 @@ classifiers = [
     "Operating System :: OS Independent",
     "Framework :: AsyncIO",
 ]
-requires-python = ">=3.10"
+requires-python = ">=3.9"
 dependencies = [
-    "fastmcp>=0.1.0",
+    # FastMCP is optional - server can run without it
+    # "fastmcp>=0.1.0",  # Requires Python 3.10+
     "aiohttp>=3.12.14,<4.0.0",
     "urllib3>=1.26.0,<3.0.0",
     "pyjwt>=2.8.0",

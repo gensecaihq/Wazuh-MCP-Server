@@ -12,8 +12,23 @@ from typing import Dict, Any, List, Optional
 from datetime import datetime, timedelta
 import json
 
-from fastmcp import FastMCP
-from pydantic import BaseModel, Field
+try:
+    from fastmcp import FastMCP
+except ImportError:
+    # Use stub if FastMCP not available
+    from wazuh_mcp_server.fastmcp_stub import FastMCP
+
+try:
+    from pydantic import BaseModel, Field
+except ImportError:
+    # Basic fallback for Pydantic
+    class BaseModel:
+        def __init__(self, **kwargs):
+            for k, v in kwargs.items():
+                setattr(self, k, v)
+    
+    def Field(default=None, **kwargs):
+        return default
 
 # Import Wazuh components
 from wazuh_mcp_server.config import WazuhConfig

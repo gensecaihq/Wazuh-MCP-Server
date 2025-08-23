@@ -280,27 +280,11 @@ except ImportError as e:
     
     ValidationInfo = None
     
-    # Error message with platform-specific guidance
-    error_msg = f"Pydantic is required but not installed on {PLATFORM_INFO['distro_name'] or PLATFORM_INFO['system']}"
-    
-    if PLATFORM_INFO['is_fedora']:
-        if PLATFORM_INFO['distro_name'] == 'fedora':
-            error_msg += "\nFor Fedora: sudo dnf install python3-pydantic or pip install pydantic"
-        elif PLATFORM_INFO['distro_name'] in ['rhel', 'centos']:
-            error_msg += f"\nFor {PLATFORM_INFO['distro_name'].upper()}: sudo yum install python3-pip && pip install pydantic"
-    elif PLATFORM_INFO['is_debian']:
-        if PLATFORM_INFO['distro_name'] == 'ubuntu':
-            error_msg += "\nFor Ubuntu: sudo apt install python3-pydantic or pip install pydantic"
-        elif PLATFORM_INFO['distro_name'] == 'debian':
-            error_msg += "\nFor Debian: sudo apt install python3-pydantic or pip install pydantic"
-    elif PLATFORM_INFO['is_macos']:
-        error_msg += "\nFor macOS: pip install pydantic or brew install python && pip install pydantic"
-    elif PLATFORM_INFO['is_windows']:
-        error_msg += "\nFor Windows: pip install pydantic"
-    else:
-        error_msg += "\nInstall with: pip install pydantic"
-    
-    raise ImportError(error_msg) from None
+    # Log warning but don't fail - provide fallback
+    logging.warning(
+        f"Pydantic not installed on {PLATFORM_INFO['distro_name'] or PLATFORM_INFO['system']}. "
+        f"Running in compatibility mode. Install pydantic for full features: pip install pydantic"
+    )
 
 # Export unified interface
 __all__ = [
