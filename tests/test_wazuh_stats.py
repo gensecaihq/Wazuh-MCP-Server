@@ -9,18 +9,17 @@ class TestGetWazuhStats:
     """Test cases for get_wazuh_stats tool."""
     
     @pytest.fixture
-    def server(self):
-        """Create a mock server instance."""
-        from src.wazuh_mcp_server.main import WazuhMCPServer
-        with patch('src.wazuh_mcp_server.main.setup_logging'):
-            with patch('src.wazuh_mcp_server.main.WazuhConfig'):
-                server = WazuhMCPServer()
-                server.client_manager = AsyncMock()
-                server.logger = AsyncMock()
-                return server
+    def mock_client_manager(self):
+        """Create a mock client manager for testing."""
+        client_manager = AsyncMock()
+        # Set up the client_manager to have the expected methods
+        client_manager.get_wazuh_stats = AsyncMock()
+        client_manager.get_agents = AsyncMock()
+        client_manager.get_cluster_info = AsyncMock()
+        return client_manager
     
     @pytest.mark.asyncio
-    async def test_get_wazuh_stats_manager(self, server):
+    async def test_get_wazuh_stats_manager(self, mock_client_manager):
         """Test getting Wazuh manager statistics."""
         # Mock manager stats response
         stats_data = {

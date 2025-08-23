@@ -5,8 +5,9 @@ import json
 from datetime import datetime, timedelta
 from unittest.mock import AsyncMock, MagicMock, patch
 
-from wazuh_mcp_server.main import WazuhMCPServer
-from wazuh_mcp_server.utils.validation import validate_weekly_stats_query, ValidationError
+# Updated imports for FastMCP architecture
+from wazuh_mcp_server.server import mcp, initialize_server
+from wazuh_mcp_server.config import WazuhConfig
 
 
 @pytest.fixture

@@ -11,9 +11,9 @@ class TestComplianceCheck:
     @pytest.fixture
     def server(self):
         """Create a mock server instance."""
-        from src.wazuh_mcp_server.main import WazuhMCPServer
-        with patch('src.wazuh_mcp_server.main.setup_logging'):
-            with patch('src.wazuh_mcp_server.main.WazuhConfig'):
+        from wazuh_mcp_server.main import WazuhMCPServer
+        with patch('wazuh_mcp_server.main.setup_logging'):
+            with patch('wazuh_mcp_server.main.WazuhConfig'):
                 server = WazuhMCPServer()
                 server.client_manager = AsyncMock()
                 server.compliance_analyzer = MagicMock()

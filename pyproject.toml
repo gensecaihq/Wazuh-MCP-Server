@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "wazuh-mcp-server"
-version = "2.1.0"
+version = "2.1.2"
 description = "Production-grade Model Context Protocol server for Wazuh security platform using stdio transport"
 readme = "README.md"
 license = {text = "MIT"}
@@ -30,9 +30,9 @@ classifiers = [
     "Operating System :: OS Independent",
     "Framework :: AsyncIO",
 ]
-requires-python = ">=3.9"
+requires-python = ">=3.10"
 dependencies = [
-    "fastmcp>=2.10.6",
+    "fastmcp>=0.1.0",
     "aiohttp>=3.12.14,<4.0.0",
     "urllib3>=1.26.0,<3.0.0",
     "pyjwt>=2.8.0",

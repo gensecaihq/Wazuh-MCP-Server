@@ -3,8 +3,8 @@
 import pytest
 import json
 from unittest.mock import AsyncMock, patch, MagicMock
-from src.wazuh_mcp_server import WazuhMCPServer
-from src.config import WazuhConfig, ConfigurationError
+from wazuh_mcp_server.server import WazuhMCPServer
+from wazuh_mcp_server.config import WazuhConfig, ConfigurationError
 
 
 class TestWazuhMCPServer:
@@ -25,13 +25,13 @@ class TestWazuhMCPServer:
     @pytest.fixture
     def server(self, mock_config_env):
         """Create a WazuhMCPServer instance for testing."""
-        with patch('src.wazuh_mcp_server.setup_logging'):
+        with patch('wazuh_mcp_server.server.setup_logging'):
             server = WazuhMCPServer()
             return server
     
     def test_server_initialization(self, mock_config_env):
         """Test server initialization."""
-        with patch('src.wazuh_mcp_server.setup_logging'):
+        with patch('wazuh_mcp_server.server.setup_logging'):
             server = WazuhMCPServer()
             
             assert server.config is not None

@@ -28,7 +28,7 @@ logger = get_logger(__name__)
 # Initialize FastMCP app
 mcp = FastMCP(
     name="Wazuh MCP Server",
-    version="2.1.0"
+    version="2.1.2"
 )
 
 # Global instances

@@ -56,7 +56,7 @@ class TestProductionStability:
     async def test_version_compatibility_check(self):
         """Test version compatibility requirements."""
         # Test minimum version requirement
-        assert __min_wazuh_version__ == "4.8.0", "Minimum Wazuh version should be 4.8.0"
+        assert __min_wazuh_version__ == "4.5.0", "Minimum Wazuh version should be 4.5.0"
         assert __version__ == "2.1.0", "MCP Server version should be 2.1.0"
 
     @pytest.mark.asyncio

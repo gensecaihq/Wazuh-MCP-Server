@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Wazuh MCP Server v2.1.0 - FastMCP STDIO Executable
+Wazuh MCP Server v2.1.2 - FastMCP STDIO Executable
 ==================================================
 Production-ready FastMCP server for Wazuh SIEM integration.
 Pure STDIO transport for Claude Desktop - no Docker required.
@@ -47,7 +47,7 @@ def main():
     parser.add_argument(
         "--version", 
         action="version", 
-        version="Wazuh MCP Server 2.1.0 (FastMCP STDIO Only)"
+        version="Wazuh MCP Server 2.1.2 (FastMCP STDIO Only)"
     )
     parser.add_argument(
         "--health-check",
@@ -64,7 +64,7 @@ def main():
     try:
         from wazuh_mcp_server.server import mcp, initialize_server
         
-        print("🚀 Starting Wazuh MCP Server v2.1.0 with FastMCP (STDIO mode)...", file=sys.stderr)
+        print("🚀 Starting Wazuh MCP Server v2.1.2 with FastMCP (STDIO mode)...", file=sys.stderr)
         
         # Initialize server components first with comprehensive health checks
         asyncio.run(initialize_server())
