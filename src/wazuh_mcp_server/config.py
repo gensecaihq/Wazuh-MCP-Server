@@ -101,7 +101,9 @@ class ConfigurationError(Exception):
     pass
 
 
-class WazuhConfig(BaseModel):
+from pydantic_settings import BaseSettings
+class WazuhConfig(BaseSettings):
+    
     """Validated Wazuh configuration with security best practices."""
     
     # Required Wazuh Server API settings
