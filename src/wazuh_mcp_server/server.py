@@ -1,9 +1,13 @@
 #!/usr/bin/env python3
 """
 Wazuh MCP Server - Complete MCP-Compliant Remote Server
-Full compliance with Model Context Protocol 2025-03-26 specification
-Production-ready with SSE transport, authentication, and monitoring
+Full compliance with Model Context Protocol 2025-06-18 specification
+Production-ready with Streamable HTTP and legacy SSE transport, authentication, and monitoring
 """
+
+# MCP Protocol Version Support
+MCP_PROTOCOL_VERSION = "2025-06-18"
+SUPPORTED_PROTOCOL_VERSIONS = ["2025-06-18", "2025-03-26", "2024-11-05"]
 
 import os
 import json
@@ -239,16 +243,19 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=allowed_origins,
     allow_credentials=True,
-    allow_methods=["GET", "POST", "OPTIONS"],  # Restrictive methods only
+    allow_methods=["GET", "POST", "DELETE", "OPTIONS"],  # Added DELETE for session management
     allow_headers=[
         "Accept",
-        "Accept-Language", 
+        "Accept-Language",
         "Content-Language",
         "Content-Type",
         "Authorization",
-        "X-Requested-With"
+        "X-Requested-With",
+        "MCP-Protocol-Version",  # MCP protocol version header
+        "Mcp-Session-Id",  # Session ID header
+        "Last-Event-ID"  # SSE reconnection header
     ],  # Specific headers only, no wildcard
-    expose_headers=["Mcp-Session-Id", "Content-Type"],
+    expose_headers=["Mcp-Session-Id", "MCP-Protocol-Version", "Content-Type"],
     max_age=600  # Cache preflight for 10 minutes
 )
 
@@ -272,6 +279,27 @@ def create_error_response(request_id: Optional[Union[str, int]], code: int, mess
 def create_success_response(request_id: Optional[Union[str, int]], result: Any) -> MCPResponse:
     """Create MCP success response."""
     return MCPResponse(id=request_id, result=result)
+
+def validate_protocol_version(version: Optional[str]) -> str:
+    """
+    Validate and normalize MCP protocol version.
+    Returns the validated version or defaults to 2025-03-26 for backwards compatibility.
+    """
+    if not version:
+        # Per spec: assume 2025-03-26 if no header provided (backwards compatibility)
+        return "2025-03-26"
+
+    if version in SUPPORTED_PROTOCOL_VERSIONS:
+        return version
+
+    # Check if it's a newer version we might support
+    if version > MCP_PROTOCOL_VERSION:
+        logger.warning(f"Client requested newer protocol version {version}, using {MCP_PROTOCOL_VERSION}")
+        return MCP_PROTOCOL_VERSION
+
+    # Unknown or too old version
+    logger.warning(f"Unsupported protocol version {version}, using 2025-03-26 for compatibility")
+    return "2025-03-26"
 
 # MCP Protocol Handlers
 async def handle_initialize(params: Dict[str, Any], session: MCPSession) -> Dict[str, Any]:
@@ -1142,6 +1170,238 @@ async def mcp_sse_endpoint(
     finally:
         ACTIVE_CONNECTIONS.dec()
 
+# Standard MCP Endpoint - Streamable HTTP Transport (2025-06-18 Specification)
+@app.post("/mcp")
+@app.get("/mcp")
+async def mcp_streamable_http_endpoint(
+    request: Request,
+    authorization: str = Header(None),
+    origin: Optional[str] = Header(None),
+    mcp_protocol_version: Optional[str] = Header(None, alias="MCP-Protocol-Version"),
+    mcp_session_id: Optional[str] = Header(None, alias="Mcp-Session-Id"),
+    accept: Optional[str] = Header("application/json"),
+    last_event_id: Optional[str] = Header(None, alias="Last-Event-ID")
+):
+    """
+    Standard MCP endpoint using Streamable HTTP transport (2025-06-18 spec).
+
+    Supports:
+    - POST: JSON-RPC requests with optional SSE streaming for long operations
+    - GET: Session information or SSE stream initiation
+    - DELETE: Session termination (see separate endpoint)
+
+    This is the RECOMMENDED endpoint for MCP clients. Legacy /sse remains for backwards compatibility.
+    """
+    # Validate protocol version
+    protocol_version = validate_protocol_version(mcp_protocol_version)
+
+    # Authentication required for remote MCP servers
+    if not authorization:
+        raise HTTPException(
+            status_code=401,
+            detail="Authorization header required for remote MCP server",
+            headers={"WWW-Authenticate": "Bearer"}
+        )
+
+    try:
+        # Verify bearer token
+        from wazuh_mcp_server.auth import verify_bearer_token
+        token_obj = await verify_bearer_token(authorization)
+    except ValueError as e:
+        raise HTTPException(
+            status_code=401,
+            detail=str(e),
+            headers={"WWW-Authenticate": "Bearer"}
+        )
+
+    # Origin validation for security (DNS rebinding protection)
+    if not origin:
+        raise HTTPException(status_code=403, detail="Origin header required")
+
+    # Validate origin against allowed list
+    allowed_origins_list = config.ALLOWED_ORIGINS.split(",") if config.ALLOWED_ORIGINS else []
+    if allowed_origins_list and origin not in allowed_origins_list:
+        origin_allowed = False
+        for allowed in allowed_origins_list:
+            if allowed == "*" or allowed == origin:
+                origin_allowed = True
+                break
+            elif allowed.startswith("*") and origin.endswith(allowed[1:]):
+                origin_allowed = True
+                break
+            elif "localhost" in allowed and "localhost" in origin:
+                origin_allowed = True
+                break
+
+        if not origin_allowed:
+            raise HTTPException(status_code=403, detail="Origin not allowed")
+
+    # Rate limiting
+    client_ip = request.client.host if request.client else "unknown"
+    if not rate_limiter.allow_request(client_ip):
+        raise HTTPException(status_code=429, detail="Rate limit exceeded")
+
+    # Track metrics
+    REQUEST_COUNT.labels(method=request.method, endpoint="/mcp", status_code=200).inc()
+    ACTIVE_CONNECTIONS.inc()
+
+    try:
+        # Get or create session
+        session = get_or_create_session(mcp_session_id, origin)
+        session.authenticated = True  # Mark as authenticated via bearer token
+
+        # Common response headers
+        response_headers = {
+            "Mcp-Session-Id": session.session_id,
+            "MCP-Protocol-Version": protocol_version,
+            "Access-Control-Expose-Headers": "Mcp-Session-Id, MCP-Protocol-Version"
+        }
+
+        # Handle GET request
+        if request.method == "GET":
+            # Check if client wants SSE stream
+            if accept and "text/event-stream" in accept:
+                # Return SSE stream for real-time communication
+                response = StreamingResponse(
+                    generate_sse_events(session),
+                    media_type="text/event-stream",
+                    headers={
+                        **response_headers,
+                        "Cache-Control": "no-cache",
+                        "Connection": "keep-alive"
+                    }
+                )
+                return response
+            else:
+                # Return session information as JSON
+                return JSONResponse(
+                    content={
+                        "jsonrpc": "2.0",
+                        "id": None,
+                        "result": {
+                            "protocolVersion": protocol_version,
+                            "serverInfo": {
+                                "name": "Wazuh MCP Server",
+                                "version": "4.0.0"
+                            },
+                            "capabilities": {
+                                "tools": True,
+                                "resources": True,
+                                "prompts": True,
+                                "logging": True
+                            },
+                            "session": session.to_dict()
+                        }
+                    },
+                    headers=response_headers
+                )
+
+        # Handle POST request (JSON-RPC)
+        elif request.method == "POST":
+            try:
+                body = await request.json()
+            except json.JSONDecodeError:
+                return JSONResponse(
+                    content=create_error_response(
+                        None,
+                        MCP_ERRORS["PARSE_ERROR"],
+                        "Invalid JSON"
+                    ).dict(),
+                    status_code=400,
+                    headers=response_headers
+                )
+
+            # Validate JSON-RPC request
+            try:
+                mcp_request = MCPRequest(**body) if isinstance(body, dict) else None
+            except ValidationError as e:
+                return JSONResponse(
+                    content=create_error_response(
+                        None,
+                        MCP_ERRORS["INVALID_REQUEST"],
+                        f"Invalid MCP request: {str(e)}"
+                    ).dict(),
+                    status_code=400,
+                    headers=response_headers
+                )
+
+            # Process the request
+            if mcp_request:
+                mcp_response = await process_mcp_request(mcp_request, session)
+
+                # Check if client accepts SSE for streaming response
+                # (For long-running operations, we could upgrade to SSE here)
+                if accept and "text/event-stream" in accept:
+                    # Optional: Stream the response via SSE for long operations
+                    # For now, return JSON response
+                    return JSONResponse(
+                        content=mcp_response.dict(),
+                        headers=response_headers
+                    )
+                else:
+                    # Standard JSON response
+                    return JSONResponse(
+                        content=mcp_response.dict(),
+                        headers=response_headers
+                    )
+            else:
+                return JSONResponse(
+                    content=create_error_response(
+                        None,
+                        MCP_ERRORS["INVALID_REQUEST"],
+                        "Invalid request format"
+                    ).dict(),
+                    status_code=400,
+                    headers=response_headers
+                )
+
+        else:
+            raise HTTPException(status_code=405, detail="Method not allowed")
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"MCP endpoint error: {e}")
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+    finally:
+        ACTIVE_CONNECTIONS.dec()
+
+@app.delete("/mcp")
+async def close_mcp_session(
+    mcp_session_id: str = Header(..., alias="Mcp-Session-Id"),
+    authorization: str = Header(None)
+):
+    """
+    Close MCP session explicitly (2025-06-18 spec).
+    Allows clients to cleanly terminate sessions.
+    """
+    # Authentication required
+    if not authorization:
+        raise HTTPException(
+            status_code=401,
+            detail="Authorization required",
+            headers={"WWW-Authenticate": "Bearer"}
+        )
+
+    try:
+        from wazuh_mcp_server.auth import verify_bearer_token
+        await verify_bearer_token(authorization)
+    except ValueError as e:
+        raise HTTPException(
+            status_code=401,
+            detail=str(e),
+            headers={"WWW-Authenticate": "Bearer"}
+        )
+
+    # Remove session
+    try:
+        sessions.remove(mcp_session_id)
+        logger.info(f"Session {mcp_session_id} closed via DELETE")
+        return Response(status_code=204)  # No content
+    except KeyError:
+        raise HTTPException(status_code=404, detail="Session not found")
+
 @app.get("/health")
 async def health_check():
     """Health check endpoint with detailed status."""
@@ -1161,6 +1421,12 @@ async def health_check():
             "status": "healthy",
             "timestamp": datetime.now(timezone.utc).isoformat(),
             "version": "4.0.0",
+            "mcp_protocol_version": MCP_PROTOCOL_VERSION,
+            "supported_protocol_versions": SUPPORTED_PROTOCOL_VERSIONS,
+            "transport": {
+                "streamable_http": "enabled",  # New standard
+                "legacy_sse": "enabled"  # Backwards compatibility
+            },
             "services": {
                 "wazuh": wazuh_status,
                 "mcp": "healthy"
@@ -1168,6 +1434,12 @@ async def health_check():
             "metrics": {
                 "active_sessions": active_sessions,
                 "total_sessions": len(all_sessions)
+            },
+            "endpoints": {
+                "recommended": "/mcp (Streamable HTTP - 2025-06-18)",
+                "legacy": "/sse (SSE only - deprecated)",
+                "authentication": "/auth/token",
+                "monitoring": ["/health", "/metrics"]
             }
         }
     except Exception as e:

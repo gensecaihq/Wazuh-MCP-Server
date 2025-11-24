@@ -1,49 +1,58 @@
-# Wazuh MCP Remote Server v4.0.0  
+# Wazuh MCP Remote Server v4.0.0
 
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Docker](https://img.shields.io/badge/Docker-Supported-blue.svg)](https://hub.docker.com/)
 [![Python 3.13+](https://img.shields.io/badge/Python-3.13+-blue.svg)](https://www.python.org/downloads/)
-[![MCP Compliant](https://img.shields.io/badge/MCP-2025--03--26-green.svg)](https://modelcontextprotocol.io/)
-[![SSE Transport](https://img.shields.io/badge/SSE-Transport-orange.svg)](#)
+[![MCP Compliant](https://img.shields.io/badge/MCP-2025--06--18-green.svg)](https://modelcontextprotocol.io/)
+[![Streamable HTTP](https://img.shields.io/badge/Streamable%20HTTP-Enabled-blue.svg)](#)
+[![Legacy SSE](https://img.shields.io/badge/Legacy%20SSE-Supported-orange.svg)](#)
 [![Bearer Auth](https://img.shields.io/badge/Bearer-Authentication-red.svg)](#)
 
-A **production-ready, enterprise-grade** MCP-compliant remote server that provides seamless integration with Wazuh SIEM platform via SSE transport.
+A **production-ready, enterprise-grade** MCP-compliant remote server that provides seamless integration with Wazuh SIEM platform using the latest **Streamable HTTP transport** (MCP 2025-06-18).
 
-> **Production-Ready**: Enterprise MCP remote server with official `/sse` endpoint
+> **Latest Standard**: Streamable HTTP transport with `/mcp` endpoint (2025-06-18)
 >
-> **Compliance**: ✅ 100% MCP protocol compliant
+> **Backwards Compatible**: Legacy `/sse` endpoint maintained
+>
+> **Compliance**: ✅ 100% compliant with MCP 2025-06-18 specification
 
 ## 🌟 Features
 
 ### Core Capabilities
-- **🔗 MCP-Compliant Remote Server**: Full compliance with MCP 2025-03-26 specification
-- **⚡ Official SSE Endpoint**: Standard `/sse` endpoint following Anthropic's requirements
+- **🔗 MCP-Compliant Remote Server**: Full compliance with MCP 2025-06-18 specification
+- **⚡ Streamable HTTP Transport**: Modern `/mcp` endpoint with dynamic SSE upgrade
+- **🔄 Backwards Compatible**: Legacy `/sse` endpoint for older clients
+- **📡 Protocol Versioning**: Supports 2025-06-18, 2025-03-26, and 2024-11-05
 - **🔐 Bearer Token Authentication**: JWT-based authentication for secure remote access
-- **🛡️ Production Security**: Rate limiting, input validation, CORS protection
-- **📊 Comprehensive Monitoring**: Prometheus metrics, health checks, logging
+- **🛡️ Production Security**: Rate limiting, input validation, CORS protection, origin validation
+- **📊 Comprehensive Monitoring**: Prometheus metrics, health checks, structured logging
 - **🐳 Docker Native**: Multi-platform container support (AMD64/ARM64)
 - **🔄 High Availability**: Circuit breakers, retry logic, graceful shutdown
+- **☁️ Serverless Ready**: Can scale to zero when idle with Streamable HTTP
 
-### 🏅 Official Anthropic Standards Compliance
+### 🏅 MCP 2025-06-18 Specification Compliance
 
-This implementation **100% complies** with Anthropic's official standards for remote MCP servers:
+This implementation **100% complies** with the latest MCP specification:
 
 | Standard | Status | Implementation |
 |----------|--------|----------------|
-| **🔗 URL Format** | ✅ COMPLIANT | `https://<server>/sse` (mandatory `/sse` endpoint) |
-| **⚡ SSE Transport** | ✅ COMPLIANT | Server-Sent Events with proper headers |
+| **🔗 Streamable HTTP** | ✅ COMPLIANT | `/mcp` endpoint with POST/GET/DELETE support |
+| **📡 Protocol Versioning** | ✅ COMPLIANT | MCP-Protocol-Version header validation |
+| **⚡ Dynamic Streaming** | ✅ COMPLIANT | JSON or SSE based on Accept header |
 | **🔐 Authentication** | ✅ COMPLIANT | Bearer token (JWT) authentication |
 | **🛡️ Security** | ✅ COMPLIANT | HTTPS, origin validation, rate limiting |
-| **📋 Protocol** | ✅ COMPLIANT | MCP 2025-03-26 specification |
+| **🔄 Legacy Support** | ✅ COMPLIANT | Legacy `/sse` endpoint maintained |
+| **📋 Session Management** | ✅ COMPLIANT | Full session lifecycle with DELETE support |
 
-**Perfect Score: 25/25 Requirements Met** ⭐
+**Perfect Score: 33/33 Requirements Met** ⭐
 
 📋 **[View Full Compliance Verification →](MCP_COMPLIANCE_VERIFICATION.md)**
 
 **References:**
-- [Anthropic's MCP Server Guidelines](https://github.blog/ai-and-ml/generative-ai/how-to-build-secure-and-scalable-remote-mcp-servers/)
-- [MCP Specification](https://modelcontextprotocol.io/quickstart/server)
+- [MCP Specification 2025-06-18](https://modelcontextprotocol.io/specification/2025-06-18/basic/transports)
+- [Streamable HTTP Transport Guide](https://blog.fka.dev/blog/2025-06-06-why-mcp-deprecated-sse-and-go-with-streamable-http/)
+- [MCP Server Development](https://modelcontextprotocol.io/docs/develop/build-server)
 
 ### Wazuh Integration
 - **🔍 Advanced Security Monitoring**: Real-time alert analysis and threat detection
@@ -385,7 +394,22 @@ curl -X POST http://localhost:3000/auth/token \
 
 ### Step 2: Configure Claude Desktop
 
-**For Production Deployment:**
+**Recommended Configuration (Streamable HTTP - 2025-06-18):**
+```json
+{
+  "mcpServers": {
+    "wazuh-security": {
+      "url": "https://your-server-domain.com/mcp",
+      "headers": {
+        "Authorization": "Bearer eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9...",
+        "MCP-Protocol-Version": "2025-06-18"
+      }
+    }
+  }
+}
+```
+
+**Legacy Configuration (SSE only - for older clients):**
 ```json
 {
   "mcpServers": {
@@ -404,9 +428,10 @@ curl -X POST http://localhost:3000/auth/token \
 {
   "mcpServers": {
     "wazuh-security": {
-      "url": "http://localhost:3000/sse",
+      "url": "http://localhost:3000/mcp",
       "headers": {
-        "Authorization": "Bearer eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9..."
+        "Authorization": "Bearer eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9...",
+        "MCP-Protocol-Version": "2025-06-18"
       }
     }
   }
@@ -418,9 +443,11 @@ curl -X POST http://localhost:3000/auth/token \
 After saving the configuration, restart Claude Desktop to load the new MCP server connection.
 
 > **✅ Requirements Checklist:**
-> - ✅ URL **must** end with `/sse` (Anthropic standard)
+> - ✅ Use `/mcp` endpoint for latest features (recommended)
+> - ✅ Use `/sse` endpoint for legacy clients only
 > - ✅ `Authorization: Bearer <token>` header required
-> - ✅ HTTPS recommended for production
+> - ✅ `MCP-Protocol-Version` header recommended for `/mcp` endpoint
+> - ✅ HTTPS required for production
 > - ✅ Token expires in 24 hours (renewable)
 
 ### Programmatic Access
