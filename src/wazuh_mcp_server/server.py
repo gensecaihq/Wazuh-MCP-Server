@@ -964,8 +964,10 @@ async def mcp_endpoint(
         
         # Rate limiting
         client_ip = request.client.host if request.client else "unknown"
-        if not rate_limiter.allow_request(client_ip):
-            raise HTTPException(status_code=429, detail="Rate limit exceeded")
+        allowed, retry_after = rate_limiter.is_allowed(client_ip)
+        if not allowed:
+            headers = {"Retry-After": str(retry_after)} if retry_after else {}
+            raise HTTPException(status_code=429, detail="Rate limit exceeded", headers=headers)
         
         # Get or create session
         session = get_or_create_session(mcp_session_id, origin)
@@ -1138,9 +1140,11 @@ async def mcp_sse_endpoint(
     
     # Rate limiting
     client_ip = request.client.host if request.client else "unknown"
-    if not rate_limiter.allow_request(client_ip):
-        raise HTTPException(status_code=429, detail="Rate limit exceeded")
-    
+    allowed, retry_after = rate_limiter.is_allowed(client_ip)
+    if not allowed:
+        headers = {"Retry-After": str(retry_after)} if retry_after else {}
+        raise HTTPException(status_code=429, detail="Rate limit exceeded", headers=headers)
+
     # Track metrics
     REQUEST_COUNT.labels(method="GET", endpoint="/sse", status_code=200).inc()
     ACTIVE_CONNECTIONS.inc()
@@ -1238,8 +1242,10 @@ async def mcp_streamable_http_endpoint(
 
     # Rate limiting
     client_ip = request.client.host if request.client else "unknown"
-    if not rate_limiter.allow_request(client_ip):
-        raise HTTPException(status_code=429, detail="Rate limit exceeded")
+    allowed, retry_after = rate_limiter.is_allowed(client_ip)
+    if not allowed:
+        headers = {"Retry-After": str(retry_after)} if retry_after else {}
+        raise HTTPException(status_code=429, detail="Rate limit exceeded", headers=headers)
 
     # Track metrics
     REQUEST_COUNT.labels(method=request.method, endpoint="/mcp", status_code=200).inc()
