@@ -709,6 +709,60 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 ---
 
+## 🤝 Contributors Wanted
+
+### 🧪 Help Us Test & Improve
+
+We're looking for **hands-on testers** to deploy this MCP server in real-world environments and provide feedback!
+
+**What We Need:**
+- Deploy the server step-by-step following the documentation
+- Test with actual Wazuh installations (v4.8.0 - v4.14.1)
+- Try different deployment scenarios:
+  - Single-instance (in-memory sessions)
+  - Multi-instance with Redis (serverless mode)
+  - Various OS platforms (Linux/macOS/Windows)
+  - Different Wazuh configurations
+
+**How to Contribute:**
+
+1. **Deploy & Test**
+   ```bash
+   # Follow the Quick Start guide
+   git clone https://github.com/gensecaihq/Wazuh-MCP-Server.git
+   cd Wazuh-MCP-Server
+   python deploy.py
+   ```
+
+2. **Report Findings**
+   - Open an [Issue](https://github.com/gensecaihq/Wazuh-MCP-Server/issues) for bugs or problems
+   - Share successful deployment stories
+   - Suggest improvements or missing features
+   - Report compatibility issues
+
+3. **What to Report**
+   - Deployment environment (OS, Docker version, Wazuh version)
+   - Steps followed
+   - What worked / what didn't
+   - Error messages or logs
+   - Performance observations
+   - Integration results with Claude Desktop
+
+**We Value:**
+- Detailed bug reports with reproduction steps
+- Real-world use case feedback
+- Performance benchmarks
+- Security findings
+- Documentation improvements
+- Integration testing results
+
+**Recognition:**
+All contributors who provide valuable feedback will be acknowledged in the project!
+
+📧 **Questions?** Open a [Discussion](https://github.com/gensecaihq/Wazuh-MCP-Server/discussions) or file an [Issue](https://github.com/gensecaihq/Wazuh-MCP-Server/issues)
+
+---
+
 ## 🌐 Production Features
 
 This production-ready remote MCP server implementation includes:
