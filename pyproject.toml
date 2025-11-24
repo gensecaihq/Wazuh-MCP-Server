@@ -4,14 +4,14 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "wazuh-mcp-server"
-version = "3.0.0"
-description = "Production-grade FastMCP server for Wazuh SIEM integration"
+version = "4.0.0"
+description = "Production-grade MCP remote server for Wazuh SIEM integration with SSE transport"
 readme = "README.md"
 license = {text = "MIT"}
 authors = [
     {name = "Wazuh MCP Server Project", email = "info@wazuh-mcp-server.org"}
 ]
-keywords = ["wazuh", "security", "mcp", "fastmcp", "siem"]
+keywords = ["wazuh", "security", "mcp", "sse", "siem", "remote-server"]
 classifiers = [
     "Development Status :: 5 - Production/Stable",
     "Intended Audience :: Developers",
@@ -20,12 +20,10 @@ classifiers = [
     "Topic :: System :: Monitoring",
     "License :: OSI Approved :: MIT License",
     "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.10",
-    "Programming Language :: Python :: 3.11", 
-    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
     "Operating System :: OS Independent",
 ]
-requires-python = ">=3.10"
+requires-python = ">=3.13"
 dependencies = [
     "fastmcp>=2.11.0",
     "httpx>=0.28.0",

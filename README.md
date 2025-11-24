@@ -1,19 +1,18 @@
-# Wazuh MCP Remote Server v3.0.0  
+# Wazuh MCP Remote Server v4.0.0  
 
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Docker](https://img.shields.io/badge/Docker-Supported-blue.svg)](https://hub.docker.com/)
 [![Python 3.13+](https://img.shields.io/badge/Python-3.13+-blue.svg)](https://www.python.org/downloads/)
 [![MCP Compliant](https://img.shields.io/badge/MCP-2025--03--26-green.svg)](https://modelcontextprotocol.io/)
-[![Anthropic Standards](https://img.shields.io/badge/Anthropic-Standards%20Compliant-blue.svg)](https://github.blog/ai-and-ml/generative-ai/how-to-build-secure-and-scalable-remote-mcp-servers/)
 [![SSE Transport](https://img.shields.io/badge/SSE-Transport-orange.svg)](#)
 [![Bearer Auth](https://img.shields.io/badge/Bearer-Authentication-red.svg)](#)
 
-A **production-ready, enterprise-grade** MCP-compliant remote server that provides seamless integration between Claude Desktop and Wazuh SIEM platform. Fully compliant with **Anthropic's official standards** for remote MCP servers.
+A **production-ready, enterprise-grade** MCP-compliant remote server that provides seamless integration with Wazuh SIEM platform via SSE transport.
 
 > **Production-Ready**: Enterprise MCP remote server with official `/sse` endpoint
 >
-> **Compliance**: ✅ 100% compliant with Anthropic's MCP remote server standards
+> **Compliance**: ✅ 100% MCP protocol compliant
 
 ## 🌟 Features
 

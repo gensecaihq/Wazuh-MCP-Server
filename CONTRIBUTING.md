@@ -17,18 +17,16 @@ Welcome to the Wazuh MCP Server project! This guide will help you understand the
 
 ## 🏗️ Repository Overview
 
-This repository contains two distinct implementations of the Wazuh MCP Server:
+This repository contains a production-ready MCP-compliant remote server implementation:
 
-- **`main` branch**: FastMCP STDIO transport implementation (v2.x.x)
-- **`mcp-remote` branch**: MCP-compliant remote server with SSE transport (v3.x.x)
+- **`main` branch**: MCP-compliant remote server with SSE transport (v4.x.x)
 
-Both implementations share the same core Wazuh integration but use different transport mechanisms for Claude Desktop integration.
+The implementation provides enterprise-grade integration between Claude Desktop and Wazuh SIEM platform using HTTP/SSE transport.
 
 ## 🌳 Branch Strategy
 
-### Main Branches
-- **`main`**: Production-ready FastMCP STDIO implementation
-- **`mcp-remote`**: Production-ready remote MCP server implementation
+### Main Branch
+- **`main`**: Production-ready MCP remote server implementation
 
 ### Development Flow
 - Feature branches: `feature/feature-name`
@@ -39,14 +37,14 @@ Both implementations share the same core Wazuh integration but use different tra
 - All changes must go through Pull Requests
 - CI/CD must pass before merging
 - Code review required from maintainers
-- Branch protection enforced on main branches
+- Branch protection enforced on main branch
 
 ## 🛠️ Development Setup
 
 ### Prerequisites
-- **Python 3.9+** (3.11+ recommended)
+- **Python 3.13+** recommended
 - **Git** with GitHub access
-- **Docker** (for mcp-remote development)
+- **Docker 20.10+** with Compose v2.20+
 - **Node.js** (for pre-commit hooks)
 
 ### Quick Setup
@@ -55,20 +53,15 @@ Both implementations share the same core Wazuh integration but use different tra
 git clone https://github.com/your-username/Wazuh-MCP-Server.git
 cd Wazuh-MCP-Server
 
-# 2. Set up the development environment
+# 2. Set up the development environment (for native development)
 python -m venv venv
 source venv/bin/activate  # Windows: venv\Scripts\activate
 
 # 3. Install development dependencies
-pip install -e ".[dev]"
+pip install -r requirements.txt
 
-# 4. Set up pre-commit hooks
-pre-commit install
-
-# 5. Choose your development branch
-git checkout main          # For STDIO development
-# OR
-git checkout mcp-remote    # For remote MCP development
+# 4. For Docker development (recommended)
+docker compose -f compose.dev.yml up -d --build
 ```
 
 ### Environment Configuration
@@ -77,7 +70,7 @@ git checkout mcp-remote    # For remote MCP development
 cp .env.example .env
 
 # Edit with your Wazuh server details
-# See USER_GUIDE.md for detailed configuration options
+# See INSTALLATION.md for detailed configuration options
 ```
 
 ## 📂 Repository Structure
@@ -94,7 +87,7 @@ Wazuh-MCP-Server/
 │   ├── __init__.py
 │   ├── __main__.py            # Entry point
 │   ├── main.py                # FastMCP server (main branch)
-│   ├── server.py              # Remote MCP server (mcp-remote)
+│   ├── server.py              # MCP remote server with SSE
 │   ├── config.py              # Configuration management
 │   ├── api/                   # Wazuh API clients
 │   ├── tools/                 # MCP tool implementations
@@ -104,38 +97,42 @@ Wazuh-MCP-Server/
 ├── tools/                     # Development tools
 │   ├── branch-sync.py         # Branch synchronization
 │   └── version-manager.py     # Version management
-├── docs/                      # Documentation
-├── docker/                    # Docker configurations (mcp-remote)
-├── pyproject.toml            # Python project configuration
-├── README.md                 # Branch-specific documentation
-├── CONTRIBUTING.md           # This file
-├── USER_GUIDE.md            # User installation guide
-└── .env.example             # Environment template
+├── Dockerfile                # Docker container configuration
+├── compose.yml              # Docker Compose setup
+├── compose.dev.yml          # Development Docker Compose
+├── deploy-production.sh     # Production deployment script
+├── install.sh               # Installation script
+├── pyproject.toml          # Python project configuration
+├── README.md               # Main documentation
+├── CONTRIBUTING.md         # This file
+├── INSTALLATION.md         # Installation guide
+└── .env.example           # Environment template
 ```
 
-### Key Files by Branch
+### Key Files
 
-**Main Branch (STDIO)**:
-- `src/wazuh_mcp_server/main.py` - FastMCP server implementation
-- `pyproject.toml` - Dependencies for STDIO transport
-- `README.md` - STDIO-focused documentation
+**Core Application**:
+- `src/wazuh_mcp_server/server.py` - MCP remote server implementation with SSE
+- `src/wazuh_mcp_server/__main__.py` - Application entry point
+- `src/wazuh_mcp_server/config.py` - Configuration management
 
-**MCP-Remote Branch (SSE)**:
-- `src/wazuh_mcp_server/server.py` - Remote MCP server implementation
-- `Dockerfile` - Container configuration
-- `compose.yml` - Docker Compose setup
-- `README.md` - Remote MCP-focused documentation
+**Deployment**:
+- `Dockerfile` - Production container configuration
+- `compose.yml` - Docker Compose production setup
+- `deploy-production.sh` - Automated deployment script
+
+**Documentation**:
+- `README.md` - Main project documentation
+- `INSTALLATION.md` - Detailed installation guide
+- `MCP_COMPLIANCE_VERIFICATION.md` - MCP compliance details
 
 ## 🔄 Development Workflow
 
-### 1. Choose Your Implementation
-Decide which version you want to contribute to:
-- **STDIO Version** (main): Local Claude Desktop integration
-- **Remote Version** (mcp-remote): Network-based MCP server
-
-### 2. Create Feature Branch
+### 1. Create Feature Branch
 ```bash
-# From the target branch (main or mcp-remote)
+# From main branch
+git checkout main
+git pull origin main
 git checkout -b feature/your-feature-name
 
 # Make your changes
@@ -155,13 +152,14 @@ ruff check src/
 black src/
 mypy src/
 
-# Test the specific implementation
-# For STDIO (main branch):
-wazuh-mcp-server --check
-
-# For Remote (mcp-remote branch):
+# Test the MCP remote server
 docker compose up -d --build
 curl http://localhost:3000/health
+
+# Test SSE endpoint
+curl -H "Authorization: Bearer YOUR_TOKEN" \
+     -H "Accept: text/event-stream" \
+     http://localhost:3000/sse
 ```
 
 ### 4. Submit Pull Request
@@ -205,35 +203,31 @@ pytest tests/unit/test_wazuh_client.py -v
 ## 🚀 Release Logic
 
 ### Version Strategy
-- **Main Branch**: Semantic versioning `2.x.x`
-  - `2.1.0` - Current stable STDIO version
-  - `2.x.x` - Future STDIO releases
-  
-- **MCP-Remote Branch**: Semantic versioning `3.x.x`
-  - `3.0.0` - Current stable remote version  
-  - `3.x.x` - Future remote releases
+- **Main Branch**: Semantic versioning `4.x.x`
+  - `4.0.0` - Current stable MCP remote server version
+  - `4.x.x` - Future releases with SSE transport
 
 ### Release Process
 1. **Automated Releases**: Triggered by version tags
    ```bash
-   # STDIO release (main branch)
-   git tag v2.1.1
-   git push origin v2.1.1
-   
-   # Remote release (mcp-remote branch) 
-   git tag remote-v3.0.1
-   git push origin remote-v3.0.1
+   # Create and push version tag
+   git tag v4.0.1
+   git push origin v4.0.1
+
+   # GitHub Actions will automatically:
+   # - Build Docker image
+   # - Run tests
+   # - Create GitHub release
    ```
 
 2. **Manual Releases**: Via GitHub Actions workflow dispatch
    - Navigate to Actions → Release Pipeline
-   - Select branch and version
    - Trigger manual release
 
 ### Release Artifacts
-- **STDIO**: PyPI package (`pip install wazuh-mcp-server`)
-- **Remote**: Docker image + PyPI package
-- **Both**: GitHub release with binaries
+- Docker image (via GitHub Container Registry)
+- GitHub release with deployment scripts
+- Documentation and compliance verification
 
 ## 📝 Code Standards
 

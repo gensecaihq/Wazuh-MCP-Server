@@ -84,18 +84,6 @@ services:
       - "monitoring.prometheus.path=/metrics"
       - "branch=mcp-remote"
 
-# Network configuration
-networks:
-  default:
-    name: wazuh-mcp-remote-network
-    driver: bridge
-    ipam:
-      driver: default
-      config:
-        - subnet: 172.20.0.0/16
-    driver_opts:
-      com.docker.network.bridge.name: br-wazuh-mcp-remote
-
 # Persistent volumes (if needed)
 volumes:
   wazuh-mcp-remote-data:
