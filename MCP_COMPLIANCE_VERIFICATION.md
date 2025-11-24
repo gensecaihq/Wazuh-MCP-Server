@@ -2,7 +2,7 @@
 
 ## Overview
 
-This document verifies that the Wazuh MCP Remote Server (`mcp-remote` branch) fully complies with Anthropic's official standards for remote MCP servers.
+This document verifies that the Wazuh MCP Remote Server fully complies with Anthropic's official standards for remote MCP servers.
 
 **References:**
 - [Anthropic's MCP Server Guidelines](https://github.blog/ai-and-ml/generative-ai/how-to-build-secure-and-scalable-remote-mcp-servers/)

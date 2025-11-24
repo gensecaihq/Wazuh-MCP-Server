@@ -2,11 +2,11 @@
 
 A comprehensive, step-by-step guide for deploying the Wazuh MCP Remote Server with complete OS-agnostic Docker support.
 
-> **Branch**: `mcp-remote` - Production-ready remote MCP server implementation
+> **Production-Ready**: Enterprise MCP remote server implementation with SSE transport
 
-## 🌐 Branch Information
+## 🌐 Production Features
 
-This installation guide is for the **`mcp-remote`** branch, which provides:
+This production-ready remote MCP server provides:
 - ✅ Full MCP protocol compliance (2025-03-26 specification)
 - ✅ Remote server with SSE transport
 - ✅ 29 specialized security tools
@@ -67,9 +67,6 @@ This installation guide is for the **`mcp-remote`** branch, which provides:
 # Clone the repository
 git clone https://github.com/gensecaihq/Wazuh-MCP-Server.git
 cd Wazuh-MCP-Server
-
-# Switch to mcp-remote branch
-git checkout mcp-remote
 
 # Make installer executable
 chmod +x install.sh
