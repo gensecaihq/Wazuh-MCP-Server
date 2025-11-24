@@ -27,7 +27,8 @@ A **production-ready, enterprise-grade** MCP-compliant remote server that provid
 - **🔐 Bearer Token Authentication**: JWT-based authentication for secure remote access
 - **🛡️ Production Security**: Rate limiting, input validation, CORS protection, origin validation
 - **📊 Comprehensive Monitoring**: Prometheus metrics, health checks, structured logging
-- **🐳 Docker Native**: Multi-platform container support (AMD64/ARM64)
+- **🐳 100% Containerized**: Everything in Docker - OS-agnostic deployment (Windows/macOS/Linux)
+- **🌍 Zero Host Dependencies**: No Python, tools, or libraries needed on host system
 - **🔄 High Availability**: Circuit breakers, retry logic, graceful shutdown
 - **☁️ Serverless Ready**: Can scale to zero when idle with Streamable HTTP
 
@@ -111,8 +112,10 @@ Comprehensive toolkit for security operations including:
 
 ### Prerequisites
 - **Docker** 20.10+ with Compose v2.20+
-- **Python** 3.13+ (for development)
-- **Wazuh** 4.x deployment with API access
+- **Python** 3.9+ (optional, for OS-agnostic deployment script)
+- **Wazuh** 4.8.0 - 4.14.1 deployment with API access
+
+> **OS-Agnostic Deployment**: Everything runs in Docker containers. Works on Windows, macOS, and Linux identically.
 
 ### 1. Clone Repository
 ```bash
@@ -126,7 +129,8 @@ cd Wazuh-MCP-Server
 cp .env.example .env
 
 # Edit configuration (required)
-nano .env
+# Windows: notepad .env
+# macOS/Linux: nano .env
 ```
 
 **Essential Configuration:**
@@ -148,12 +152,26 @@ AUTH_SECRET_KEY=your-secret-key-here
 ALLOWED_ORIGINS=https://claude.ai,https://*.anthropic.com
 ```
 
-### 3. Deploy with Docker
+### 3. Deploy with Docker (OS-Agnostic)
+
+**Option 1: Python Deployment Script (Recommended - Works on all platforms)**
 ```bash
-# Production deployment
+# Windows
+python deploy.py
+
+# macOS/Linux
+python3 deploy.py
+```
+
+**Option 2: Platform-Specific Scripts**
+```bash
+# Linux/macOS
 ./deploy-production.sh
 
-# Or manually
+# Windows (PowerShell/CMD)
+deploy.bat
+
+# Or use Docker Compose directly (all platforms)
 docker compose up -d --wait
 ```
 

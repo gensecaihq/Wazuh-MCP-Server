@@ -64,13 +64,13 @@ check_prerequisites() {
 
 setup_environment() {
     print_step "Setting up environment configuration..."
-    
+
     if [[ ! -f .env ]]; then
-        if [[ -f env.example ]]; then
-            cp env.example .env
-            print_success "Copied env.example to .env"
+        if [[ -f .env.example ]]; then
+            cp .env.example .env
+            print_success "Copied .env.example to .env"
         else
-            print_error ".env file not found and no env.example template available"
+            print_error ".env file not found and no .env.example template available"
             exit 1
         fi
     fi
