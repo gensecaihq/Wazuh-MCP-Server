@@ -14,9 +14,6 @@ services:
         BUILD_DATE: ${BUILD_DATE}
         PYTHON_VERSION: ${PYTHON_VERSION:-3.13}
         VERSION: ${VERSION:-4.0.0}
-      platforms:
-        - linux/amd64
-        - linux/arm64/v8
       target: production
     
     image: wazuh-mcp-remote-server:${VERSION:-4.0.0}

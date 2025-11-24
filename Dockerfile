@@ -61,7 +61,7 @@ RUN trivy fs \
     /scan || echo "Security scan completed with findings"
 
 # Stage 3: Production image with latest Alpine
-FROM python:${PYTHON_VERSION}-alpine
+FROM python:${PYTHON_VERSION}-alpine AS production
 
 LABEL stage=production
 

@@ -12,6 +12,7 @@ docker-compose.yml
 # Environment files (will be handled by Docker)
 .env
 .env.*
+!.env.example
 !.env.docker.template
 !docker/.env.docker
 
