@@ -1,4 +1,4 @@
-"""Wazuh API client optimized for Wazuh 4.8+ to 4.12+ compatibility with latest features."""
+"""Wazuh API client optimized for Wazuh 4.8.0 to 4.14.1 compatibility with latest features."""
 
 import asyncio
 import json
@@ -69,9 +69,10 @@ class WazuhClient:
         return await self._request("GET", "/agents", params=params)
     
     async def get_vulnerabilities(self, **params) -> Dict[str, Any]:
-        """Get vulnerabilities from Wazuh Indexer (4.8+ uses centralized vulnerability detection, 4.12+ includes package conditions and CTI data)."""
+        """Get vulnerabilities from Wazuh Indexer (4.8.0-4.14.1 supported, uses centralized vulnerability detection)."""
         # Note: /vulnerability endpoint was deprecated in 4.7.0 and removed in 4.8.0
         # 4.12+ includes package condition fields and CTI references
+        # 4.14.x maintains API compatibility with enhanced vulnerability data
         return await self._request("GET", "/vulnerability/agents", params=params)
     
     async def get_cluster_status(self) -> Dict[str, Any]:
@@ -143,11 +144,11 @@ class WazuhClient:
         return await self._request("GET", "/manager/version/check")
     
     async def get_cti_data(self, cve_id: str) -> Dict[str, Any]:
-        """Get Cyber Threat Intelligence data for CVE (4.12+ feature)."""
+        """Get Cyber Threat Intelligence data for CVE (4.12-4.14.1 feature)."""
         return await self._request("GET", f"/vulnerability/cti/{cve_id}")
-    
+
     async def get_vulnerability_details(self, vuln_id: str, **params) -> Dict[str, Any]:
-        """Get detailed vulnerability information including CTI references (4.12+ enhanced)."""
+        """Get detailed vulnerability information including CTI references (4.12-4.14.1 enhanced)."""
         return await self._request("GET", f"/vulnerability/{vuln_id}", params=params)
     
     async def get_agent_stats(self, agent_id: str, component: str = "logcollector") -> Dict[str, Any]:

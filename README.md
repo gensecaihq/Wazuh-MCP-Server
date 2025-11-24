@@ -55,11 +55,15 @@ This implementation **100% complies** with the latest MCP specification:
 - [MCP Server Development](https://modelcontextprotocol.io/docs/develop/build-server)
 
 ### Wazuh Integration
+
+**Supported Wazuh Versions**: 4.8.0 - 4.14.1 ✅
+
 - **🔍 Advanced Security Monitoring**: Real-time alert analysis and threat detection
 - **👥 Agent Management**: Comprehensive agent lifecycle and health monitoring
 - **🚨 Incident Response**: Automated threat hunting and response capabilities
 - **📈 Security Analytics**: Performance metrics and compliance reporting
 - **🌐 Multi-Environment**: Support for cloud, on-premise, and hybrid deployments
+- **🆕 Latest Features**: Full support for Wazuh 4.14.1 enhancements including improved vulnerability scanning and AWS integrations
 
 ### 29 Specialized Tools
 Comprehensive toolkit for security operations including:

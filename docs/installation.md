@@ -11,9 +11,10 @@ This guide covers all installation methods for Wazuh MCP Server v2.1.0 across di
 - **Disk Space**: 100MB+ free space
 
 ### Wazuh Requirements
-- **Wazuh Server**: 4.8.0+ (recommended) or 4.0.0+ (minimum)
+- **Wazuh Server**: 4.8.0 to 4.14.1 (recommended) or 4.0.0+ (minimum with limited features)
 - **Network Access**: HTTP/HTTPS connectivity to Wazuh server
 - **Credentials**: Valid Wazuh user account with API access
+- **Tested Versions**: Fully tested and verified with Wazuh 4.8.0, 4.10.x, 4.12.x, 4.13.x, and 4.14.1
 
 ### Claude Desktop
 - **Claude Desktop**: Latest version
