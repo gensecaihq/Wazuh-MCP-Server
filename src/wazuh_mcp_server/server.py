@@ -31,6 +31,8 @@ from wazuh_mcp_server.api.wazuh_client import WazuhClient
 from wazuh_mcp_server.auth import create_access_token, verify_token
 from wazuh_mcp_server.security import RateLimiter, validate_input
 from wazuh_mcp_server.monitoring import REQUEST_COUNT, REQUEST_DURATION, ACTIVE_CONNECTIONS
+from wazuh_mcp_server.resilience import GracefulShutdown
+from wazuh_mcp_server.session_store import create_session_store, SessionStore
 
 logger = logging.getLogger(__name__)
 
@@ -88,96 +90,125 @@ class MCPSession:
             "authenticated": self.authenticated
         }
 
-# Thread-safe session management
-class ThreadSafeSessionManager:
-    """Thread-safe session manager with proper locking."""
-    
-    def __init__(self):
-        self._sessions: Dict[str, MCPSession] = {}
-        self._lock = threading.RLock()  # Reentrant lock for nested operations
-    
-    def get(self, session_id: str) -> Optional[MCPSession]:
-        """Get session by ID with thread safety."""
-        with self._lock:
-            return self._sessions.get(session_id)
-    
-    def __getitem__(self, session_id: str) -> MCPSession:
-        """Get session by ID (dict-like access) with thread safety."""
-        with self._lock:
-            return self._sessions[session_id]
-    
-    def __setitem__(self, session_id: str, session: MCPSession) -> None:
-        """Set session (dict-like access) with thread safety."""
-        with self._lock:
-            self._sessions[session_id] = session
-    
-    def __delitem__(self, session_id: str) -> None:
-        """Delete session (dict-like access) with thread safety."""
-        with self._lock:
-            del self._sessions[session_id]
-    
-    def __contains__(self, session_id: str) -> bool:
-        """Check if session exists with thread safety."""
-        with self._lock:
-            return session_id in self._sessions
-    
-    def pop(self, session_id: str, default=None) -> Optional[MCPSession]:
-        """Remove and return session with thread safety."""
-        with self._lock:
-            return self._sessions.pop(session_id, default)
-    
-    def clear(self) -> None:
-        """Clear all sessions with thread safety."""
-        with self._lock:
-            self._sessions.clear()
-    
-    def values(self) -> List[MCPSession]:
-        """Get all session values with thread safety."""
-        with self._lock:
-            return list(self._sessions.values())
-    
-    def keys(self) -> List[str]:
-        """Get all session keys with thread safety."""
-        with self._lock:
-            return list(self._sessions.keys())
+# Session management with pluggable backend (serverless-ready)
+class SessionManager:
+    """
+    Session manager with pluggable storage backend.
+    Supports both in-memory (default) and Redis (serverless-ready) backends.
+    """
 
-    def get_all(self) -> Dict[str, MCPSession]:
-        """Get all sessions as a dictionary with thread safety."""
-        with self._lock:
-            return dict(self._sessions)
+    def __init__(self, store: SessionStore):
+        self._store = store
+        self._lock = threading.RLock()  # For synchronous operations
+        logger.info(f"SessionManager initialized with {type(store).__name__}")
 
-    def cleanup_expired(self) -> int:
-        """Remove expired sessions and return count of removed sessions."""
-        expired_count = 0
-        with self._lock:
-            expired_sessions = [
-                sid for sid, session in self._sessions.items()
-                if session.is_expired()
-            ]
-            for sid in expired_sessions:
-                del self._sessions[sid]
-                expired_count += 1
-        return expired_count
-
-# Initialize thread-safe session manager
-sessions = ThreadSafeSessionManager()
-
-def get_or_create_session(session_id: Optional[str], origin: Optional[str]) -> MCPSession:
-    """Get existing session or create new one."""
-    if session_id and session_id in sessions:
-        session = sessions[session_id]
-        session.update_activity()
+    def _session_from_dict(self, data: Dict[str, Any]) -> MCPSession:
+        """Reconstruct MCPSession from dictionary."""
+        session = MCPSession(data['session_id'], data.get('origin'))
+        session.created_at = datetime.fromisoformat(data['created_at'].replace('Z', '+00:00'))
+        session.last_activity = datetime.fromisoformat(data['last_activity'].replace('Z', '+00:00'))
+        session.capabilities = data.get('capabilities', {})
+        session.client_info = data.get('client_info', {})
+        session.authenticated = data.get('authenticated', False)
         return session
-    
+
+    async def get(self, session_id: str) -> Optional[MCPSession]:
+        """Get session by ID."""
+        data = await self._store.get(session_id)
+        if data:
+            return self._session_from_dict(data)
+        return None
+
+    async def set(self, session_id: str, session: MCPSession) -> bool:
+        """Store session."""
+        return await self._store.set(session_id, session.to_dict())
+
+    def __getitem__(self, session_id: str) -> MCPSession:
+        """Synchronous dict-like access (blocks)."""
+        loop = asyncio.get_event_loop()
+        session = loop.run_until_complete(self.get(session_id))
+        if session is None:
+            raise KeyError(f"Session {session_id} not found")
+        return session
+
+    def __setitem__(self, session_id: str, session: MCPSession) -> None:
+        """Synchronous dict-like access (blocks)."""
+        loop = asyncio.get_event_loop()
+        loop.run_until_complete(self.set(session_id, session))
+
+    def __delitem__(self, session_id: str) -> None:
+        """Synchronous delete (blocks)."""
+        loop = asyncio.get_event_loop()
+        loop.run_until_complete(self.remove(session_id))
+
+    async def __contains__(self, session_id: str) -> bool:
+        """Check if session exists."""
+        return await self._store.exists(session_id)
+
+    async def remove(self, session_id: str) -> bool:
+        """Remove session by ID."""
+        return await self._store.delete(session_id)
+
+    def pop(self, session_id: str, default=None) -> Optional[MCPSession]:
+        """Remove and return session (synchronous, blocks)."""
+        loop = asyncio.get_event_loop()
+        session = loop.run_until_complete(self.get(session_id))
+        if session:
+            loop.run_until_complete(self.remove(session_id))
+            return session
+        return default
+
+    async def clear(self) -> bool:
+        """Clear all sessions."""
+        return await self._store.clear()
+
+    def values(self) -> List[MCPSession]:
+        """Get all session values (synchronous, blocks)."""
+        loop = asyncio.get_event_loop()
+        sessions_dict = loop.run_until_complete(self.get_all())
+        return list(sessions_dict.values())
+
+    def keys(self) -> List[str]:
+        """Get all session keys (synchronous, blocks)."""
+        loop = asyncio.get_event_loop()
+        sessions_dict = loop.run_until_complete(self.get_all())
+        return list(sessions_dict.keys())
+
+    async def get_all(self) -> Dict[str, MCPSession]:
+        """Get all sessions as dictionary."""
+        data_dict = await self._store.get_all()
+        return {sid: self._session_from_dict(data) for sid, data in data_dict.items()}
+
+    async def cleanup_expired(self) -> int:
+        """Remove expired sessions and return count."""
+        return await self._store.cleanup_expired()
+
+# Initialize session manager with pluggable backend
+# Will use Redis if REDIS_URL is set, otherwise in-memory
+_session_store = create_session_store()
+sessions = SessionManager(_session_store)
+
+async def get_or_create_session(session_id: Optional[str], origin: Optional[str]) -> MCPSession:
+    """Get existing session or create new one."""
+    if session_id:
+        existing_session = await sessions.get(session_id)
+        if existing_session:
+            existing_session.update_activity()
+            await sessions.set(session_id, existing_session)
+            return existing_session
+
     # Create new session
     new_session_id = session_id or str(uuid.uuid4())
     session = MCPSession(new_session_id, origin)
-    sessions[new_session_id] = session
-    
-    # Cleanup expired sessions using thread-safe method
-    expired_count = sessions.cleanup_expired()
-    if expired_count > 0:
-        logger.debug(f"Cleaned up {expired_count} expired sessions")
+    await sessions.set(new_session_id, session)
+
+    # Cleanup expired sessions periodically
+    try:
+        expired_count = await sessions.cleanup_expired()
+        if expired_count > 0:
+            logger.debug(f"Cleaned up {expired_count} expired sessions")
+    except Exception as e:
+        logger.error(f"Session cleanup error: {e}")
     
     return session
 
@@ -207,6 +238,10 @@ wazuh_client = WazuhClient(wazuh_config)
 
 # Initialize rate limiter
 rate_limiter = RateLimiter(max_requests=100, window_seconds=60)
+
+# Initialize graceful shutdown manager
+shutdown_manager = GracefulShutdown()
+logger.info("Graceful shutdown manager initialized")
 
 # CORS middleware for remote access with security
 def validate_cors_origins(origins_config: str) -> List[str]:
@@ -970,8 +1005,8 @@ async def mcp_endpoint(
             raise HTTPException(status_code=429, detail="Rate limit exceeded", headers=headers)
         
         # Get or create session
-        session = get_or_create_session(mcp_session_id, origin)
-        
+        session = await get_or_create_session(mcp_session_id, origin)
+
         # Handle GET request (SSE)
         if request.method == "GET":
             if accept and "text/event-stream" in accept:
@@ -1151,9 +1186,9 @@ async def mcp_sse_endpoint(
     
     try:
         # Get or create session
-        session = get_or_create_session(mcp_session_id, origin)
+        session = await get_or_create_session(mcp_session_id, origin)
         session.authenticated = True  # Mark as authenticated via bearer token
-        
+
         # Return SSE stream
         response = StreamingResponse(
             generate_sse_events(session),
@@ -1253,7 +1288,7 @@ async def mcp_streamable_http_endpoint(
 
     try:
         # Get or create session
-        session = get_or_create_session(mcp_session_id, origin)
+        session = await get_or_create_session(mcp_session_id, origin)
         session.authenticated = True  # Mark as authenticated via bearer token
 
         # Common response headers
@@ -1402,7 +1437,7 @@ async def close_mcp_session(
 
     # Remove session
     try:
-        sessions.remove(mcp_session_id)
+        await sessions.remove(mcp_session_id)
         logger.info(f"Session {mcp_session_id} closed via DELETE")
         return Response(status_code=204)  # No content
     except KeyError:
@@ -1420,7 +1455,7 @@ async def health_check():
             wazuh_status = f"unhealthy: {str(e)}"
         
         # Check session count
-        all_sessions = sessions.get_all()
+        all_sessions = await sessions.get_all()
         active_sessions = len([s for s in all_sessions.values() if not s.is_expired()])
 
         return {
@@ -1508,7 +1543,7 @@ async def get_auth_token(request: Request):
 # Startup event
 @app.on_event("startup")
 async def startup_event():
-    """Initialize server on startup."""
+    """Initialize server on startup with graceful shutdown support."""
     logger.info("🚀 Wazuh MCP Server v4.0.0 starting up...")
     logger.info(f"📡 MCP Protocol: {MCP_PROTOCOL_VERSION}")
     logger.info(f"🔗 Wazuh Host: {config.WAZUH_HOST}")
@@ -1518,6 +1553,15 @@ async def startup_event():
     try:
         await wazuh_client.initialize()
         logger.info("✅ Wazuh client initialized successfully")
+
+        # Register Wazuh client cleanup
+        async def cleanup_wazuh():
+            if hasattr(wazuh_client, 'close'):
+                await wazuh_client.close()
+                logger.info("Wazuh client connections closed")
+
+        shutdown_manager.add_cleanup_task(cleanup_wazuh)
+
     except Exception as e:
         logger.warning(f"⚠️  Wazuh client initialization failed: {e}")
 
@@ -1528,44 +1572,40 @@ async def startup_event():
     except Exception as e:
         logger.warning(f"⚠️  Wazuh connectivity test failed: {e}")
 
+    logger.info("✅ Server startup complete with high availability features enabled")
+
 @app.on_event("shutdown")
 async def shutdown_event():
-    """Cleanup on server shutdown with proper resource management."""
-    logger.info("🛑 Wazuh MCP Server shutting down...")
-    
+    """Cleanup on server shutdown with graceful resource management."""
+    logger.info("🛑 Wazuh MCP Server initiating graceful shutdown...")
+
     try:
-        # Close Wazuh client connections
-        if hasattr(wazuh_client, 'close'):
-            await wazuh_client.close()
-            logger.info("Wazuh client connections closed")
-        
+        # Initiate graceful shutdown (waits for active connections)
+        await shutdown_manager.initiate_shutdown()
+
         # Clear and cleanup auth manager
         from wazuh_mcp_server.auth import auth_manager
         auth_manager.cleanup_expired()
         auth_manager.tokens.clear()
         logger.info("Authentication tokens cleared")
-        
+
         # Clear sessions with proper cleanup
-        for session_id in list(sessions.keys()):
-            session = sessions.pop(session_id, None)
-            if session:
-                # Clean up session resources
-                session.clear()
+        await sessions.clear()
         logger.info("Sessions cleared")
-        
+
         # Cleanup rate limiter
         if hasattr(rate_limiter, 'cleanup'):
             rate_limiter.cleanup()
-        
+
         # Force garbage collection
         import gc
         gc.collect()
         logger.info("Garbage collection completed")
-        
+
     except Exception as e:
         logger.error(f"Error during shutdown: {e}")
     finally:
-        logger.info("✅ Shutdown completed")
+        logger.info("✅ Graceful shutdown completed")
 
 if __name__ == "__main__":
     import uvicorn

@@ -29,8 +29,8 @@ A **production-ready, enterprise-grade** MCP-compliant remote server that provid
 - **📊 Comprehensive Monitoring**: Prometheus metrics, health checks, structured logging
 - **🐳 100% Containerized**: Everything in Docker - OS-agnostic deployment (Windows/macOS/Linux)
 - **🌍 Zero Host Dependencies**: No Python, tools, or libraries needed on host system
-- **🔄 High Availability**: Circuit breakers, retry logic, graceful shutdown
-- **☁️ Serverless Ready**: Can scale to zero when idle with Streamable HTTP
+- **🔄 High Availability**: Integrated circuit breakers, exponential backoff retry logic, graceful shutdown with connection draining
+- **☁️ Serverless Ready**: Pluggable session storage (Redis or in-memory), stateless operations, horizontal scaling support
 
 ### 🏅 MCP 2025-06-18 Specification Compliance
 
@@ -217,6 +217,8 @@ curl http://localhost:3000/health
 | `LOG_LEVEL` | Logging level | `INFO` | ❌ |
 | `WAZUH_VERIFY_SSL` | SSL verification | `false` | ❌ |
 | `ALLOWED_ORIGINS` | CORS origins | `https://claude.ai` | ❌ |
+| `REDIS_URL` | Redis URL for serverless sessions | - | ❌ |
+| `SESSION_TTL_SECONDS` | Session TTL (Redis only) | `1800` | ❌ |
 
 ### Docker Compose Configuration
 
@@ -300,6 +302,96 @@ chmod 700 deploy-production.sh
 # Regular security updates
 docker compose pull
 docker compose up -d
+```
+
+## 🚀 Advanced Features
+
+### High Availability (HA)
+
+The server includes production-grade HA features for maximum reliability:
+
+**Circuit Breakers**
+- Automatically opens after 5 consecutive failures
+- Prevents cascading failures to Wazuh API
+- Recovers automatically after 60 seconds
+- Falls back gracefully during outages
+
+**Retry Logic**
+- Exponential backoff with jitter
+- 3 retry attempts with 1-10 second delays
+- Applies to all Wazuh API calls
+- Handles transient network failures
+
+**Graceful Shutdown**
+- Waits for active connections to complete (max 30s)
+- Runs cleanup tasks before termination
+- Prevents data loss during restarts
+- Integrates with Docker health checks
+
+**Implementation:**
+```python
+# Automatically applied to all Wazuh API calls
+# No configuration required - works out of the box
+```
+
+### Serverless Ready
+
+Enable horizontally scalable, serverless deployments with external session storage:
+
+**Default Mode: In-Memory Sessions**
+```bash
+# Single-instance deployments (default)
+# No configuration needed
+docker compose up -d
+```
+- ✅ Zero configuration
+- ✅ Works immediately
+- ❌ Sessions lost on restart
+- ❌ Cannot scale horizontally
+
+**Serverless Mode: Redis Sessions**
+```bash
+# Multi-instance/serverless deployments
+# Configure Redis in .env file
+REDIS_URL=redis://redis:6379/0
+SESSION_TTL_SECONDS=1800  # 30 minutes
+
+# Deploy with Redis
+docker compose -f compose.yml -f compose.redis.yml up -d
+```
+- ✅ Sessions persist across restarts
+- ✅ Horizontal scaling support
+- ✅ Serverless compatible (AWS Lambda, Cloud Run)
+- ✅ Automatic session expiration
+
+**Redis Setup (Optional):**
+```yaml
+# compose.redis.yml
+services:
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+
+volumes:
+  redis-data:
+```
+
+**Verification:**
+```bash
+# Check session storage mode
+curl http://localhost:3000/health | jq '.session_storage'
+
+# Output:
+# {
+#   "type": "InMemorySessionStore"  # or "RedisSessionStore"
+#   "sessions_count": 5
+# }
 ```
 
 ## 📊 Monitoring & Operations  

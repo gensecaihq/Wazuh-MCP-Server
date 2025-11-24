@@ -5,13 +5,21 @@ import json
 import time
 from typing import Dict, Any, Optional
 import httpx
+import logging
 
 from wazuh_mcp_server.config import WazuhConfig
+from wazuh_mcp_server.resilience import (
+    CircuitBreaker,
+    CircuitBreakerConfig,
+    RetryConfig
+)
+
+logger = logging.getLogger(__name__)
 
 
 class WazuhClient:
-    """Simplified Wazuh API client with rate limiting."""
-    
+    """Simplified Wazuh API client with rate limiting, circuit breaker, and retry logic."""
+
     def __init__(self, config: WazuhConfig):
         self.config = config
         self.token: Optional[str] = None
@@ -21,6 +29,15 @@ class WazuhClient:
         self._request_times = []
         self._max_requests_per_minute = getattr(config, 'max_requests_per_minute', 100)
         self._rate_limit_enabled = True
+
+        # Circuit breaker for API resilience
+        circuit_config = CircuitBreakerConfig(
+            failure_threshold=5,
+            recovery_timeout=60,
+            expected_exception=Exception
+        )
+        self._circuit_breaker = CircuitBreaker(circuit_config)
+        logger.info("WazuhClient initialized with circuit breaker and retry logic")
     
     async def initialize(self):
         """Initialize the HTTP client and authenticate."""
@@ -180,45 +197,58 @@ class WazuhClient:
         self._request_times.append(current_time)
 
     async def _request(self, method: str, endpoint: str, **kwargs) -> Dict[str, Any]:
-        """Make authenticated request to Wazuh API with rate limiting."""
+        """Make authenticated request to Wazuh API with rate limiting, circuit breaker, and retry logic."""
         # Apply rate limiting
         async with self._rate_limiter:
             await self._rate_limit_check()
-            
-            if not self.token:
+
+            # Apply circuit breaker and retry logic
+            return await self._request_with_resilience(method, endpoint, **kwargs)
+
+    @RetryConfig.WAZUH_API_RETRY
+    async def _request_with_resilience(self, method: str, endpoint: str, **kwargs) -> Dict[str, Any]:
+        """Execute request with circuit breaker and retry logic."""
+        return await self._circuit_breaker._call(self._execute_request, method, endpoint, **kwargs)
+
+    async def _execute_request(self, method: str, endpoint: str, **kwargs) -> Dict[str, Any]:
+        """Execute the actual HTTP request to Wazuh API."""
+        if not self.token:
+            await self._authenticate()
+
+        url = f"{self.config.base_url}{endpoint}"
+        headers = {"Authorization": f"Bearer {self.token}"}
+
+        try:
+            response = await self.client.request(method, url, headers=headers, **kwargs)
+            response.raise_for_status()
+
+            data = response.json()
+
+            # Validate response structure
+            if "data" not in data:
+                raise ValueError(f"Invalid response structure from Wazuh API: {endpoint}")
+
+            return data
+
+        except httpx.HTTPStatusError as e:
+            if e.response.status_code == 401:
+                # Token might be expired, try to re-authenticate
+                self.token = None
                 await self._authenticate()
-            
-            url = f"{self.config.base_url}{endpoint}"
-            headers = {"Authorization": f"Bearer {self.token}"}
-            
-            try:
+                # Retry the request once
+                headers = {"Authorization": f"Bearer {self.token}"}
                 response = await self.client.request(method, url, headers=headers, **kwargs)
                 response.raise_for_status()
-                
-                data = response.json()
-                
-                # Validate response structure
-                if "data" not in data:
-                    raise ValueError(f"Invalid response structure from Wazuh API: {endpoint}")
-                
-                return data
-                
-            except httpx.HTTPStatusError as e:
-                if e.response.status_code == 401:
-                    # Token might be expired, try to re-authenticate
-                    self.token = None
-                    await self._authenticate()
-                    # Retry the request once
-                    headers = {"Authorization": f"Bearer {self.token}"}
-                    response = await self.client.request(method, url, headers=headers, **kwargs)
-                    response.raise_for_status()
-                    return response.json()
-                else:
-                    raise ValueError(f"Wazuh API request failed: {e.response.status_code} - {e.response.text}")
-            except httpx.ConnectError:
-                raise ConnectionError(f"Lost connection to Wazuh server at {self.config.wazuh_host}")
-            except httpx.TimeoutException:
-                raise ConnectionError(f"Request timeout to Wazuh server")
+                return response.json()
+            else:
+                logger.error(f"Wazuh API request failed: {e.response.status_code} - {e.response.text}")
+                raise ValueError(f"Wazuh API request failed: {e.response.status_code} - {e.response.text}")
+        except httpx.ConnectError as e:
+            logger.error(f"Lost connection to Wazuh server at {self.config.wazuh_host}")
+            raise ConnectionError(f"Lost connection to Wazuh server at {self.config.wazuh_host}")
+        except httpx.TimeoutException as e:
+            logger.error(f"Request timeout to Wazuh server")
+            raise ConnectionError(f"Request timeout to Wazuh server")
     
     async def get_manager_info(self) -> Dict[str, Any]:
         """Get Wazuh manager information."""

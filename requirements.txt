@@ -29,5 +29,8 @@ psutil>=5.9.0
 tenacity>=8.2.0  # Retry logic
 aiofiles>=23.0.0  # Async file operations
 
+# Session storage for serverless (optional)
+redis[async]>=5.0.0  # Redis async client for serverless session storage
+
 # Security and encryption
 cryptography>=41.0.0  # Encryption for secrets
