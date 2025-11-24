@@ -136,7 +136,12 @@ class ThreadSafeSessionManager:
         """Get all session keys with thread safety."""
         with self._lock:
             return list(self._sessions.keys())
-    
+
+    def get_all(self) -> Dict[str, MCPSession]:
+        """Get all sessions as a dictionary with thread safety."""
+        with self._lock:
+            return dict(self._sessions)
+
     def cleanup_expired(self) -> int:
         """Remove expired sessions and return count of removed sessions."""
         expired_count = 0
@@ -1149,8 +1154,9 @@ async def health_check():
             wazuh_status = f"unhealthy: {str(e)}"
         
         # Check session count
-        active_sessions = len([s for s in sessions.values() if not s.is_expired()])
-        
+        all_sessions = sessions.get_all()
+        active_sessions = len([s for s in all_sessions.values() if not s.is_expired()])
+
         return {
             "status": "healthy",
             "timestamp": datetime.now(timezone.utc).isoformat(),
@@ -1161,7 +1167,7 @@ async def health_check():
             },
             "metrics": {
                 "active_sessions": active_sessions,
-                "total_sessions": len(sessions)
+                "total_sessions": len(all_sessions)
             }
         }
     except Exception as e:

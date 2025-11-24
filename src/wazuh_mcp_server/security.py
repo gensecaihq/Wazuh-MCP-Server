@@ -22,6 +22,36 @@ import httpx
 
 logger = logging.getLogger(__name__)
 
+def validate_input(value: str, max_length: int = 1000, allowed_chars: Optional[str] = None) -> bool:
+    """
+    Validate user input for security.
+
+    Args:
+        value: Input string to validate
+        max_length: Maximum allowed length
+        allowed_chars: Optional regex pattern for allowed characters
+
+    Returns:
+        True if valid
+
+    Raises:
+        ValueError: If validation fails
+    """
+    if not value:
+        raise ValueError("Input cannot be empty")
+
+    if len(value) > max_length:
+        raise ValueError(f"Input exceeds maximum length of {max_length}")
+
+    # Check for common injection patterns
+    dangerous_patterns = ['<script', 'javascript:', 'onerror=', 'onclick=', '../', '..\\\\']
+    value_lower = value.lower()
+    for pattern in dangerous_patterns:
+        if pattern in value_lower:
+            raise ValueError(f"Input contains disallowed pattern: {pattern}")
+
+    return True
+
 @dataclass
 class SecurityMetrics:
     """Track security-related metrics."""
