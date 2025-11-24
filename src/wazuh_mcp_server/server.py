@@ -1510,10 +1510,17 @@ async def get_auth_token(request: Request):
 async def startup_event():
     """Initialize server on startup."""
     logger.info("🚀 Wazuh MCP Server v4.0.0 starting up...")
-    logger.info(f"📡 MCP Protocol: 2025-03-26")
+    logger.info(f"📡 MCP Protocol: {MCP_PROTOCOL_VERSION}")
     logger.info(f"🔗 Wazuh Host: {config.WAZUH_HOST}")
     logger.info(f"🌐 CORS Origins: {config.ALLOWED_ORIGINS}")
-    
+
+    # Initialize Wazuh client
+    try:
+        await wazuh_client.initialize()
+        logger.info("✅ Wazuh client initialized successfully")
+    except Exception as e:
+        logger.warning(f"⚠️  Wazuh client initialization failed: {e}")
+
     # Test Wazuh connectivity
     try:
         await wazuh_client.get_manager_info()
