@@ -62,3 +62,6 @@ Thumbs.db
 
 # Sensitive documentation (maintainer-only content)
 MAINTAINER_MANUAL.md
+docker-local-install.yml
+docker-prod-install.yml
+.api_key
