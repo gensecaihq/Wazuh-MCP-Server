@@ -859,6 +859,43 @@ This production-ready remote MCP server implementation includes:
 
 ---
 
+## 🙌 Thanks
+
+A huge thank you to everyone who has contributed to this project through issues, pull requests, and discussions!
+
+<!-- CONTRIBUTORS-START -->
+### Contributors
+
+| Avatar | Username | Contributions |
+|--------|----------|---------------|
+| <img src="https://github.com/alokemajumder.png" width="40" height="40" style="border-radius: 50%"/> | [@alokemajumder](https://github.com/alokemajumder) | 💻 Code, 🐛 Issues, 💬 Discussions |
+| <img src="https://github.com/gensecai-dev.png" width="40" height="40" style="border-radius: 50%"/> | [@gensecai-dev](https://github.com/gensecai-dev) | 💻 Code, 💬 Discussions |
+| <img src="https://github.com/aiunmukto.png" width="40" height="40" style="border-radius: 50%"/> | [@aiunmukto](https://github.com/aiunmukto) | 💻 Code, 🔀 PRs |
+| <img src="https://github.com/Karibusan.png" width="40" height="40" style="border-radius: 50%"/> | [@Karibusan](https://github.com/Karibusan) | 💻 Code, 🐛 Issues, 🔀 PRs |
+| <img src="https://github.com/lwsinclair.png" width="40" height="40" style="border-radius: 50%"/> | [@lwsinclair](https://github.com/lwsinclair) | 💻 Code, 🔀 PRs |
+| <img src="https://github.com/taylorwalton.png" width="40" height="40" style="border-radius: 50%"/> | [@taylorwalton](https://github.com/taylorwalton) | 🔀 PRs |
+| <img src="https://github.com/MilkyWay88.png" width="40" height="40" style="border-radius: 50%"/> | [@MilkyWay88](https://github.com/MilkyWay88) | 🔀 PRs |
+| <img src="https://github.com/Uberkarhu.png" width="40" height="40" style="border-radius: 50%"/> | [@Uberkarhu](https://github.com/Uberkarhu) | 🐛 Issues |
+| <img src="https://github.com/cbassonbgroup.png" width="40" height="40" style="border-radius: 50%"/> | [@cbassonbgroup](https://github.com/cbassonbgroup) | 🐛 Issues |
+| <img src="https://github.com/cybersentinel-06.png" width="40" height="40" style="border-radius: 50%"/> | [@cybersentinel-06](https://github.com/cybersentinel-06) | 🐛 Issues |
+| <img src="https://github.com/daod-arshad.png" width="40" height="40" style="border-radius: 50%"/> | [@daod-arshad](https://github.com/daod-arshad) | 🐛 Issues |
+| <img src="https://github.com/mamema.png" width="40" height="40" style="border-radius: 50%"/> | [@mamema](https://github.com/mamema) | 🐛 Issues |
+| <img src="https://github.com/marcolinux46.png" width="40" height="40" style="border-radius: 50%"/> | [@marcolinux46](https://github.com/marcolinux46) | 🐛 Issues |
+| <img src="https://github.com/matveevandrey.png" width="40" height="40" style="border-radius: 50%"/> | [@matveevandrey](https://github.com/matveevandrey) | 🐛 Issues |
+| <img src="https://github.com/punkpeye.png" width="40" height="40" style="border-radius: 50%"/> | [@punkpeye](https://github.com/punkpeye) | 🐛 Issues |
+| <img src="https://github.com/tonyliu9189.png" width="40" height="40" style="border-radius: 50%"/> | [@tonyliu9189](https://github.com/tonyliu9189) | 🐛 Issues |
+| <img src="https://github.com/Vasanth120v.png" width="40" height="40" style="border-radius: 50%"/> | [@Vasanth120v](https://github.com/Vasanth120v) | 💬 Discussions |
+| <img src="https://github.com/gnix45.png" width="40" height="40" style="border-radius: 50%"/> | [@gnix45](https://github.com/gnix45) | 💬 Discussions |
+| <img src="https://github.com/melmasry1987.png" width="40" height="40" style="border-radius: 50%"/> | [@melmasry1987](https://github.com/melmasry1987) | 💬 Discussions |
+
+**Legend:** 💻 Code · 🐛 Issues · 🔀 Pull Requests · 💬 Discussions
+
+<!-- CONTRIBUTORS-END -->
+
+> This section is automatically updated by GitHub Actions. See [.github/workflows/update-contributors.yml](.github/workflows/update-contributors.yml)
+
+---
+
 ## 🏆 **Summary**
 
 The **Wazuh MCP Remote Server** represents a **gold standard implementation** of Anthropic's MCP remote server specifications:
