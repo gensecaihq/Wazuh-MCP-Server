@@ -265,7 +265,7 @@ async def get_or_create_session(session_id: Optional[str], origin: Optional[str]
 app = FastAPI(
     title="Wazuh MCP Server",
     description="MCP-compliant remote server for Wazuh SIEM integration. Supports Streamable HTTP, SSE, OAuth, and authless modes.",
-    version="4.0.1",
+    version="4.0.2",
     docs_url="/docs",
     openapi_url="/openapi.json"
 )

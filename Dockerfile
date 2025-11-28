@@ -5,7 +5,7 @@
 
 ARG PYTHON_VERSION=3.13
 ARG BUILD_DATE
-ARG VERSION=4.0.1
+ARG VERSION=4.0.2
 
 # Stage 1: Build dependencies
 FROM python:${PYTHON_VERSION}-alpine AS builder

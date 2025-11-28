@@ -13,10 +13,10 @@ services:
       args:
         BUILD_DATE: ${BUILD_DATE}
         PYTHON_VERSION: ${PYTHON_VERSION:-3.13}
-        VERSION: ${VERSION:-4.0.1}
+        VERSION: ${VERSION:-4.0.2}
       target: production
 
-    image: wazuh-mcp-remote-server:${VERSION:-4.0.1}
+    image: wazuh-mcp-remote-server:${VERSION:-4.0.2}
     container_name: wazuh-mcp-remote-server
     hostname: wazuh-mcp-remote-server
     
