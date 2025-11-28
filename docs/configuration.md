@@ -413,6 +413,51 @@ Check configuration loading:
 python -c "from wazuh_mcp_server.config import WazuhConfig; config = WazuhConfig(); print('Configuration loaded successfully')"
 ```
 
+## 🤖 Claude Desktop Integration
+
+> **Important:** Claude Desktop supports remote MCP servers through the **Connectors UI**, not via `claude_desktop_config.json`. The JSON config file only supports local stdio-based MCP servers.
+
+### Requirements
+
+- **Claude Pro, Max, Team, or Enterprise plan** (custom connectors require paid plan)
+- Server accessible via **HTTPS** (required for production)
+- Feature is currently in **beta**
+
+### Configuration Steps
+
+1. **Deploy your server** with HTTPS enabled
+2. Open Claude Desktop → **Settings** → **Connectors**
+3. Click **"Add custom connector"**
+4. Enter your server URL:
+   - Streamable HTTP: `https://your-domain.com/mcp`
+   - Legacy SSE: `https://your-domain.com/sse`
+5. Configure authentication in **Advanced settings** if needed
+6. Click **Connect**
+
+### Authentication
+
+| Method | Use Case |
+|--------|----------|
+| **OAuth** | Production (DCR supported) |
+| **Authless** | Development/testing |
+
+OAuth callback URL: `https://claude.ai/api/mcp/auth_callback`
+
+### Common Error
+
+If you see this error:
+```
+Could not load app settings
+"path": ["mcpServers", "wazuh-security", "command"]
+"message": "Required"
+```
+
+**Cause:** You edited `claude_desktop_config.json` with `url` + `headers` format.
+
+**Solution:** Use the **Connectors UI** instead. The JSON config only supports local stdio servers.
+
+For detailed instructions, see the [Claude Desktop Integration](../README.md#-claude-desktop-integration) section in the main README.
+
 ## 📞 Getting Help
 
 For configuration issues:

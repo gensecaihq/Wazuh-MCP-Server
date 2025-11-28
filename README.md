@@ -485,84 +485,97 @@ curl -H "Authorization: Bearer <token>" http://localhost:3000/
 
 ## 🤖 Claude Desktop Integration
 
-### Step 1: Get Authentication Token
+> **Important:** Claude Desktop supports remote MCP servers through the **Connectors UI**, not via the `claude_desktop_config.json` file. The JSON config file only supports local stdio-based MCP servers.
 
-First, get your JWT token for Claude Desktop authentication:
+### Prerequisites
+
+- **Claude Pro, Max, Team, or Enterprise plan** (required for custom connectors)
+- Your Wazuh MCP Server deployed and accessible via **HTTPS**
+- Custom Connectors feature is currently in **beta**
+
+### Step 1: Deploy Your Server
+
+Ensure your Wazuh MCP Server is running and publicly accessible:
 
 ```bash
-# 1. Get the API key from server logs (generated on startup)
-docker compose logs wazuh-mcp-remote-server | grep "Created default API key"
+# Deploy the server
+docker compose up -d
 
-# 2. Exchange API key for JWT token
-curl -X POST http://localhost:3000/auth/token \
-  -H "Content-Type: application/json" \
-  -d '{"api_key": "wazuh_your-generated-api-key"}'
-
-# Response includes the bearer token
-{
-  "access_token": "eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9...",
-  "token_type": "bearer",
-  "expires_in": 86400
-}
+# Verify it's running (must be HTTPS in production)
+curl https://your-server-domain.com/health
 ```
 
-### Step 2: Configure Claude Desktop
+### Step 2: Add Custom Connector in Claude Desktop
 
-**Recommended Configuration (Streamable HTTP - 2025-06-18):**
+1. Open **Claude Desktop**
+2. Go to **Settings** → **Connectors**
+3. Click **"Add custom connector"**
+4. Enter your MCP server URL:
+   - **Recommended (Streamable HTTP):** `https://your-server-domain.com/mcp`
+   - **Legacy (SSE):** `https://your-server-domain.com/sse`
+5. For authentication, use **Advanced settings** to configure OAuth or headers
+6. Click **Connect**
+
+### Step 3: Enable Tools in Chat
+
+1. In your chat interface, click the **"Search and tools"** button
+2. Find your Wazuh connector in the list
+3. Click **"Connect"** to authenticate (if required)
+4. Enable/disable specific tools as needed
+
+### Authentication Options
+
+**Option A: OAuth (Recommended for Production)**
+
+This server supports OAuth with Dynamic Client Registration (DCR). Claude will automatically handle the OAuth flow when you connect.
+
+- OAuth callback URL: `https://claude.ai/api/mcp/auth_callback`
+- OAuth client name: "Claude"
+
+**Option B: Authless (Development/Testing)**
+
+For development environments, you can configure the server to accept connections without authentication.
+
+### Supported Features
+
+| Feature | Status |
+|---------|--------|
+| Tools | ✅ Supported |
+| Prompts | ✅ Supported |
+| Resources | ✅ Supported |
+| Text/Image Results | ✅ Supported |
+| Resource Subscriptions | ❌ Not yet supported |
+| Sampling | ❌ Not yet supported |
+
+### ⚠️ Common Mistake: Using JSON Config for Remote Servers
+
+**❌ This will NOT work** — the JSON config is for local stdio servers only:
 ```json
 {
   "mcpServers": {
     "wazuh-security": {
-      "url": "https://your-server-domain.com/mcp",
-      "headers": {
-        "Authorization": "Bearer eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9...",
-        "MCP-Protocol-Version": "2025-06-18"
-      }
+      "url": "https://your-server.com/mcp",
+      "headers": { "Authorization": "Bearer ..." }
     }
   }
 }
 ```
 
-**Legacy Configuration (SSE only - for older clients):**
-```json
-{
-  "mcpServers": {
-    "wazuh-security": {
-      "url": "https://your-server-domain.com/sse",
-      "headers": {
-        "Authorization": "Bearer eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9..."
-      }
-    }
-  }
-}
+This produces the error:
+```
+Could not load app settings
+"path": ["mcpServers", "wazuh-security", "command"]
+"message": "Required"
 ```
 
-**For Local Development:**
-```json
-{
-  "mcpServers": {
-    "wazuh-security": {
-      "url": "http://localhost:3000/mcp",
-      "headers": {
-        "Authorization": "Bearer eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9...",
-        "MCP-Protocol-Version": "2025-06-18"
-      }
-    }
-  }
-}
-```
+**✅ Correct approach:** Use **Settings → Connectors** UI as described above.
 
-### Step 3: Restart Claude Desktop
-
-After saving the configuration, restart Claude Desktop to load the new MCP server connection.
-
-> **✅ Requirements Checklist:**
-> - ✅ Use `/mcp` endpoint for latest features (recommended)
-> - ✅ Use `/sse` endpoint for legacy clients only
-> - ✅ `Authorization: Bearer <token>` header required
-> - ✅ `MCP-Protocol-Version` header recommended for `/mcp` endpoint
-> - ✅ HTTPS required for production
-> - ✅ Token expires in 24 hours (renewable)
+> **Requirements Checklist:**
+> - ✅ Claude Pro, Max, Team, or Enterprise plan
+> - ✅ Use **Connectors UI** (Settings → Connectors), NOT `claude_desktop_config.json`
+> - ✅ Server must be accessible via **HTTPS** (production)
+> - ✅ Use `/mcp` endpoint (Streamable HTTP) or `/sse` endpoint (legacy)
+> - ✅ OAuth or authless authentication supported
 
 ### Programmatic Access
 
