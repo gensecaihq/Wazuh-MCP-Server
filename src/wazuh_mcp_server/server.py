@@ -36,6 +36,55 @@ from wazuh_mcp_server.session_store import create_session_store, SessionStore
 
 logger = logging.getLogger(__name__)
 
+# OAuth manager (initialized on startup if needed)
+_oauth_manager = None
+
+
+async def verify_authentication(authorization: Optional[str], config) -> bool:
+    """
+    Verify authentication based on configured auth mode.
+
+    Returns True if authenticated, raises HTTPException if not.
+    Supports: authless (none), bearer token, and OAuth modes.
+    """
+    # Authless mode - no authentication required
+    if config.is_authless:
+        return True
+
+    # Authentication required
+    if not authorization:
+        raise HTTPException(
+            status_code=401,
+            detail="Authorization header required",
+            headers={"WWW-Authenticate": "Bearer"}
+        )
+
+    # OAuth mode
+    if config.is_oauth:
+        global _oauth_manager
+        if _oauth_manager:
+            token = authorization.replace("Bearer ", "") if authorization.startswith("Bearer ") else authorization
+            token_obj = _oauth_manager.validate_access_token(token)
+            if token_obj:
+                return True
+        raise HTTPException(
+            status_code=401,
+            detail="Invalid or expired OAuth token",
+            headers={"WWW-Authenticate": "Bearer"}
+        )
+
+    # Bearer token mode (default)
+    try:
+        from wazuh_mcp_server.auth import verify_bearer_token
+        await verify_bearer_token(authorization)
+        return True
+    except ValueError as e:
+        raise HTTPException(
+            status_code=401,
+            detail=str(e),
+            headers={"WWW-Authenticate": "Bearer"}
+        )
+
 # MCP Protocol Models
 class MCPRequest(BaseModel):
     """MCP JSON-RPC 2.0 Request."""
@@ -215,8 +264,8 @@ async def get_or_create_session(session_id: Optional[str], origin: Optional[str]
 # Initialize FastAPI app for MCP compliance
 app = FastAPI(
     title="Wazuh MCP Server",
-    description="MCP-compliant remote server for Wazuh SIEM integration with SSE transport",
-    version="4.0.0",
+    description="MCP-compliant remote server for Wazuh SIEM integration. Supports Streamable HTTP, SSE, OAuth, and authless modes.",
+    version="4.0.1",
     docs_url="/docs",
     openapi_url="/openapi.json"
 )
@@ -1130,26 +1179,12 @@ async def mcp_sse_endpoint(
     Official MCP SSE endpoint following Anthropic standards.
     URL format: https://<server_address>/sse
     This is the standard endpoint that Claude Desktop connects to.
+
+    Supports authentication modes: bearer (default), oauth, none (authless)
     """
-    # Authentication required for remote MCP servers
-    if not authorization:
-        raise HTTPException(
-            status_code=401, 
-            detail="Authorization header required for remote MCP server",
-            headers={"WWW-Authenticate": "Bearer"}
-        )
-    
-    try:
-        # Verify bearer token
-        from wazuh_mcp_server.auth import verify_bearer_token
-        token_obj = await verify_bearer_token(authorization)
-    except ValueError as e:
-        raise HTTPException(
-            status_code=401, 
-            detail=str(e),
-            headers={"WWW-Authenticate": "Bearer"}
-        )
-    
+    # Verify authentication based on configured mode
+    await verify_authentication(authorization, config)
+
     # Origin validation for security
     if not origin:
         raise HTTPException(status_code=403, detail="Origin header required")
@@ -1230,28 +1265,13 @@ async def mcp_streamable_http_endpoint(
     - DELETE: Session termination (see separate endpoint)
 
     This is the RECOMMENDED endpoint for MCP clients. Legacy /sse remains for backwards compatibility.
+    Supports authentication modes: bearer (default), oauth, none (authless)
     """
     # Validate protocol version
     protocol_version = validate_protocol_version(mcp_protocol_version)
 
-    # Authentication required for remote MCP servers
-    if not authorization:
-        raise HTTPException(
-            status_code=401,
-            detail="Authorization header required for remote MCP server",
-            headers={"WWW-Authenticate": "Bearer"}
-        )
-
-    try:
-        # Verify bearer token
-        from wazuh_mcp_server.auth import verify_bearer_token
-        token_obj = await verify_bearer_token(authorization)
-    except ValueError as e:
-        raise HTTPException(
-            status_code=401,
-            detail=str(e),
-            headers={"WWW-Authenticate": "Bearer"}
-        )
+    # Verify authentication based on configured mode
+    await verify_authentication(authorization, config)
 
     # Origin validation for security (DNS rebinding protection)
     if not origin:
@@ -1458,16 +1478,29 @@ async def health_check():
         all_sessions = await sessions.get_all()
         active_sessions = len([s for s in all_sessions.values() if not s.is_expired()])
 
+        # Build auth info
+        auth_info = {
+            "mode": config.AUTH_MODE,
+            "bearer_enabled": config.is_bearer,
+            "oauth_enabled": config.is_oauth,
+            "authless": config.is_authless,
+        }
+        if config.is_oauth:
+            auth_info["oauth_dcr"] = config.OAUTH_ENABLE_DCR
+            auth_info["oauth_endpoints"] = ["/oauth/authorize", "/oauth/token", "/oauth/register"]
+            auth_info["oauth_discovery"] = "/.well-known/oauth-authorization-server"
+
         return {
             "status": "healthy",
             "timestamp": datetime.now(timezone.utc).isoformat(),
-            "version": "4.0.0",
+            "version": "4.0.1",
             "mcp_protocol_version": MCP_PROTOCOL_VERSION,
             "supported_protocol_versions": SUPPORTED_PROTOCOL_VERSIONS,
             "transport": {
                 "streamable_http": "enabled",  # New standard
                 "legacy_sse": "enabled"  # Backwards compatibility
             },
+            "authentication": auth_info,
             "services": {
                 "wazuh": wazuh_status,
                 "mcp": "healthy"
@@ -1478,8 +1511,8 @@ async def health_check():
             },
             "endpoints": {
                 "recommended": "/mcp (Streamable HTTP - 2025-06-18)",
-                "legacy": "/sse (SSE only - deprecated)",
-                "authentication": "/auth/token",
+                "legacy": "/sse (SSE only)",
+                "authentication": "/auth/token" if config.is_bearer else ("/oauth/token" if config.is_oauth else None),
                 "monitoring": ["/health", "/metrics"]
             }
         }
@@ -1501,6 +1534,24 @@ async def metrics():
         content=generate_latest(),
         media_type=CONTENT_TYPE_LATEST
     )
+
+
+# OAuth 2.0 Discovery Endpoint (RFC 8414)
+@app.get("/.well-known/oauth-authorization-server")
+async def oauth_metadata(request: Request):
+    """
+    OAuth 2.0 Authorization Server Metadata endpoint.
+    Required for Claude Desktop OAuth integration.
+    """
+    global _oauth_manager
+    if not config.is_oauth or not _oauth_manager:
+        raise HTTPException(
+            status_code=404,
+            detail="OAuth not enabled. Set AUTH_MODE=oauth to enable."
+        )
+
+    return JSONResponse(_oauth_manager.get_metadata(request))
+
 
 # Authentication endpoint for API key validation
 @app.post("/auth/token")
@@ -1544,10 +1595,32 @@ async def get_auth_token(request: Request):
 @app.on_event("startup")
 async def startup_event():
     """Initialize server on startup with graceful shutdown support."""
-    logger.info("🚀 Wazuh MCP Server v4.0.0 starting up...")
+    global _oauth_manager
+
+    logger.info("🚀 Wazuh MCP Server v4.0.1 starting up...")
     logger.info(f"📡 MCP Protocol: {MCP_PROTOCOL_VERSION}")
     logger.info(f"🔗 Wazuh Host: {config.WAZUH_HOST}")
     logger.info(f"🌐 CORS Origins: {config.ALLOWED_ORIGINS}")
+    logger.info(f"🔐 Auth Mode: {config.AUTH_MODE}")
+
+    # Initialize OAuth if enabled
+    if config.is_oauth:
+        try:
+            from wazuh_mcp_server.oauth import init_oauth_manager, create_oauth_router
+            _oauth_manager = init_oauth_manager(config)
+            oauth_router = create_oauth_router(_oauth_manager)
+            app.include_router(oauth_router)
+            logger.info("✅ OAuth 2.0 with DCR initialized")
+            logger.info(f"   OAuth endpoints: /oauth/authorize, /oauth/token, /oauth/register")
+            logger.info(f"   Discovery: /.well-known/oauth-authorization-server")
+        except Exception as e:
+            logger.error(f"❌ OAuth initialization failed: {e}")
+
+    # Log auth mode status
+    if config.is_authless:
+        logger.warning("⚠️  Running in AUTHLESS mode - no authentication required!")
+    elif config.is_bearer:
+        logger.info("🔐 Bearer token authentication enabled")
 
     # Initialize Wazuh client
     try:

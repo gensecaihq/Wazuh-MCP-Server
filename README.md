@@ -523,13 +523,51 @@ curl https://your-server-domain.com/health
 3. Click **"Connect"** to authenticate (if required)
 4. Enable/disable specific tools as needed
 
-### Authentication Setup
+### Authentication Modes
 
-This server uses **Bearer token authentication**. You need to obtain a JWT token before connecting.
+The server supports three authentication modes configured via `AUTH_MODE` environment variable:
+
+| Mode | `AUTH_MODE` | Use Case | Claude Desktop Support |
+|------|-------------|----------|----------------------|
+| **OAuth** | `oauth` | Production with Claude Desktop | ✅ Native (recommended) |
+| **Bearer Token** | `bearer` | API/Programmatic access | ✅ Via Advanced settings |
+| **Authless** | `none` | Development/Testing | ✅ Direct connect |
+
+---
+
+#### Option A: OAuth (Recommended for Claude Desktop)
+
+OAuth with Dynamic Client Registration (DCR) provides the best Claude Desktop experience.
+
+```bash
+# Set environment variable
+AUTH_MODE=oauth docker compose up -d
+```
+
+**How it works:**
+1. Claude Desktop discovers OAuth endpoints via `/.well-known/oauth-authorization-server`
+2. Automatically registers as a client (DCR)
+3. Handles authorization flow seamlessly
+
+**OAuth Endpoints:**
+- Discovery: `/.well-known/oauth-authorization-server`
+- Authorization: `/oauth/authorize`
+- Token: `/oauth/token`
+- Registration: `/oauth/register` (DCR)
+
+---
+
+#### Option B: Bearer Token (Programmatic Access)
+
+For API access or when OAuth is not available:
+
+```bash
+# Default mode
+AUTH_MODE=bearer docker compose up -d
+```
 
 **Step 1: Get API Key**
 ```bash
-# The server generates an API key on startup - check the logs
 docker compose logs wazuh-mcp-remote-server | grep "API key"
 ```
 
@@ -540,11 +578,22 @@ curl -X POST https://your-server-domain.com/auth/token \
   -d '{"api_key": "wazuh_your-generated-api-key"}'
 ```
 
-**Step 3: Configure in Claude Desktop**
+**Step 3: Use Bearer Token**
+Add the token in Claude Desktop's Advanced settings or API requests.
 
-When adding the custom connector in Claude Desktop:
-1. Enter your server URL (`https://your-server.com/mcp`)
-2. In **Advanced settings**, add the Authorization header with your Bearer token
+---
+
+#### Option C: Authless (Development Only)
+
+For local development and testing only. **Not recommended for production.**
+
+```bash
+AUTH_MODE=none docker compose up -d
+```
+
+No authentication required - clients connect directly.
+
+---
 
 ### Supported Features
 
@@ -585,7 +634,7 @@ Could not load app settings
 > - ✅ Use **Connectors UI** (Settings → Connectors), NOT `claude_desktop_config.json`
 > - ✅ Server must be accessible via **HTTPS** (production)
 > - ✅ Use `/mcp` endpoint (Streamable HTTP) or `/sse` endpoint (legacy)
-> - ✅ Bearer token authentication (JWT) required
+> - ✅ Authentication: OAuth (recommended), Bearer token, or Authless (dev only)
 
 ### Programmatic Access
 

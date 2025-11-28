@@ -434,20 +434,32 @@ python -c "from wazuh_mcp_server.config import WazuhConfig; config = WazuhConfig
 5. Configure authentication in **Advanced settings** if needed
 6. Click **Connect**
 
-### Authentication
+### Authentication Modes
 
-This server uses **Bearer token authentication**:
+Configure via `AUTH_MODE` environment variable:
 
-1. Get the API key from server startup logs
-2. Exchange API key for JWT token via `/auth/token` endpoint
-3. Add Bearer token in Claude Desktop's Advanced settings
+| Mode | Value | Description |
+|------|-------|-------------|
+| **OAuth** | `oauth` | OAuth 2.0 with DCR (recommended for Claude Desktop) |
+| **Bearer** | `bearer` | JWT token authentication (default) |
+| **Authless** | `none` | No authentication (development only) |
 
+**OAuth Mode (`AUTH_MODE=oauth`):**
+- Discovery: `/.well-known/oauth-authorization-server`
+- Endpoints: `/oauth/authorize`, `/oauth/token`, `/oauth/register`
+- Claude Desktop connects seamlessly via DCR
+
+**Bearer Mode (`AUTH_MODE=bearer`):**
 ```bash
 # Get JWT token
 curl -X POST https://your-server.com/auth/token \
   -H "Content-Type: application/json" \
   -d '{"api_key": "wazuh_your-api-key"}'
 ```
+
+**Authless Mode (`AUTH_MODE=none`):**
+- No authentication required
+- For development/testing only
 
 ### Common Error
 

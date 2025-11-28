@@ -13,7 +13,8 @@ from datetime import datetime, timezone, timedelta
 from dataclasses import dataclass
 import json
 import base64
-import jwt
+from jose import jwt
+from jose.exceptions import JWTError, ExpiredSignatureError
 
 from pydantic import BaseModel, Field
 import httpx
@@ -286,9 +287,9 @@ def verify_token(token: str, secret_key: str) -> Dict[str, Any]:
     try:
         payload = jwt.decode(token, secret_key, algorithms=["HS256"])
         return payload
-    except jwt.ExpiredSignatureError:
+    except ExpiredSignatureError:
         raise ValueError("Token has expired")
-    except jwt.InvalidTokenError:
+    except JWTError:
         raise ValueError("Invalid token")
 
 
