@@ -436,12 +436,18 @@ python -c "from wazuh_mcp_server.config import WazuhConfig; config = WazuhConfig
 
 ### Authentication
 
-| Method | Use Case |
-|--------|----------|
-| **OAuth** | Production (DCR supported) |
-| **Authless** | Development/testing |
+This server uses **Bearer token authentication**:
 
-OAuth callback URL: `https://claude.ai/api/mcp/auth_callback`
+1. Get the API key from server startup logs
+2. Exchange API key for JWT token via `/auth/token` endpoint
+3. Add Bearer token in Claude Desktop's Advanced settings
+
+```bash
+# Get JWT token
+curl -X POST https://your-server.com/auth/token \
+  -H "Content-Type: application/json" \
+  -d '{"api_key": "wazuh_your-api-key"}'
+```
 
 ### Common Error
 

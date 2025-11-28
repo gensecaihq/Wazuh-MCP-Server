@@ -513,7 +513,7 @@ curl https://your-server-domain.com/health
 4. Enter your MCP server URL:
    - **Recommended (Streamable HTTP):** `https://your-server-domain.com/mcp`
    - **Legacy (SSE):** `https://your-server-domain.com/sse`
-5. For authentication, use **Advanced settings** to configure OAuth or headers
+5. In **Advanced settings**, add your Bearer token for authentication
 6. Click **Connect**
 
 ### Step 3: Enable Tools in Chat
@@ -523,18 +523,28 @@ curl https://your-server-domain.com/health
 3. Click **"Connect"** to authenticate (if required)
 4. Enable/disable specific tools as needed
 
-### Authentication Options
+### Authentication Setup
 
-**Option A: OAuth (Recommended for Production)**
+This server uses **Bearer token authentication**. You need to obtain a JWT token before connecting.
 
-This server supports OAuth with Dynamic Client Registration (DCR). Claude will automatically handle the OAuth flow when you connect.
+**Step 1: Get API Key**
+```bash
+# The server generates an API key on startup - check the logs
+docker compose logs wazuh-mcp-remote-server | grep "API key"
+```
 
-- OAuth callback URL: `https://claude.ai/api/mcp/auth_callback`
-- OAuth client name: "Claude"
+**Step 2: Exchange for JWT Token**
+```bash
+curl -X POST https://your-server-domain.com/auth/token \
+  -H "Content-Type: application/json" \
+  -d '{"api_key": "wazuh_your-generated-api-key"}'
+```
 
-**Option B: Authless (Development/Testing)**
+**Step 3: Configure in Claude Desktop**
 
-For development environments, you can configure the server to accept connections without authentication.
+When adding the custom connector in Claude Desktop:
+1. Enter your server URL (`https://your-server.com/mcp`)
+2. In **Advanced settings**, add the Authorization header with your Bearer token
 
 ### Supported Features
 
@@ -575,7 +585,7 @@ Could not load app settings
 > - ✅ Use **Connectors UI** (Settings → Connectors), NOT `claude_desktop_config.json`
 > - ✅ Server must be accessible via **HTTPS** (production)
 > - ✅ Use `/mcp` endpoint (Streamable HTTP) or `/sse` endpoint (legacy)
-> - ✅ OAuth or authless authentication supported
+> - ✅ Bearer token authentication (JWT) required
 
 ### Programmatic Access
 
