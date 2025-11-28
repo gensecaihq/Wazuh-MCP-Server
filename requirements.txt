@@ -20,6 +20,7 @@ python-dotenv>=1.0.0
 # Authentication and security
 python-jose[cryptography]>=3.3.0
 passlib[bcrypt]>=1.7.4
+python-multipart>=0.0.9  # Form data for OAuth token endpoint
 
 # Monitoring and metrics
 prometheus-client>=0.20.0

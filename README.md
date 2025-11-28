@@ -1,4 +1,4 @@
-# Wazuh MCP Remote Server v4.0.0
+# Wazuh MCP Remote Server v4.0.1
 
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
@@ -7,6 +7,7 @@
 [![MCP Compliant](https://img.shields.io/badge/MCP-2025--06--18-green.svg)](https://modelcontextprotocol.io/)
 [![Streamable HTTP](https://img.shields.io/badge/Streamable%20HTTP-Enabled-blue.svg)](#)
 [![Legacy SSE](https://img.shields.io/badge/Legacy%20SSE-Supported-orange.svg)](#)
+[![OAuth 2.0](https://img.shields.io/badge/OAuth%202.0-DCR-green.svg)](#)
 [![Bearer Auth](https://img.shields.io/badge/Bearer-Authentication-red.svg)](#)
 
 A **production-ready, enterprise-grade** MCP-compliant remote server that provides seamless integration with Wazuh SIEM platform using the latest **Streamable HTTP transport** (MCP 2025-06-18).
@@ -211,9 +212,11 @@ curl http://localhost:3000/health
 | `WAZUH_USER` | API username | - | ✅ |
 | `WAZUH_PASS` | API password | - | ✅ |
 | `WAZUH_PORT` | API port | `55000` | ❌ |
-| `MCP_HOST` | Server bind address | `127.0.0.1` | ❌ |
+| `MCP_HOST` | Server bind address | `0.0.0.0` | ❌ |
 | `MCP_PORT` | Server port | `3000` | ❌ |
-| `AUTH_SECRET_KEY` | JWT signing key | - | ✅ |
+| `AUTH_MODE` | Authentication mode: `oauth`, `bearer`, `none` | `bearer` | ❌ |
+| `AUTH_SECRET_KEY` | JWT signing key | auto-generated | ❌ |
+| `OAUTH_ENABLE_DCR` | Enable OAuth Dynamic Client Registration | `true` | ❌ |
 | `LOG_LEVEL` | Logging level | `INFO` | ❌ |
 | `WAZUH_VERIFY_SSL` | SSL verification | `false` | ❌ |
 | `ALLOWED_ORIGINS` | CORS origins | `https://claude.ai` | ❌ |
@@ -461,14 +464,24 @@ docker stats wazuh-mcp-server --format "table {{.Name}}\t{{.CPUPerc}}\t{{.MemUsa
 
 | Endpoint | Method | Description |
 |----------|--------|-------------|
-| `/sse` | GET | **Official MCP SSE endpoint** (required for Claude Desktop) |
+| `/mcp` | GET/POST | **Recommended MCP endpoint** (Streamable HTTP - 2025-06-18) |
+| `/sse` | GET | Legacy SSE endpoint (backward compatibility) |
 | `/` | POST | JSON-RPC 2.0 endpoint (alternative API access) |
-| `/auth/token` | POST | Authentication token generation |
 | `/health` | GET | Health check and status |
 | `/metrics` | GET | Prometheus metrics |
 | `/docs` | GET | OpenAPI documentation |
 
-> **Important**: Claude Desktop **must** use the `/sse` endpoint with Bearer authentication
+### Authentication Endpoints
+
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/auth/token` | POST | Exchange API key for JWT token (bearer mode) |
+| `/.well-known/oauth-authorization-server` | GET | OAuth 2.0 discovery (oauth mode) |
+| `/oauth/authorize` | GET | OAuth authorization endpoint |
+| `/oauth/token` | POST | OAuth token exchange |
+| `/oauth/register` | POST | Dynamic Client Registration (DCR) |
+
+> **Claude Desktop**: Use `/mcp` endpoint with OAuth mode for best experience
 
 ### Authentication
 ```bash

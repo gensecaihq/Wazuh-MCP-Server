@@ -128,7 +128,8 @@ class AuthManager:
             return None
             
         # Format validation - must start with wazuh_ and have proper length
-        if not api_key.startswith("wazuh_") or len(api_key) != 50:  # wazuh_ (6) + 44 char base64
+        # secrets.token_urlsafe(32) generates 43 chars, so total = 6 + 43 = 49
+        if not api_key.startswith("wazuh_") or len(api_key) != 49:
             return None
             
         # Sanitize input to prevent injection attacks
