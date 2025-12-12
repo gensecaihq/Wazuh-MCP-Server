@@ -266,7 +266,7 @@ async def get_or_create_session(session_id: Optional[str], origin: Optional[str]
 app = FastAPI(
     title="Wazuh MCP Server",
     description="MCP-compliant remote server for Wazuh SIEM integration. Supports Streamable HTTP, SSE, OAuth, and authless modes.",
-    version="4.0.2",
+    version="4.0.3",
     docs_url="/docs",
     openapi_url="/openapi.json"
 )
@@ -415,7 +415,7 @@ async def handle_initialize(params: Dict[str, Any], session: MCPSession) -> Dict
     # Server information
     server_info = {
         "name": "Wazuh MCP Server",
-        "version": "4.0.0",
+        "version": "4.0.3",
         "vendor": "GenSec AI",
         "description": "MCP-compliant remote server for Wazuh SIEM integration"
     }
@@ -1086,7 +1086,7 @@ async def mcp_endpoint(
                             "protocolVersion": "2025-03-26",
                             "serverInfo": {
                                 "name": "Wazuh MCP Server",
-                                "version": "4.0.0"
+                                "version": "4.0.3"
                             },
                             "session": session.to_dict()
                         }
@@ -1349,7 +1349,7 @@ async def mcp_streamable_http_endpoint(
                             "protocolVersion": protocol_version,
                             "serverInfo": {
                                 "name": "Wazuh MCP Server",
-                                "version": "4.0.0"
+                                "version": "4.0.3"
                             },
                             "capabilities": {
                                 "tools": True,
@@ -1513,7 +1513,7 @@ async def health_check():
         return {
             "status": "healthy",
             "timestamp": datetime.now(timezone.utc).isoformat(),
-            "version": "4.0.2",
+            "version": "4.0.3",
             "mcp_protocol_version": MCP_PROTOCOL_VERSION,
             "supported_protocol_versions": SUPPORTED_PROTOCOL_VERSIONS,
             "transport": {
