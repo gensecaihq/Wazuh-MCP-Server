@@ -212,6 +212,10 @@ curl http://localhost:3000/health
 | `WAZUH_USER` | API username | - | ✅ |
 | `WAZUH_PASS` | API password | - | ✅ |
 | `WAZUH_PORT` | API port | `55000` | ❌ |
+| `WAZUH_INDEXER_HOST` | Wazuh Indexer hostname (required for vulnerability tools in 4.8.0+) | - | ❌* |
+| `WAZUH_INDEXER_PORT` | Wazuh Indexer port | `9200` | ❌ |
+| `WAZUH_INDEXER_USER` | Wazuh Indexer username | - | ❌* |
+| `WAZUH_INDEXER_PASS` | Wazuh Indexer password | - | ❌* |
 | `MCP_HOST` | Server bind address | `0.0.0.0` | ❌ |
 | `MCP_PORT` | Server port | `3000` | ❌ |
 | `AUTH_MODE` | Authentication mode: `oauth`, `bearer`, `none` | `bearer` | ❌ |
@@ -222,6 +226,8 @@ curl http://localhost:3000/health
 | `ALLOWED_ORIGINS` | CORS origins | `https://claude.ai` | ❌ |
 | `REDIS_URL` | Redis URL for serverless sessions | - | ❌ |
 | `SESSION_TTL_SECONDS` | Session TTL (Redis only) | `1800` | ❌ |
+
+> **Note**: *`WAZUH_INDEXER_*` variables are required for vulnerability tools when using Wazuh 4.8.0+. The `/vulnerability` API was removed in Wazuh 4.8.0.
 
 ### Docker Compose Configuration
 

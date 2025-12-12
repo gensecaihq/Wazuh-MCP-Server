@@ -28,6 +28,7 @@ import httpx
 
 from wazuh_mcp_server.config import get_config, WazuhConfig
 from wazuh_mcp_server.api.wazuh_client import WazuhClient
+from wazuh_mcp_server.api.wazuh_indexer import IndexerNotConfiguredError
 from wazuh_mcp_server.auth import create_access_token, verify_token
 from wazuh_mcp_server.security import RateLimiter, validate_input
 from wazuh_mcp_server.monitoring import REQUEST_COUNT, REQUEST_DURATION, ACTIVE_CONNECTIONS
@@ -554,10 +555,10 @@ async def handle_tools_list(params: Dict[str, Any], session: MCPSession) -> Dict
             }
         },
 
-        # Vulnerability Management Tools (3 tools)
+        # Vulnerability Management Tools (3 tools) - Requires Wazuh Indexer (4.8.0+)
         {
             "name": "get_wazuh_vulnerabilities",
-            "description": "Retrieve vulnerability information from Wazuh",
+            "description": "Retrieve vulnerability information from Wazuh Indexer (requires WAZUH_INDEXER_HOST configuration)",
             "inputSchema": {
                 "type": "object",
                 "properties": {
@@ -570,7 +571,7 @@ async def handle_tools_list(params: Dict[str, Any], session: MCPSession) -> Dict
         },
         {
             "name": "get_wazuh_critical_vulnerabilities",
-            "description": "Get critical vulnerabilities from Wazuh",
+            "description": "Get critical vulnerabilities from Wazuh Indexer (requires WAZUH_INDEXER_HOST configuration)",
             "inputSchema": {
                 "type": "object",
                 "properties": {
@@ -581,7 +582,7 @@ async def handle_tools_list(params: Dict[str, Any], session: MCPSession) -> Dict
         },
         {
             "name": "get_wazuh_vulnerability_summary",
-            "description": "Get vulnerability summary statistics from Wazuh",
+            "description": "Get vulnerability summary statistics from Wazuh Indexer (requires WAZUH_INDEXER_HOST configuration)",
             "inputSchema": {
                 "type": "object",
                 "properties": {
@@ -944,7 +945,12 @@ async def handle_tools_call(params: Dict[str, Any], session: MCPSession) -> Dict
 
         else:
             raise ValueError(f"Unknown tool: {tool_name}")
-            
+
+    except IndexerNotConfiguredError as e:
+        # Provide helpful error for vulnerability tools when indexer is not configured
+        logger.warning(f"Indexer not configured for tool {tool_name}: {e}")
+        raise ValueError(str(e))
+
     except Exception as e:
         logger.error(f"Tool execution error: {e}")
         raise ValueError(f"Tool execution failed: {str(e)}")
@@ -1473,7 +1479,21 @@ async def health_check():
             await wazuh_client.get_manager_info()
         except Exception as e:
             wazuh_status = f"unhealthy: {str(e)}"
-        
+
+        # Test Wazuh Indexer connectivity (if configured)
+        indexer_status = "not_configured"
+        if wazuh_client._indexer_client:
+            try:
+                health = await wazuh_client._indexer_client.health_check()
+                if health.get("status") in ("green", "yellow"):
+                    indexer_status = "healthy"
+                elif health.get("status") == "red":
+                    indexer_status = "degraded"
+                else:
+                    indexer_status = health.get("status", "unknown")
+            except Exception as e:
+                indexer_status = f"unhealthy: {str(e)}"
+
         # Check session count
         all_sessions = await sessions.get_all()
         active_sessions = len([s for s in all_sessions.values() if not s.is_expired()])
@@ -1493,7 +1513,7 @@ async def health_check():
         return {
             "status": "healthy",
             "timestamp": datetime.now(timezone.utc).isoformat(),
-            "version": "4.0.1",
+            "version": "4.0.2",
             "mcp_protocol_version": MCP_PROTOCOL_VERSION,
             "supported_protocol_versions": SUPPORTED_PROTOCOL_VERSIONS,
             "transport": {
@@ -1502,8 +1522,13 @@ async def health_check():
             },
             "authentication": auth_info,
             "services": {
-                "wazuh": wazuh_status,
+                "wazuh_manager": wazuh_status,
+                "wazuh_indexer": indexer_status,
                 "mcp": "healthy"
+            },
+            "vulnerability_tools": {
+                "available": wazuh_client._indexer_client is not None,
+                "note": "Vulnerability tools require Wazuh Indexer (4.8.0+). Set WAZUH_INDEXER_HOST to enable." if not wazuh_client._indexer_client else "Wazuh Indexer configured"
             },
             "metrics": {
                 "active_sessions": active_sessions,

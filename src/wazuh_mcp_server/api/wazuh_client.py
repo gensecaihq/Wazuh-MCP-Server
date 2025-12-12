@@ -13,6 +13,10 @@ from wazuh_mcp_server.resilience import (
     CircuitBreakerConfig,
     RetryConfig
 )
+from wazuh_mcp_server.api.wazuh_indexer import (
+    WazuhIndexerClient,
+    IndexerNotConfiguredError
+)
 
 logger = logging.getLogger(__name__)
 
@@ -37,6 +41,25 @@ class WazuhClient:
             expected_exception=Exception
         )
         self._circuit_breaker = CircuitBreaker(circuit_config)
+
+        # Initialize Wazuh Indexer client if configured (required for Wazuh 4.8.0+)
+        self._indexer_client: Optional[WazuhIndexerClient] = None
+        if config.wazuh_indexer_host:
+            self._indexer_client = WazuhIndexerClient(
+                host=config.wazuh_indexer_host,
+                port=config.wazuh_indexer_port,
+                username=config.wazuh_indexer_user,
+                password=config.wazuh_indexer_pass,
+                verify_ssl=config.verify_ssl,
+                timeout=config.request_timeout_seconds
+            )
+            logger.info(f"WazuhIndexerClient configured for {config.wazuh_indexer_host}:{config.wazuh_indexer_port}")
+        else:
+            logger.warning(
+                "Wazuh Indexer not configured. Vulnerability tools will not work with Wazuh 4.8.0+. "
+                "Set WAZUH_INDEXER_HOST to enable vulnerability queries."
+            )
+
         logger.info("WazuhClient initialized with circuit breaker and retry logic")
     
     async def initialize(self):
@@ -46,6 +69,14 @@ class WazuhClient:
             timeout=self.config.request_timeout_seconds
         )
         await self._authenticate()
+
+        # Initialize indexer client if configured
+        if self._indexer_client:
+            try:
+                await self._indexer_client.initialize()
+                logger.info("Wazuh Indexer client initialized successfully")
+            except Exception as e:
+                logger.warning(f"Wazuh Indexer initialization failed: {e}")
     
     async def _authenticate(self):
         """Authenticate with Wazuh API."""
@@ -86,11 +117,36 @@ class WazuhClient:
         return await self._request("GET", "/agents", params=params)
     
     async def get_vulnerabilities(self, **params) -> Dict[str, Any]:
-        """Get vulnerabilities from Wazuh Indexer (4.8.0-4.14.1 supported, uses centralized vulnerability detection)."""
-        # Note: /vulnerability endpoint was deprecated in 4.7.0 and removed in 4.8.0
-        # 4.12+ includes package condition fields and CTI references
-        # 4.14.x maintains API compatibility with enhanced vulnerability data
-        return await self._request("GET", "/vulnerability/agents", params=params)
+        """
+        Get vulnerabilities from Wazuh Indexer (4.8.0+ required).
+
+        Note: The /vulnerability API endpoint was deprecated in Wazuh 4.7.0
+        and removed in 4.8.0. Vulnerability data must be queried from the
+        Wazuh Indexer using the wazuh-states-vulnerabilities-* index.
+
+        Args:
+            agent_id: Filter by agent ID
+            severity: Filter by severity (critical, high, medium, low)
+            limit: Maximum number of results (default: 100)
+
+        Returns:
+            Vulnerability data from the indexer
+
+        Raises:
+            IndexerNotConfiguredError: If Wazuh Indexer is not configured
+        """
+        if not self._indexer_client:
+            raise IndexerNotConfiguredError()
+
+        agent_id = params.get("agent_id")
+        severity = params.get("severity")
+        limit = params.get("limit", 100)
+
+        return await self._indexer_client.get_vulnerabilities(
+            agent_id=agent_id,
+            severity=severity,
+            limit=limit
+        )
     
     async def get_cluster_status(self) -> Dict[str, Any]:
         """Get cluster status."""
@@ -161,12 +217,44 @@ class WazuhClient:
         return await self._request("GET", "/manager/version/check")
     
     async def get_cti_data(self, cve_id: str) -> Dict[str, Any]:
-        """Get Cyber Threat Intelligence data for CVE (4.12-4.14.1 feature)."""
-        return await self._request("GET", f"/vulnerability/cti/{cve_id}")
+        """
+        Get Cyber Threat Intelligence data for CVE (4.8.0+ via Indexer).
+
+        Note: CTI data is now stored in the Wazuh Indexer.
+
+        Args:
+            cve_id: CVE ID to look up (e.g., "CVE-2021-44228")
+
+        Returns:
+            Vulnerability data for the specific CVE
+
+        Raises:
+            IndexerNotConfiguredError: If Wazuh Indexer is not configured
+        """
+        if not self._indexer_client:
+            raise IndexerNotConfiguredError()
+
+        return await self._indexer_client.get_vulnerabilities(cve_id=cve_id, limit=100)
 
     async def get_vulnerability_details(self, vuln_id: str, **params) -> Dict[str, Any]:
-        """Get detailed vulnerability information including CTI references (4.12-4.14.1 enhanced)."""
-        return await self._request("GET", f"/vulnerability/{vuln_id}", params=params)
+        """
+        Get detailed vulnerability information (4.8.0+ via Indexer).
+
+        Note: Vulnerability details are now stored in the Wazuh Indexer.
+
+        Args:
+            vuln_id: Vulnerability/CVE ID
+
+        Returns:
+            Detailed vulnerability information
+
+        Raises:
+            IndexerNotConfiguredError: If Wazuh Indexer is not configured
+        """
+        if not self._indexer_client:
+            raise IndexerNotConfiguredError()
+
+        return await self._indexer_client.get_vulnerabilities(cve_id=vuln_id, limit=1)
     
     async def get_agent_stats(self, agent_id: str, component: str = "logcollector") -> Dict[str, Any]:
         """Get agent component statistics."""
@@ -290,12 +378,40 @@ class WazuhClient:
         return await self._request("GET", f"/agents/{agent_id}/config")
 
     async def get_critical_vulnerabilities(self, limit: int) -> Dict[str, Any]:
-        """Get critical vulnerabilities."""
-        return await self._request("GET", "/vulnerability/agents", params={"severity": "critical", "limit": limit})
+        """
+        Get critical vulnerabilities from Wazuh Indexer (4.8.0+ required).
+
+        Args:
+            limit: Maximum number of results
+
+        Returns:
+            Critical vulnerability data from the indexer
+
+        Raises:
+            IndexerNotConfiguredError: If Wazuh Indexer is not configured
+        """
+        if not self._indexer_client:
+            raise IndexerNotConfiguredError()
+
+        return await self._indexer_client.get_critical_vulnerabilities(limit=limit)
 
     async def get_vulnerability_summary(self, time_range: str) -> Dict[str, Any]:
-        """Get vulnerability summary."""
-        return await self._request("GET", "/vulnerability/summary", params={"time_range": time_range})
+        """
+        Get vulnerability summary statistics from Wazuh Indexer (4.8.0+ required).
+
+        Args:
+            time_range: Time range for the summary (currently not used, returns all current vulnerabilities)
+
+        Returns:
+            Vulnerability summary with counts by severity
+
+        Raises:
+            IndexerNotConfiguredError: If Wazuh Indexer is not configured
+        """
+        if not self._indexer_client:
+            raise IndexerNotConfiguredError()
+
+        return await self._indexer_client.get_vulnerability_summary()
 
     async def analyze_security_threat(self, indicator: str, indicator_type: str) -> Dict[str, Any]:
         """Analyze security threat."""
@@ -376,6 +492,8 @@ class WazuhClient:
             return {"status": "failed", "error": str(e)}
     
     async def close(self):
-        """Close the HTTP client."""
+        """Close the HTTP client and indexer client."""
         if self.client:
             await self.client.aclose()
+        if self._indexer_client:
+            await self._indexer_client.close()
