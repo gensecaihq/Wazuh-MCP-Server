@@ -35,3 +35,4 @@ redis[async]>=5.0.0  # Redis async client for serverless session storage
 
 # Security and encryption
 cryptography>=41.0.0  # Encryption for secrets
+pyasn1>=0.6.2 # not directly required, pinned by Snyk to avoid a vulnerability
