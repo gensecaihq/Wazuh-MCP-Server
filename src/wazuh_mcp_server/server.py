@@ -293,7 +293,7 @@ async def get_or_create_session(session_id: Optional[str], origin: Optional[str]
 app = FastAPI(
     title="Wazuh MCP Server",
     description="MCP-compliant remote server for Wazuh SIEM integration. Supports Streamable HTTP, SSE, OAuth, and authless modes.",
-    version="4.0.4",
+    version="4.0.5",
     docs_url="/docs",
     openapi_url="/openapi.json"
 )
@@ -418,49 +418,456 @@ def validate_protocol_version(version: Optional[str]) -> str:
     logger.warning(f"Unsupported protocol version {version}, using 2025-03-26 for compatibility")
     return "2025-03-26"
 
+# Track initialized sessions (for notifications/initialized handling)
+_initialized_sessions: Dict[str, bool] = {}
+
+# Current log level for logging/setLevel
+_current_log_level: str = "info"
+
+
 # MCP Protocol Handlers
 async def handle_initialize(params: Dict[str, Any], session: MCPSession) -> Dict[str, Any]:
-    """Handle MCP initialize method."""
-    protocol_version = params.get("protocolVersion", "")
+    """Handle MCP initialize method per MCP specification."""
+    client_protocol_version = params.get("protocolVersion", "2025-03-26")
     capabilities = params.get("capabilities", {})
     client_info = params.get("clientInfo", {})
-    
+
     # Store client information
     session.capabilities = capabilities
     session.client_info = client_info
-    
-    # Server capabilities
+
+    # Protocol version negotiation per MCP spec
+    # Server should respond with a version it supports
+    if client_protocol_version in SUPPORTED_PROTOCOL_VERSIONS:
+        negotiated_version = client_protocol_version
+    else:
+        # Default to latest supported version
+        negotiated_version = MCP_PROTOCOL_VERSION
+
+    # Server capabilities - only declare what we actually implement
     server_capabilities = {
         "logging": {},
         "prompts": {
             "listChanged": True
         },
         "resources": {
-            "subscribe": True,
+            "subscribe": False,  # Not fully implemented yet
             "listChanged": True
         },
         "tools": {
             "listChanged": True
         }
     }
-    
+
     # Server information
     server_info = {
         "name": "Wazuh MCP Server",
-        "version": "4.0.4",
+        "version": "4.0.5",
         "vendor": "GenSec AI",
         "description": "MCP-compliant remote server for Wazuh SIEM integration"
     }
-    
+
+    # Mark session as awaiting initialized notification
+    _initialized_sessions[session.session_id] = False
+
     return {
-        "protocolVersion": "2025-03-26",
+        "protocolVersion": negotiated_version,
         "capabilities": server_capabilities,
         "serverInfo": server_info,
         "instructions": "Connected to Wazuh MCP Server. Use available tools for security operations."
     }
 
+
+async def handle_initialized_notification(params: Dict[str, Any], session: MCPSession) -> None:
+    """Handle notifications/initialized - marks session as fully initialized."""
+    _initialized_sessions[session.session_id] = True
+    logger.info(f"Session {session.session_id} fully initialized")
+
+
+async def handle_ping(params: Dict[str, Any], session: MCPSession) -> Dict[str, Any]:
+    """
+    Handle ping method per MCP specification.
+    MUST respond immediately with empty result.
+    """
+    return {}
+
+async def handle_logging_set_level(params: Dict[str, Any], session: MCPSession) -> Dict[str, Any]:
+    """
+    Handle logging/setLevel method per MCP specification.
+    Sets the minimum log level for server log notifications.
+    """
+    global _current_log_level
+    level = params.get("level", "info")
+
+    valid_levels = ["debug", "info", "notice", "warning", "error", "critical", "alert", "emergency"]
+    if level.lower() not in valid_levels:
+        raise ValueError(f"Invalid log level: {level}. Must be one of: {', '.join(valid_levels)}")
+
+    _current_log_level = level.lower()
+    logger.info(f"Log level set to: {_current_log_level}")
+
+    return {}
+
+
+async def handle_prompts_list(params: Dict[str, Any], session: MCPSession) -> Dict[str, Any]:
+    """
+    Handle prompts/list method per MCP specification.
+    Returns list of available prompts with pagination support.
+    """
+    cursor = params.get("cursor")
+
+    # Wazuh security prompts
+    prompts = [
+        {
+            "name": "security_investigation",
+            "description": "Investigate a security incident using Wazuh data",
+            "arguments": [
+                {
+                    "name": "incident_type",
+                    "description": "Type of incident to investigate (e.g., malware, intrusion, data_breach)",
+                    "required": True
+                },
+                {
+                    "name": "time_range",
+                    "description": "Time range for investigation (e.g., 1h, 24h, 7d)",
+                    "required": False
+                }
+            ]
+        },
+        {
+            "name": "threat_hunt",
+            "description": "Perform proactive threat hunting across Wazuh agents",
+            "arguments": [
+                {
+                    "name": "hunt_hypothesis",
+                    "description": "The threat hypothesis to investigate",
+                    "required": True
+                },
+                {
+                    "name": "agent_scope",
+                    "description": "Scope of agents to hunt (all, critical, specific)",
+                    "required": False
+                }
+            ]
+        },
+        {
+            "name": "compliance_audit",
+            "description": "Generate compliance audit report for a specific framework",
+            "arguments": [
+                {
+                    "name": "framework",
+                    "description": "Compliance framework (PCI-DSS, HIPAA, SOX, GDPR, NIST)",
+                    "required": True
+                },
+                {
+                    "name": "include_remediation",
+                    "description": "Include remediation recommendations",
+                    "required": False
+                }
+            ]
+        },
+        {
+            "name": "vulnerability_assessment",
+            "description": "Assess vulnerabilities across the environment",
+            "arguments": [
+                {
+                    "name": "severity_threshold",
+                    "description": "Minimum severity to include (low, medium, high, critical)",
+                    "required": False
+                },
+                {
+                    "name": "agent_id",
+                    "description": "Specific agent to assess (optional)",
+                    "required": False
+                }
+            ]
+        }
+    ]
+
+    # Simple pagination (no cursor means start from beginning)
+    # In production, implement proper cursor-based pagination
+    return {
+        "prompts": prompts,
+        "nextCursor": None  # No more results
+    }
+
+
+async def handle_prompts_get(params: Dict[str, Any], session: MCPSession) -> Dict[str, Any]:
+    """
+    Handle prompts/get method per MCP specification.
+    Returns prompt content with substituted arguments.
+    """
+    name = params.get("name")
+    arguments = params.get("arguments", {})
+
+    if not name:
+        raise ValueError("Prompt name is required")
+
+    # Prompt templates
+    prompt_templates = {
+        "security_investigation": {
+            "description": "Security incident investigation workflow",
+            "messages": [
+                {
+                    "role": "user",
+                    "content": {
+                        "type": "text",
+                        "text": f"Investigate a {arguments.get('incident_type', 'security')} incident. "
+                               f"Time range: {arguments.get('time_range', '24h')}. "
+                               f"Steps:\n"
+                               f"1. Use get_wazuh_alerts to retrieve relevant alerts\n"
+                               f"2. Use analyze_alert_patterns to identify patterns\n"
+                               f"3. Use search_security_events to find related events\n"
+                               f"4. Use check_agent_health for affected agents\n"
+                               f"5. Use perform_risk_assessment to evaluate impact"
+                    }
+                }
+            ]
+        },
+        "threat_hunt": {
+            "description": "Proactive threat hunting workflow",
+            "messages": [
+                {
+                    "role": "user",
+                    "content": {
+                        "type": "text",
+                        "text": f"Hunt for threats based on hypothesis: {arguments.get('hunt_hypothesis', 'suspicious activity')}. "
+                               f"Agent scope: {arguments.get('agent_scope', 'all')}. "
+                               f"Workflow:\n"
+                               f"1. Use get_wazuh_agents to identify target agents\n"
+                               f"2. Use search_security_events with relevant patterns\n"
+                               f"3. Use analyze_security_threat for any indicators found\n"
+                               f"4. Use check_ioc_reputation for suspicious IPs/domains\n"
+                               f"5. Use generate_security_report to document findings"
+                    }
+                }
+            ]
+        },
+        "compliance_audit": {
+            "description": "Compliance audit workflow",
+            "messages": [
+                {
+                    "role": "user",
+                    "content": {
+                        "type": "text",
+                        "text": f"Perform {arguments.get('framework', 'PCI-DSS')} compliance audit. "
+                               f"Include remediation: {arguments.get('include_remediation', 'true')}. "
+                               f"Steps:\n"
+                               f"1. Use run_compliance_check with the specified framework\n"
+                               f"2. Use get_wazuh_agents to assess agent coverage\n"
+                               f"3. Use get_wazuh_vulnerabilities to identify security gaps\n"
+                               f"4. Use generate_security_report for compliance documentation"
+                    }
+                }
+            ]
+        },
+        "vulnerability_assessment": {
+            "description": "Vulnerability assessment workflow",
+            "messages": [
+                {
+                    "role": "user",
+                    "content": {
+                        "type": "text",
+                        "text": f"Assess vulnerabilities with severity >= {arguments.get('severity_threshold', 'medium')}. "
+                               f"Agent: {arguments.get('agent_id', 'all')}. "
+                               f"Workflow:\n"
+                               f"1. Use get_wazuh_vulnerabilities to retrieve vulnerability data\n"
+                               f"2. Use get_wazuh_critical_vulnerabilities for highest priority items\n"
+                               f"3. Use get_wazuh_vulnerability_summary for statistics\n"
+                               f"4. Use perform_risk_assessment to evaluate overall risk"
+                    }
+                }
+            ]
+        }
+    }
+
+    if name not in prompt_templates:
+        raise ValueError(f"Unknown prompt: {name}")
+
+    return prompt_templates[name]
+
+
+async def handle_resources_list(params: Dict[str, Any], session: MCPSession) -> Dict[str, Any]:
+    """
+    Handle resources/list method per MCP specification.
+    Returns list of available resources with pagination support.
+    """
+    cursor = params.get("cursor")
+
+    # Wazuh resources
+    resources = [
+        {
+            "uri": "wazuh://manager/info",
+            "name": "Wazuh Manager Information",
+            "description": "Current Wazuh manager status and configuration",
+            "mimeType": "application/json"
+        },
+        {
+            "uri": "wazuh://agents/summary",
+            "name": "Agents Summary",
+            "description": "Summary of all Wazuh agents and their status",
+            "mimeType": "application/json"
+        },
+        {
+            "uri": "wazuh://alerts/recent",
+            "name": "Recent Alerts",
+            "description": "Most recent security alerts from Wazuh",
+            "mimeType": "application/json"
+        },
+        {
+            "uri": "wazuh://cluster/status",
+            "name": "Cluster Status",
+            "description": "Wazuh cluster health and node information",
+            "mimeType": "application/json"
+        },
+        {
+            "uri": "wazuh://rules/summary",
+            "name": "Rules Summary",
+            "description": "Summary of active Wazuh detection rules",
+            "mimeType": "application/json"
+        },
+        {
+            "uri": "wazuh://vulnerabilities/critical",
+            "name": "Critical Vulnerabilities",
+            "description": "Critical vulnerabilities from Wazuh Indexer (requires 4.8.0+)",
+            "mimeType": "application/json"
+        }
+    ]
+
+    return {
+        "resources": resources,
+        "nextCursor": None
+    }
+
+
+async def handle_resources_read(params: Dict[str, Any], session: MCPSession) -> Dict[str, Any]:
+    """
+    Handle resources/read method per MCP specification.
+    Returns resource content.
+    """
+    uri = params.get("uri")
+
+    if not uri:
+        raise ValueError("Resource URI is required")
+
+    # Parse Wazuh resource URI
+    if not uri.startswith("wazuh://"):
+        raise ValueError(f"Invalid resource URI scheme: {uri}. Expected wazuh://")
+
+    resource_path = uri[8:]  # Remove "wazuh://"
+
+    try:
+        if resource_path == "manager/info":
+            data = await wazuh_client.get_manager_info()
+        elif resource_path == "agents/summary":
+            data = await wazuh_client.get_running_agents()
+        elif resource_path == "alerts/recent":
+            data = await wazuh_client.get_alerts(limit=50)
+        elif resource_path == "cluster/status":
+            data = await wazuh_client.get_cluster_health()
+        elif resource_path == "rules/summary":
+            data = await wazuh_client.get_rules_summary()
+        elif resource_path == "vulnerabilities/critical":
+            data = await wazuh_client.get_critical_vulnerabilities(limit=50)
+        else:
+            raise ValueError(f"Resource not found: {uri}")
+
+        return {
+            "contents": [
+                {
+                    "uri": uri,
+                    "mimeType": "application/json",
+                    "text": json.dumps(data, indent=2)
+                }
+            ]
+        }
+
+    except Exception as e:
+        logger.error(f"Error reading resource {uri}: {e}")
+        raise ValueError(f"Failed to read resource: {str(e)}")
+
+
+async def handle_resources_templates_list(params: Dict[str, Any], session: MCPSession) -> Dict[str, Any]:
+    """
+    Handle resources/templates/list method per MCP specification.
+    Returns list of resource URI templates.
+    """
+    templates = [
+        {
+            "uriTemplate": "wazuh://agents/{agent_id}/info",
+            "name": "Agent Information",
+            "description": "Detailed information for a specific agent",
+            "mimeType": "application/json"
+        },
+        {
+            "uriTemplate": "wazuh://agents/{agent_id}/alerts",
+            "name": "Agent Alerts",
+            "description": "Recent alerts for a specific agent",
+            "mimeType": "application/json"
+        },
+        {
+            "uriTemplate": "wazuh://agents/{agent_id}/vulnerabilities",
+            "name": "Agent Vulnerabilities",
+            "description": "Vulnerabilities for a specific agent",
+            "mimeType": "application/json"
+        }
+    ]
+
+    return {
+        "resourceTemplates": templates,
+        "nextCursor": None
+    }
+
+
+async def handle_completion_complete(params: Dict[str, Any], session: MCPSession) -> Dict[str, Any]:
+    """
+    Handle completion/complete method per MCP specification.
+    Returns argument completion suggestions.
+    """
+    ref = params.get("ref", {})
+    argument = params.get("argument", {})
+
+    ref_type = ref.get("type")
+    ref_name = ref.get("name")
+    arg_name = argument.get("name", "")
+    arg_value = argument.get("value", "")
+
+    completions = []
+
+    # Provide completions based on context
+    if ref_type == "ref/prompt":
+        if arg_name == "incident_type":
+            completions = ["malware", "intrusion", "data_breach", "ransomware", "phishing", "insider_threat"]
+        elif arg_name == "time_range":
+            completions = ["1h", "6h", "24h", "7d", "30d"]
+        elif arg_name == "framework":
+            completions = ["PCI-DSS", "HIPAA", "SOX", "GDPR", "NIST"]
+        elif arg_name == "severity_threshold":
+            completions = ["low", "medium", "high", "critical"]
+        elif arg_name == "agent_scope":
+            completions = ["all", "critical", "specific"]
+
+    elif ref_type == "ref/resource":
+        if "agent" in ref_name.lower():
+            # Could fetch actual agent IDs here
+            completions = ["001", "002", "003", "004", "005"]
+
+    # Filter by current value
+    if arg_value:
+        completions = [c for c in completions if c.lower().startswith(arg_value.lower())]
+
+    return {
+        "completion": {
+            "values": completions[:100],  # Max 100 per spec
+            "total": len(completions),
+            "hasMore": len(completions) > 100
+        }
+    }
+
+
 async def handle_tools_list(params: Dict[str, Any], session: MCPSession) -> Dict[str, Any]:
-    """Handle tools/list method - All 29 Wazuh Security Tools."""
+    """Handle tools/list method - All 29 Wazuh Security Tools with pagination."""
+    cursor = params.get("cursor")
     tools = [
         # Alert Management Tools (4 tools)
         {
@@ -795,7 +1202,11 @@ async def handle_tools_list(params: Dict[str, Any], session: MCPSession) -> Dict
         }
     ]
     
-    return {"tools": tools}
+    # Pagination support per MCP spec
+    return {
+        "tools": tools,
+        "nextCursor": None  # No more tools
+    }
 
 async def handle_tools_call(params: Dict[str, Any], session: MCPSession) -> Dict[str, Any]:
     """Handle tools/call method - All 29 Wazuh Security Tools."""
@@ -987,30 +1398,78 @@ async def handle_tools_call(params: Dict[str, Any], session: MCPSession) -> Dict
         logger.error(f"Tool execution error: {e}")
         raise ValueError(f"Tool execution failed: {str(e)}")
 
-# MCP Method Registry
+# MCP Method Registry - Full MCP 2025-03-26 Compliance
 MCP_METHODS = {
+    # Lifecycle methods
     "initialize": handle_initialize,
+    "ping": handle_ping,
+
+    # Tools methods
     "tools/list": handle_tools_list,
     "tools/call": handle_tools_call,
+
+    # Prompts methods
+    "prompts/list": handle_prompts_list,
+    "prompts/get": handle_prompts_get,
+
+    # Resources methods
+    "resources/list": handle_resources_list,
+    "resources/read": handle_resources_read,
+    "resources/templates/list": handle_resources_templates_list,
+
+    # Logging methods
+    "logging/setLevel": handle_logging_set_level,
+
+    # Completion methods
+    "completion/complete": handle_completion_complete,
 }
 
+# Notification handlers (don't return responses)
+MCP_NOTIFICATIONS = {
+    "notifications/initialized": handle_initialized_notification,
+    "notifications/cancelled": lambda params, session: None,  # Acknowledge cancellation
+}
+
+async def process_mcp_notification(method: str, params: Dict[str, Any], session: MCPSession) -> None:
+    """
+    Process MCP notification (no response expected).
+    Per MCP spec, notifications MUST NOT receive responses.
+    """
+    if method in MCP_NOTIFICATIONS:
+        handler = MCP_NOTIFICATIONS[method]
+        try:
+            await handler(params, session)
+        except Exception as e:
+            # Log but don't return error - notifications don't get responses
+            logger.error(f"Error processing notification {method}: {e}")
+    else:
+        logger.debug(f"Received unknown notification: {method}")
+
+
 async def process_mcp_request(request: MCPRequest, session: MCPSession) -> MCPResponse:
-    """Process individual MCP request."""
+    """Process individual MCP request per JSON-RPC 2.0 specification."""
     try:
         # Check if method exists
         if request.method not in MCP_METHODS:
+            # Check if it's a notification method being called as request
+            if request.method in MCP_NOTIFICATIONS:
+                return create_error_response(
+                    request.id,
+                    MCP_ERRORS["INVALID_REQUEST"],
+                    f"'{request.method}' is a notification, not a request method"
+                )
             return create_error_response(
                 request.id,
                 MCP_ERRORS["METHOD_NOT_FOUND"],
                 f"Method '{request.method}' not found"
             )
-        
+
         # Execute method handler
         handler = MCP_METHODS[request.method]
         result = await handler(request.params or {}, session)
-        
+
         return create_success_response(request.id, result)
-        
+
     except ValueError as e:
         return create_error_response(
             request.id,
@@ -1159,7 +1618,7 @@ async def mcp_endpoint(
                             "protocolVersion": "2025-03-26",
                             "serverInfo": {
                                 "name": "Wazuh MCP Server",
-                                "version": "4.0.4"
+                                "version": "4.0.5"
                             },
                             "session": session.to_dict()
                         }
@@ -1204,8 +1663,13 @@ async def mcp_endpoint(
                 )
 
                 if not has_requests:
-                    # All items are notifications or responses - accept and return 202
-                    logger.debug(f"Received batch of {len(body)} notifications/responses")
+                    # Process all notifications before returning 202
+                    for item in body:
+                        if isinstance(item, dict) and is_json_rpc_notification(item):
+                            method = item.get("method", "")
+                            params = item.get("params", {})
+                            await process_mcp_notification(method, params, session)
+                    logger.debug(f"Processed batch of {len(body)} notifications/responses")
                     return Response(
                         status_code=202,
                         headers={
@@ -1217,8 +1681,14 @@ async def mcp_endpoint(
                 # Process batch containing requests
                 responses = []
                 for item in body:
-                    # Skip notifications and responses in batch
-                    if isinstance(item, dict) and not is_json_rpc_request(item):
+                    # Process notifications but don't add to responses
+                    if isinstance(item, dict) and is_json_rpc_notification(item):
+                        method = item.get("method", "")
+                        params = item.get("params", {})
+                        await process_mcp_notification(method, params, session)
+                        continue
+                    # Skip responses
+                    if isinstance(item, dict) and is_json_rpc_response(item):
                         continue
                     try:
                         mcp_request = MCPRequest(**item)
@@ -1243,8 +1713,22 @@ async def mcp_endpoint(
             else:
                 # Per MCP spec: notifications and responses return HTTP 202 Accepted
                 if isinstance(body, dict):
-                    if is_json_rpc_notification(body) or is_json_rpc_response(body):
-                        logger.debug(f"Received single notification/response")
+                    if is_json_rpc_notification(body):
+                        # Process the notification (no response)
+                        method = body.get("method", "")
+                        params = body.get("params", {})
+                        await process_mcp_notification(method, params, session)
+                        logger.debug(f"Processed notification: {method}")
+                        return Response(
+                            status_code=202,
+                            headers={
+                                "Mcp-Session-Id": session.session_id,
+                                "Access-Control-Expose-Headers": "Mcp-Session-Id"
+                            }
+                        )
+                    elif is_json_rpc_response(body):
+                        # Client sending a response - just acknowledge
+                        logger.debug(f"Received client response")
                         return Response(
                             status_code=202,
                             headers={
@@ -1457,7 +1941,7 @@ async def mcp_streamable_http_endpoint(
                             "protocolVersion": protocol_version,
                             "serverInfo": {
                                 "name": "Wazuh MCP Server",
-                                "version": "4.0.4"
+                                "version": "4.0.5"
                             },
                             "capabilities": {
                                 "tools": True,
@@ -1506,14 +1990,26 @@ async def mcp_streamable_http_endpoint(
                 )
 
                 if not has_requests:
-                    # All notifications/responses - return 202 Accepted
+                    # Process all notifications before returning 202
+                    for item in body:
+                        if isinstance(item, dict) and is_json_rpc_notification(item):
+                            method = item.get("method", "")
+                            params = item.get("params", {})
+                            await process_mcp_notification(method, params, session)
                     return Response(status_code=202, headers=response_headers)
 
                 # Process requests in batch
                 responses = []
                 for item in body:
-                    if isinstance(item, dict) and not is_json_rpc_request(item):
-                        continue  # Skip notifications/responses
+                    # Process notifications but don't add to responses
+                    if isinstance(item, dict) and is_json_rpc_notification(item):
+                        method = item.get("method", "")
+                        params = item.get("params", {})
+                        await process_mcp_notification(method, params, session)
+                        continue
+                    # Skip responses
+                    if isinstance(item, dict) and is_json_rpc_response(item):
+                        continue
                     try:
                         mcp_request = MCPRequest(**item)
                         resp = await process_mcp_request(mcp_request, session)
@@ -1530,7 +2026,15 @@ async def mcp_streamable_http_endpoint(
             # Handle single message
             if isinstance(body, dict):
                 # Notifications and responses return 202 Accepted
-                if is_json_rpc_notification(body) or is_json_rpc_response(body):
+                if is_json_rpc_notification(body):
+                    # Process the notification (no response)
+                    method = body.get("method", "")
+                    params = body.get("params", {})
+                    await process_mcp_notification(method, params, session)
+                    logger.debug(f"Processed notification: {method}")
+                    return Response(status_code=202, headers=response_headers)
+                elif is_json_rpc_response(body):
+                    # Client sending a response - just acknowledge
                     return Response(status_code=202, headers=response_headers)
 
             # Validate JSON-RPC request
@@ -1668,7 +2172,7 @@ async def health_check():
         return {
             "status": "healthy",
             "timestamp": datetime.now(timezone.utc).isoformat(),
-            "version": "4.0.4",
+            "version": "4.0.5",
             "mcp_protocol_version": MCP_PROTOCOL_VERSION,
             "supported_protocol_versions": SUPPORTED_PROTOCOL_VERSIONS,
             "transport": {
@@ -1777,7 +2281,7 @@ async def startup_event():
     """Initialize server on startup with graceful shutdown support."""
     global _oauth_manager
 
-    logger.info("🚀 Wazuh MCP Server v4.0.3 starting up...")
+    logger.info("🚀 Wazuh MCP Server v4.0.5 starting up...")
     logger.info(f"📡 MCP Protocol: {MCP_PROTOCOL_VERSION}")
     logger.info(f"🔗 Wazuh Host: {config.WAZUH_HOST}")
     logger.info(f"🌐 CORS Origins: {config.ALLOWED_ORIGINS}")
