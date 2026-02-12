@@ -1,37 +1,38 @@
-# Wazuh MCP SSE Server v3.0.0 - Production Grade
+# Wazuh MCP Server v4.0.6 - Production Grade
 # MCP-compliant remote server with comprehensive monitoring
+# Updated: February 2026
 
 # Core MCP framework
-fastmcp>=2.10.6
+fastmcp>=2.14.0
 
 # Web framework for SSE endpoints
-fastapi>=0.115.0
-uvicorn[standard]>=0.32.0
+fastapi>=0.128.0
+uvicorn[standard]>=0.40.0
 
 # HTTP client for Wazuh API with connection pooling
-httpx>=0.28.0
+httpx>=0.28.1
 
 # Data validation
-pydantic>=2.10.0
+pydantic>=2.12.0
 
 # Environment configuration
 python-dotenv>=1.0.0
 
 # Authentication and security
-python-jose[cryptography]>=3.3.0
+python-jose[cryptography]>=3.5.0  # Security fix: CVE-2024-33663, CVE-2024-33664
 passlib[bcrypt]>=1.7.4
 python-multipart>=0.0.9  # Form data for OAuth token endpoint
 
 # Monitoring and metrics
-prometheus-client>=0.20.0
-psutil>=5.9.0
+prometheus-client>=0.24.0
+psutil>=6.0.0
 
 # Performance and reliability
-tenacity>=8.2.0  # Retry logic
-aiofiles>=23.0.0  # Async file operations
+tenacity>=9.0.0  # Retry logic
+aiofiles>=24.0.0  # Async file operations
 
 # Session storage for serverless (optional)
-redis[async]>=5.0.0  # Redis async client for serverless session storage
+redis>=7.0.0  # Redis async client for serverless session storage
 
 # Security and encryption
-cryptography>=41.0.0  # Encryption for secrets
+cryptography>=46.0.5  # Security fix: CVE-2026-26007
