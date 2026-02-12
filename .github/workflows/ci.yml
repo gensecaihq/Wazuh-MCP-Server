@@ -78,9 +78,10 @@ jobs:
         python -m py_compile src/wazuh_mcp_server/*.py
         python -m py_compile src/wazuh_mcp_server/api/*.py
 
-    - name: Install package
+    - name: Install package and dependencies
       run: |
         python -m pip install --upgrade pip
+        pip install fastapi httpx pydantic uvicorn python-dotenv tenacity
         pip install -e .
 
     - name: Verify imports
