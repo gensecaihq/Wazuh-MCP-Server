@@ -391,9 +391,19 @@ async def lifespan(app: FastAPI):
         await sessions.clear()
         logger.info("Sessions cleared")
 
+        # Close Wazuh client to release HTTP connections
+        if wazuh_client and hasattr(wazuh_client, 'close'):
+            await wazuh_client.close()
+            logger.info("Wazuh client closed")
+
         # Cleanup rate limiter
         if hasattr(rate_limiter, 'cleanup'):
             rate_limiter.cleanup()
+
+        # Close connection pools
+        from wazuh_mcp_server.security import connection_pool_manager
+        await connection_pool_manager.close_all()
+        logger.info("Connection pools closed")
 
         # Force garbage collection
         import gc
