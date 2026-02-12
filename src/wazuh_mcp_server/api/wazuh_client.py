@@ -502,12 +502,14 @@ class WazuhClient:
         return await self._request("GET", "/cluster/health")
 
     async def get_cluster_nodes(self) -> Dict[str, Any]:
-        """Get cluster nodes."""
-        return await self._request("GET", "/cluster/nodes")
+        """Get cluster nodes (cached for 2 minutes)."""
+        cache_key = "cluster_nodes"
+        return await self._get_cached(cache_key, "/cluster/nodes")
 
     async def get_rules_summary(self) -> Dict[str, Any]:
-        """Get rules summary."""
-        return await self._request("GET", "/rules/summary")
+        """Get rules summary (cached for 5 minutes)."""
+        cache_key = "rules_summary"
+        return await self._get_cached(cache_key, "/rules/summary")
 
     async def get_remoted_stats(self) -> Dict[str, Any]:
         """Get remoted statistics."""

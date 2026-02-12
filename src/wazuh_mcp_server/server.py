@@ -31,7 +31,13 @@ from wazuh_mcp_server.config import get_config, WazuhConfig
 from wazuh_mcp_server.api.wazuh_client import WazuhClient
 from wazuh_mcp_server.api.wazuh_indexer import IndexerNotConfiguredError
 from wazuh_mcp_server.auth import create_access_token, verify_token
-from wazuh_mcp_server.security import RateLimiter, validate_input
+from wazuh_mcp_server.security import (
+    RateLimiter, validate_input, ToolValidationError,
+    validate_limit, validate_agent_id, validate_rule_id, validate_time_range,
+    validate_severity, validate_agent_status, validate_timestamp,
+    validate_indicator, validate_indicator_type, validate_report_type,
+    validate_compliance_framework, validate_query, validate_boolean
+)
 from wazuh_mcp_server.monitoring import REQUEST_COUNT, REQUEST_DURATION, ACTIVE_CONNECTIONS
 from wazuh_mcp_server.resilience import GracefulShutdown
 from wazuh_mcp_server.session_store import create_session_store, SessionStore
@@ -1349,26 +1355,34 @@ async def handle_tools_list(params: Dict[str, Any], session: MCPSession) -> Dict
     }
 
 async def handle_tools_call(params: Dict[str, Any], session: MCPSession) -> Dict[str, Any]:
-    """Handle tools/call method - All 29 Wazuh Security Tools."""
+    """Handle tools/call method - All 29 Wazuh Security Tools with comprehensive validation."""
     tool_name = params.get("name")
     arguments = params.get("arguments", {})
-    
+
     if not tool_name:
         raise ValueError("Tool name is required")
-    
-    # Validate input
+
+    # Validate tool name
     validate_input(tool_name, max_length=100)
-    
+
+    # Track tool execution for metrics
+    from wazuh_mcp_server.monitoring import record_tool_execution
+    import time as _time
+    _start_time = _time.time()
+    _success = False
+
     try:
         # Alert Management Tools
         if tool_name == "get_wazuh_alerts":
-            limit = arguments.get("limit", 100)
-            rule_id = arguments.get("rule_id")
-            level = arguments.get("level")
-            agent_id = arguments.get("agent_id")
-            timestamp_start = arguments.get("timestamp_start")
-            timestamp_end = arguments.get("timestamp_end")
-            compact = arguments.get("compact", True)
+            # Validate all parameters
+            limit = validate_limit(arguments.get("limit"), max_val=1000)
+            rule_id = validate_rule_id(arguments.get("rule_id"))
+            level = arguments.get("level")  # Free-form (e.g., "12", "10+")
+            agent_id = validate_agent_id(arguments.get("agent_id"))
+            timestamp_start = validate_timestamp(arguments.get("timestamp_start"), param_name="timestamp_start")
+            timestamp_end = validate_timestamp(arguments.get("timestamp_end"), param_name="timestamp_end")
+            compact = validate_boolean(arguments.get("compact"), default=True, param_name="compact")
+
             result = await wazuh_client.get_alerts(
                 limit=limit, rule_id=rule_id, level=level,
                 agent_id=agent_id, timestamp_start=timestamp_start,
@@ -1376,179 +1390,233 @@ async def handle_tools_call(params: Dict[str, Any], session: MCPSession) -> Dict
             )
             if compact:
                 result = _compact_alerts_result(result)
+            _success = True
             return {"content": [{"type": "text", "text": f"Wazuh Alerts:\n{json.dumps(result, indent=2 if not compact else None)}"}]}
-            
+
         elif tool_name == "get_wazuh_alert_summary":
-            time_range = arguments.get("time_range", "24h")
+            time_range = validate_time_range(arguments.get("time_range"))
             group_by = arguments.get("group_by", "rule.level")
             result = await wazuh_client.get_alert_summary(time_range, group_by)
+            _success = True
             return {"content": [{"type": "text", "text": f"Alert Summary:\n{json.dumps(result, indent=2)}"}]}
-            
+
         elif tool_name == "analyze_alert_patterns":
-            time_range = arguments.get("time_range", "24h")
-            min_frequency = arguments.get("min_frequency", 5)
+            time_range = validate_time_range(arguments.get("time_range"))
+            min_frequency = validate_limit(arguments.get("min_frequency"), min_val=1, max_val=1000, param_name="min_frequency")
             result = await wazuh_client.analyze_alert_patterns(time_range, min_frequency)
+            _success = True
             return {"content": [{"type": "text", "text": f"Alert Patterns:\n{json.dumps(result, indent=2)}"}]}
-            
+
         elif tool_name == "search_security_events":
-            query = arguments.get("query")
-            time_range = arguments.get("time_range", "24h")
-            limit = arguments.get("limit", 100)
-            compact = arguments.get("compact", True)
+            query = validate_query(arguments.get("query"), required=True)
+            time_range = validate_time_range(arguments.get("time_range"))
+            limit = validate_limit(arguments.get("limit"), max_val=1000)
+            compact = validate_boolean(arguments.get("compact"), default=True, param_name="compact")
+
             result = await wazuh_client.search_security_events(query, time_range, limit)
             if compact:
                 result = _compact_alerts_result(result)
+            _success = True
             return {"content": [{"type": "text", "text": f"Security Events:\n{json.dumps(result, indent=2 if not compact else None)}"}]}
 
         # Agent Management Tools
         elif tool_name == "get_wazuh_agents":
-            agent_id = arguments.get("agent_id")
-            status = arguments.get("status")
-            limit = arguments.get("limit", 100)
+            agent_id = validate_agent_id(arguments.get("agent_id"))
+            status = validate_agent_status(arguments.get("status"))
+            limit = validate_limit(arguments.get("limit"), max_val=1000)
+
             result = await wazuh_client.get_agents(agent_id=agent_id, status=status, limit=limit)
+            _success = True
             return {"content": [{"type": "text", "text": f"Wazuh Agents:\n{json.dumps(result, indent=2)}"}]}
             
         elif tool_name == "get_wazuh_running_agents":
             result = await wazuh_client.get_running_agents()
+            _success = True
             return {"content": [{"type": "text", "text": f"Running Agents:\n{json.dumps(result, indent=2)}"}]}
-            
+
         elif tool_name == "check_agent_health":
-            agent_id = arguments.get("agent_id")
+            agent_id = validate_agent_id(arguments.get("agent_id"), required=True)
             result = await wazuh_client.check_agent_health(agent_id)
+            _success = True
             return {"content": [{"type": "text", "text": f"Agent Health:\n{json.dumps(result, indent=2)}"}]}
-            
+
         elif tool_name == "get_agent_processes":
-            agent_id = arguments.get("agent_id")
-            limit = arguments.get("limit", 100)
+            agent_id = validate_agent_id(arguments.get("agent_id"), required=True)
+            limit = validate_limit(arguments.get("limit"), max_val=1000)
             result = await wazuh_client.get_agent_processes(agent_id, limit)
+            _success = True
             return {"content": [{"type": "text", "text": f"Agent Processes:\n{json.dumps(result, indent=2)}"}]}
-            
+
         elif tool_name == "get_agent_ports":
-            agent_id = arguments.get("agent_id")
-            limit = arguments.get("limit", 100)
+            agent_id = validate_agent_id(arguments.get("agent_id"), required=True)
+            limit = validate_limit(arguments.get("limit"), max_val=1000)
             result = await wazuh_client.get_agent_ports(agent_id, limit)
+            _success = True
             return {"content": [{"type": "text", "text": f"Agent Ports:\n{json.dumps(result, indent=2)}"}]}
-            
+
         elif tool_name == "get_agent_configuration":
-            agent_id = arguments.get("agent_id")
+            agent_id = validate_agent_id(arguments.get("agent_id"), required=True)
             result = await wazuh_client.get_agent_configuration(agent_id)
+            _success = True
             return {"content": [{"type": "text", "text": f"Agent Configuration:\n{json.dumps(result, indent=2)}"}]}
 
         # Vulnerability Management Tools
         elif tool_name == "get_wazuh_vulnerabilities":
-            agent_id = arguments.get("agent_id")
-            severity = arguments.get("severity")
-            limit = arguments.get("limit", 100)
-            compact = arguments.get("compact", True)
+            agent_id = validate_agent_id(arguments.get("agent_id"))
+            severity = validate_severity(arguments.get("severity"))
+            limit = validate_limit(arguments.get("limit"), max_val=500)
+            compact = validate_boolean(arguments.get("compact"), default=True, param_name="compact")
+
             result = await wazuh_client.get_vulnerabilities(agent_id=agent_id, severity=severity, limit=limit)
             if compact:
                 result = _compact_vulns_result(result)
+            _success = True
             return {"content": [{"type": "text", "text": f"Vulnerabilities:\n{json.dumps(result, indent=2 if not compact else None)}"}]}
-            
+
         elif tool_name == "get_wazuh_critical_vulnerabilities":
-            limit = arguments.get("limit", 50)
-            compact = arguments.get("compact", True)
+            limit = validate_limit(arguments.get("limit"), max_val=500, param_name="limit")
+            compact = validate_boolean(arguments.get("compact"), default=True, param_name="compact")
+
             result = await wazuh_client.get_critical_vulnerabilities(limit)
             if compact:
                 result = _compact_vulns_result(result)
+            _success = True
             return {"content": [{"type": "text", "text": f"Critical Vulnerabilities:\n{json.dumps(result, indent=2 if not compact else None)}"}]}
-            
+
         elif tool_name == "get_wazuh_vulnerability_summary":
-            time_range = arguments.get("time_range", "7d")
+            time_range = validate_time_range(arguments.get("time_range"))
             result = await wazuh_client.get_vulnerability_summary(time_range)
+            _success = True
             return {"content": [{"type": "text", "text": f"Vulnerability Summary:\n{json.dumps(result, indent=2)}"}]}
 
-        # Security Analysis Tools  
+        # Security Analysis Tools
         elif tool_name == "analyze_security_threat":
-            indicator = arguments.get("indicator")
-            indicator_type = arguments.get("indicator_type", "ip")
+            indicator_type = validate_indicator_type(arguments.get("indicator_type"))
+            indicator = validate_indicator(arguments.get("indicator"), indicator_type)
+
             result = await wazuh_client.analyze_security_threat(indicator, indicator_type)
+            _success = True
             return {"content": [{"type": "text", "text": f"Threat Analysis:\n{json.dumps(result, indent=2)}"}]}
-            
+
         elif tool_name == "check_ioc_reputation":
-            indicator = arguments.get("indicator")
-            indicator_type = arguments.get("indicator_type", "ip")
+            indicator_type = validate_indicator_type(arguments.get("indicator_type"))
+            indicator = validate_indicator(arguments.get("indicator"), indicator_type)
+
             result = await wazuh_client.check_ioc_reputation(indicator, indicator_type)
+            _success = True
             return {"content": [{"type": "text", "text": f"IoC Reputation:\n{json.dumps(result, indent=2)}"}]}
-            
+
         elif tool_name == "perform_risk_assessment":
-            agent_id = arguments.get("agent_id")
+            agent_id = validate_agent_id(arguments.get("agent_id"))
             result = await wazuh_client.perform_risk_assessment(agent_id)
+            _success = True
             return {"content": [{"type": "text", "text": f"Risk Assessment:\n{json.dumps(result, indent=2)}"}]}
-            
+
         elif tool_name == "get_top_security_threats":
-            limit = arguments.get("limit", 10)
-            time_range = arguments.get("time_range", "24h")
+            limit = validate_limit(arguments.get("limit"), min_val=1, max_val=50)
+            time_range = validate_time_range(arguments.get("time_range"))
+
             result = await wazuh_client.get_top_security_threats(limit, time_range)
+            _success = True
             return {"content": [{"type": "text", "text": f"Top Security Threats:\n{json.dumps(result, indent=2)}"}]}
-            
+
         elif tool_name == "generate_security_report":
-            report_type = arguments.get("report_type", "daily")
-            include_recommendations = arguments.get("include_recommendations", True)
+            report_type = validate_report_type(arguments.get("report_type"))
+            include_recommendations = validate_boolean(arguments.get("include_recommendations"), default=True, param_name="include_recommendations")
+
             result = await wazuh_client.generate_security_report(report_type, include_recommendations)
+            _success = True
             return {"content": [{"type": "text", "text": f"Security Report:\n{json.dumps(result, indent=2)}"}]}
-            
+
         elif tool_name == "run_compliance_check":
-            framework = arguments.get("framework", "PCI-DSS")
-            agent_id = arguments.get("agent_id")
+            framework = validate_compliance_framework(arguments.get("framework"))
+            agent_id = validate_agent_id(arguments.get("agent_id"))
+
             result = await wazuh_client.run_compliance_check(framework, agent_id)
+            _success = True
             return {"content": [{"type": "text", "text": f"Compliance Check:\n{json.dumps(result, indent=2)}"}]}
 
         # System Monitoring Tools
         elif tool_name == "get_wazuh_statistics":
             result = await wazuh_client.get_wazuh_statistics()
+            _success = True
             return {"content": [{"type": "text", "text": f"Wazuh Statistics:\n{json.dumps(result, indent=2)}"}]}
-            
+
         elif tool_name == "get_wazuh_weekly_stats":
             result = await wazuh_client.get_weekly_stats()
+            _success = True
             return {"content": [{"type": "text", "text": f"Weekly Statistics:\n{json.dumps(result, indent=2)}"}]}
-            
+
         elif tool_name == "get_wazuh_cluster_health":
             result = await wazuh_client.get_cluster_health()
+            _success = True
             return {"content": [{"type": "text", "text": f"Cluster Health:\n{json.dumps(result, indent=2)}"}]}
-            
+
         elif tool_name == "get_wazuh_cluster_nodes":
             result = await wazuh_client.get_cluster_nodes()
+            _success = True
             return {"content": [{"type": "text", "text": f"Cluster Nodes:\n{json.dumps(result, indent=2)}"}]}
-            
+
         elif tool_name == "get_wazuh_rules_summary":
             result = await wazuh_client.get_rules_summary()
+            _success = True
             return {"content": [{"type": "text", "text": f"Rules Summary:\n{json.dumps(result, indent=2)}"}]}
-            
+
         elif tool_name == "get_wazuh_remoted_stats":
             result = await wazuh_client.get_remoted_stats()
+            _success = True
             return {"content": [{"type": "text", "text": f"Remoted Statistics:\n{json.dumps(result, indent=2)}"}]}
-            
+
         elif tool_name == "get_wazuh_log_collector_stats":
             result = await wazuh_client.get_log_collector_stats()
+            _success = True
             return {"content": [{"type": "text", "text": f"Log Collector Statistics:\n{json.dumps(result, indent=2)}"}]}
-            
+
         elif tool_name == "search_wazuh_manager_logs":
-            query = arguments.get("query")
-            limit = arguments.get("limit", 100)
+            query = validate_query(arguments.get("query"), required=True)
+            limit = validate_limit(arguments.get("limit"), max_val=1000)
+
             result = await wazuh_client.search_manager_logs(query, limit)
+            _success = True
             return {"content": [{"type": "text", "text": f"Manager Logs:\n{json.dumps(result, indent=2)}"}]}
-            
+
         elif tool_name == "get_wazuh_manager_error_logs":
-            limit = arguments.get("limit", 100)
+            limit = validate_limit(arguments.get("limit"), max_val=1000)
             result = await wazuh_client.get_manager_error_logs(limit)
+            _success = True
             return {"content": [{"type": "text", "text": f"Manager Error Logs:\n{json.dumps(result, indent=2)}"}]}
-            
+
         elif tool_name == "validate_wazuh_connection":
             result = await wazuh_client.validate_connection()
+            _success = True
             return {"content": [{"type": "text", "text": f"Connection Validation:\n{json.dumps(result, indent=2)}"}]}
 
         else:
-            raise ValueError(f"Unknown tool: {tool_name}")
+            raise ValueError(f"Unknown tool: {tool_name}. Use 'tools/list' to see available tools.")
+
+    except ToolValidationError as e:
+        # Parameter validation errors - provide actionable guidance
+        logger.warning(f"Tool validation error in {tool_name}: {e}")
+        raise ValueError(str(e))
 
     except IndexerNotConfiguredError as e:
         # Provide helpful error for vulnerability tools when indexer is not configured
         logger.warning(f"Indexer not configured for tool {tool_name}: {e}")
         raise ValueError(str(e))
 
+    except ConnectionError as e:
+        # Network/connection errors - provide retry guidance
+        logger.error(f"Connection error in tool {tool_name}: {e}")
+        raise ValueError(f"Connection failed: {str(e)}. Check Wazuh server connectivity and try again.")
+
     except Exception as e:
-        logger.error(f"Tool execution error: {e}")
+        logger.error(f"Tool execution error in {tool_name}: {e}", exc_info=True)
         raise ValueError(f"Tool execution failed: {str(e)}")
+
+    finally:
+        # Record tool execution metrics
+        _duration = _time.time() - _start_time
+        record_tool_execution(tool_name, _duration, _success)
 
 # MCP Method Registry - Full MCP 2025-03-26 Compliance
 MCP_METHODS = {
