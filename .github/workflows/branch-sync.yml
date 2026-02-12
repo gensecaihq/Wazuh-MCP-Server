@@ -34,8 +34,8 @@ jobs:
     
     - name: Fetch all branches
       run: |
-        git fetch origin main:main
-        git fetch origin mcp-remote:mcp-remote
+        git fetch origin main:main || true
+        git fetch origin mcp-remote:mcp-remote 2>/dev/null || echo "mcp-remote branch not found, skipping"
     
     - name: Check for version management tools
       run: |
@@ -51,19 +51,23 @@ jobs:
         echo "# Branch Sync Report" >> $GITHUB_STEP_SUMMARY
         echo "## Current Status" >> $GITHUB_STEP_SUMMARY
         echo "- Main branch: $(git rev-parse --short main)" >> $GITHUB_STEP_SUMMARY
-        echo "- MCP-Remote branch: $(git rev-parse --short mcp-remote)" >> $GITHUB_STEP_SUMMARY
-        echo "" >> $GITHUB_STEP_SUMMARY
-        
-        echo "## Differences" >> $GITHUB_STEP_SUMMARY
-        echo "### Main → MCP-Remote" >> $GITHUB_STEP_SUMMARY
-        echo '```' >> $GITHUB_STEP_SUMMARY
-        git log main..mcp-remote --oneline | head -10 >> $GITHUB_STEP_SUMMARY || echo "No differences" >> $GITHUB_STEP_SUMMARY
-        echo '```' >> $GITHUB_STEP_SUMMARY
-        
-        echo "### MCP-Remote → Main" >> $GITHUB_STEP_SUMMARY
-        echo '```' >> $GITHUB_STEP_SUMMARY
-        git log mcp-remote..main --oneline | head -10 >> $GITHUB_STEP_SUMMARY || echo "No differences" >> $GITHUB_STEP_SUMMARY
-        echo '```' >> $GITHUB_STEP_SUMMARY
+        if git rev-parse --verify mcp-remote >/dev/null 2>&1; then
+          echo "- MCP-Remote branch: $(git rev-parse --short mcp-remote)" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          echo "## Differences" >> $GITHUB_STEP_SUMMARY
+          echo "### Main → MCP-Remote" >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          git log main..mcp-remote --oneline | head -10 >> $GITHUB_STEP_SUMMARY || echo "No differences" >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+
+          echo "### MCP-Remote → Main" >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          git log mcp-remote..main --oneline | head -10 >> $GITHUB_STEP_SUMMARY || echo "No differences" >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+        else
+          echo "- MCP-Remote branch: Not found (skipping comparison)" >> $GITHUB_STEP_SUMMARY
+        fi
     
     - name: Sync based on input
       if: github.event_name == 'workflow_dispatch'
@@ -91,9 +95,14 @@ jobs:
         if [ -f pyproject.toml ]; then
           echo "Version: $(grep '^version' pyproject.toml | cut -d'"' -f2)" >> $GITHUB_STEP_SUMMARY
         fi
-        
-        echo "### MCP-Remote Branch" >> $GITHUB_STEP_SUMMARY
-        git checkout mcp-remote
-        if [ -f pyproject.toml ]; then
-          echo "Version: $(grep '^version' pyproject.toml | cut -d'"' -f2)" >> $GITHUB_STEP_SUMMARY
+
+        if git rev-parse --verify mcp-remote >/dev/null 2>&1; then
+          echo "### MCP-Remote Branch" >> $GITHUB_STEP_SUMMARY
+          git checkout mcp-remote
+          if [ -f pyproject.toml ]; then
+            echo "Version: $(grep '^version' pyproject.toml | cut -d'"' -f2)" >> $GITHUB_STEP_SUMMARY
+          fi
+        else
+          echo "### MCP-Remote Branch" >> $GITHUB_STEP_SUMMARY
+          echo "Branch not found" >> $GITHUB_STEP_SUMMARY
         fi
