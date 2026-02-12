@@ -519,7 +519,9 @@ async def check_session_store() -> Dict[str, Any]:
     """Check session store health."""
     try:
         from wazuh_mcp_server.server import sessions
-        active_count = len(sessions._sessions) if hasattr(sessions, '_sessions') else 0
+        # Use get_all() to get all sessions count
+        all_sessions = await sessions.get_all()
+        active_count = len(all_sessions)
         SESSION_ACTIVE.set(active_count)
 
         return {

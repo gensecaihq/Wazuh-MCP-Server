@@ -422,6 +422,15 @@ wazuh_config = WazuhConfig(
 # Initialize Wazuh client
 wazuh_client = WazuhClient(wazuh_config)
 
+
+async def get_wazuh_client() -> WazuhClient:
+    """Get the global Wazuh client instance.
+
+    Used by monitoring health checks to access client state.
+    """
+    return wazuh_client
+
+
 # Initialize rate limiter
 rate_limiter = RateLimiter(max_requests=RATE_LIMIT_REQUESTS, window_seconds=RATE_LIMIT_WINDOW_SECONDS)
 
@@ -1743,9 +1752,16 @@ MCP_METHODS = {
 }
 
 # Notification handlers (don't return responses)
+async def handle_cancelled_notification(params: Dict[str, Any], session: MCPSession) -> None:
+    """Handle notifications/cancelled - acknowledge cancellation request."""
+    request_id = params.get("requestId")
+    reason = params.get("reason", "Unknown")
+    logger.debug(f"Request {request_id} cancelled: {reason}")
+
+
 MCP_NOTIFICATIONS = {
     "notifications/initialized": handle_initialized_notification,
-    "notifications/cancelled": lambda params, session: None,  # Acknowledge cancellation
+    "notifications/cancelled": handle_cancelled_notification,
 }
 
 async def process_mcp_notification(method: str, params: Dict[str, Any], session: MCPSession) -> None:
