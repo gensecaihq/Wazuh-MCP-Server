@@ -284,8 +284,13 @@ async def verify_bearer_token(authorization: str) -> AuthToken:
 
     # Second, try JWT token validation (tokens from /auth/token endpoint)
     try:
-        # Verify and decode the JWT token using the auth_manager's secret key
-        payload = verify_token(token, auth_manager.secret_key)
+        # Import config to get the same secret key used for token creation
+        from wazuh_mcp_server.config import get_config
+        config = get_config()
+
+        # Verify and decode the JWT token using the config's AUTH_SECRET_KEY
+        # This must match the key used in server.py's /auth/token endpoint
+        payload = verify_token(token, config.AUTH_SECRET_KEY)
 
         # Extract timestamps from JWT payload
         exp_timestamp = payload.get("exp")
