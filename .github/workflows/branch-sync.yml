@@ -34,8 +34,10 @@ jobs:
     
     - name: Fetch all branches
       run: |
-        git fetch origin main:main
-        git fetch origin mcp-remote:mcp-remote
+        # Fetch remote tracking branches without updating the checked-out branch
+        git fetch origin
+        # Create local tracking branches if they don't exist
+        git branch --track mcp-remote origin/mcp-remote 2>/dev/null || git checkout mcp-remote && git checkout -
     
     - name: Check for version management tools
       run: |
