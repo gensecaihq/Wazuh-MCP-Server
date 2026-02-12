@@ -293,7 +293,7 @@ async def get_or_create_session(session_id: Optional[str], origin: Optional[str]
 app = FastAPI(
     title="Wazuh MCP Server",
     description="MCP-compliant remote server for Wazuh SIEM integration. Supports Streamable HTTP, SSE, OAuth, and authless modes.",
-    version="4.0.3",
+    version="4.0.4",
     docs_url="/docs",
     openapi_url="/openapi.json"
 )
@@ -447,7 +447,7 @@ async def handle_initialize(params: Dict[str, Any], session: MCPSession) -> Dict
     # Server information
     server_info = {
         "name": "Wazuh MCP Server",
-        "version": "4.0.3",
+        "version": "4.0.4",
         "vendor": "GenSec AI",
         "description": "MCP-compliant remote server for Wazuh SIEM integration"
     }
@@ -1025,17 +1025,58 @@ async def process_mcp_request(request: MCPRequest, session: MCPSession) -> MCPRe
             "Internal server error"
         )
 
-async def generate_sse_events(session: MCPSession):
-    """Generate Server-Sent Events for MCP."""
-    yield f"event: session\ndata: {json.dumps(session.to_dict())}\n\n"
-    
-    # Send capabilities
-    yield f"event: capabilities\ndata: {json.dumps({'tools': True, 'resources': True})}\n\n"
-    
-    # Send periodic keepalive
+async def generate_sse_events(session: MCPSession, event_id_counter: int = 0):
+    """
+    Generate Server-Sent Events for MCP Streamable HTTP transport.
+
+    Per MCP spec, SSE events may include an 'id' field for resumability.
+    The data field contains JSON-RPC formatted messages.
+    """
+    event_id = event_id_counter
+
+    # Send session info as a JSON-RPC notification
+    event_id += 1
+    session_notification = {
+        "jsonrpc": "2.0",
+        "method": "notifications/session",
+        "params": session.to_dict()
+    }
+    yield f"id: {event_id}\nevent: message\ndata: {json.dumps(session_notification)}\n\n"
+
+    # Send capabilities notification
+    event_id += 1
+    capabilities_notification = {
+        "jsonrpc": "2.0",
+        "method": "notifications/capabilities",
+        "params": {"tools": True, "resources": True, "prompts": True, "logging": True}
+    }
+    yield f"id: {event_id}\nevent: message\ndata: {json.dumps(capabilities_notification)}\n\n"
+
+    # Send periodic keepalive (ping) to maintain connection
     while True:
-        yield f"event: keepalive\ndata: {json.dumps({'timestamp': datetime.now(timezone.utc).isoformat()})}\n\n"
+        event_id += 1
+        ping_notification = {
+            "jsonrpc": "2.0",
+            "method": "notifications/ping",
+            "params": {"timestamp": datetime.now(timezone.utc).isoformat()}
+        }
+        yield f"id: {event_id}\nevent: message\ndata: {json.dumps(ping_notification)}\n\n"
         await asyncio.sleep(30)
+
+
+def is_json_rpc_notification(message: Dict[str, Any]) -> bool:
+    """Check if a JSON-RPC message is a notification (no 'id' field)."""
+    return "method" in message and "id" not in message
+
+
+def is_json_rpc_response(message: Dict[str, Any]) -> bool:
+    """Check if a JSON-RPC message is a response (has 'result' or 'error', no 'method')."""
+    return ("result" in message or "error" in message) and "method" not in message
+
+
+def is_json_rpc_request(message: Dict[str, Any]) -> bool:
+    """Check if a JSON-RPC message is a request (has 'method' and 'id')."""
+    return "method" in message and "id" in message
 
 @app.get("/")
 @app.post("/")
@@ -1118,7 +1159,7 @@ async def mcp_endpoint(
                             "protocolVersion": "2025-03-26",
                             "serverInfo": {
                                 "name": "Wazuh MCP Server",
-                                "version": "4.0.3"
+                                "version": "4.0.4"
                             },
                             "session": session.to_dict()
                         }
@@ -1154,9 +1195,31 @@ async def mcp_endpoint(
                         ).dict(),
                         status_code=400
                     )
-                
+
+                # Per MCP Streamable HTTP spec: If the input consists solely of
+                # notifications or responses, return HTTP 202 Accepted with no body
+                has_requests = any(
+                    is_json_rpc_request(item) if isinstance(item, dict) else False
+                    for item in body
+                )
+
+                if not has_requests:
+                    # All items are notifications or responses - accept and return 202
+                    logger.debug(f"Received batch of {len(body)} notifications/responses")
+                    return Response(
+                        status_code=202,
+                        headers={
+                            "Mcp-Session-Id": session.session_id,
+                            "Access-Control-Expose-Headers": "Mcp-Session-Id"
+                        }
+                    )
+
+                # Process batch containing requests
                 responses = []
                 for item in body:
+                    # Skip notifications and responses in batch
+                    if isinstance(item, dict) and not is_json_rpc_request(item):
+                        continue
                     try:
                         mcp_request = MCPRequest(**item)
                         response = await process_mcp_request(mcp_request, session)
@@ -1167,7 +1230,7 @@ async def mcp_endpoint(
                             MCP_ERRORS["INVALID_REQUEST"],
                             f"Invalid request format: {e}"
                         ).dict())
-                
+
                 return JSONResponse(
                     content=responses,
                     headers={
@@ -1176,8 +1239,21 @@ async def mcp_endpoint(
                     }
                 )
             
-            # Handle single request
+            # Handle single message
             else:
+                # Per MCP spec: notifications and responses return HTTP 202 Accepted
+                if isinstance(body, dict):
+                    if is_json_rpc_notification(body) or is_json_rpc_response(body):
+                        logger.debug(f"Received single notification/response")
+                        return Response(
+                            status_code=202,
+                            headers={
+                                "Mcp-Session-Id": session.session_id,
+                                "Access-Control-Expose-Headers": "Mcp-Session-Id"
+                            }
+                        )
+
+                # Handle request
                 try:
                     mcp_request = MCPRequest(**body)
                     response = await process_mcp_request(mcp_request, session)
@@ -1381,7 +1457,7 @@ async def mcp_streamable_http_endpoint(
                             "protocolVersion": protocol_version,
                             "serverInfo": {
                                 "name": "Wazuh MCP Server",
-                                "version": "4.0.3"
+                                "version": "4.0.4"
                             },
                             "capabilities": {
                                 "tools": True,
@@ -1409,6 +1485,53 @@ async def mcp_streamable_http_endpoint(
                     status_code=400,
                     headers=response_headers
                 )
+
+            # Handle batch messages per MCP Streamable HTTP spec
+            if isinstance(body, list):
+                if not body:
+                    return JSONResponse(
+                        content=create_error_response(
+                            None,
+                            MCP_ERRORS["INVALID_REQUEST"],
+                            "Empty batch request"
+                        ).dict(),
+                        status_code=400,
+                        headers=response_headers
+                    )
+
+                # Check if batch contains any requests
+                has_requests = any(
+                    is_json_rpc_request(item) if isinstance(item, dict) else False
+                    for item in body
+                )
+
+                if not has_requests:
+                    # All notifications/responses - return 202 Accepted
+                    return Response(status_code=202, headers=response_headers)
+
+                # Process requests in batch
+                responses = []
+                for item in body:
+                    if isinstance(item, dict) and not is_json_rpc_request(item):
+                        continue  # Skip notifications/responses
+                    try:
+                        mcp_request = MCPRequest(**item)
+                        resp = await process_mcp_request(mcp_request, session)
+                        responses.append(resp.dict())
+                    except ValidationError as e:
+                        responses.append(create_error_response(
+                            item.get("id") if isinstance(item, dict) else None,
+                            MCP_ERRORS["INVALID_REQUEST"],
+                            f"Invalid request format: {e}"
+                        ).dict())
+
+                return JSONResponse(content=responses, headers=response_headers)
+
+            # Handle single message
+            if isinstance(body, dict):
+                # Notifications and responses return 202 Accepted
+                if is_json_rpc_notification(body) or is_json_rpc_response(body):
+                    return Response(status_code=202, headers=response_headers)
 
             # Validate JSON-RPC request
             try:
@@ -1545,7 +1668,7 @@ async def health_check():
         return {
             "status": "healthy",
             "timestamp": datetime.now(timezone.utc).isoformat(),
-            "version": "4.0.3",
+            "version": "4.0.4",
             "mcp_protocol_version": MCP_PROTOCOL_VERSION,
             "supported_protocol_versions": SUPPORTED_PROTOCOL_VERSIONS,
             "transport": {
