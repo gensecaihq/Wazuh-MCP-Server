@@ -23,7 +23,7 @@ def main():
         port = int(os.getenv('MCP_PORT', '3000'))
         log_level = os.getenv('LOG_LEVEL', 'info').lower()
         
-        print(f"🚀 Starting Wazuh MCP Server v4.0.0")
+        print(f"🚀 Starting Wazuh MCP Server v4.0.6")
         print(f"📡 Server: http://{host}:{port}")
         print(f"🔍 Health: http://{host}:{port}/health")
         print(f"📊 Metrics: http://{host}:{port}/metrics")

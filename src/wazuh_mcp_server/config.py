@@ -1,6 +1,7 @@
 """Configuration management for Wazuh MCP Server."""
 
 import os
+import re
 from dataclasses import dataclass
 from typing import Optional
 
@@ -8,6 +9,32 @@ from typing import Optional
 class ConfigurationError(Exception):
     """Raised when configuration is invalid."""
     pass
+
+
+def validate_port(value: str, name: str) -> int:
+    """Validate port number is within valid range."""
+    try:
+        port = int(value)
+        if not (1 <= port <= 65535):
+            raise ConfigurationError(
+                f"{name} must be between 1 and 65535, got {port}"
+            )
+        return port
+    except ValueError:
+        raise ConfigurationError(f"{name} must be a valid integer, got '{value}'")
+
+
+def validate_positive_int(value: str, name: str, max_val: Optional[int] = None) -> int:
+    """Validate positive integer with optional maximum."""
+    try:
+        num = int(value)
+        if num < 1:
+            raise ConfigurationError(f"{name} must be positive, got {num}")
+        if max_val and num > max_val:
+            raise ConfigurationError(f"{name} must be <= {max_val}, got {num}")
+        return num
+    except ValueError:
+        raise ConfigurationError(f"{name} must be a valid integer, got '{value}'")
 
 
 @dataclass
@@ -148,7 +175,7 @@ class ServerConfig:
 
     @classmethod
     def from_env(cls) -> 'ServerConfig':
-        """Create configuration from environment variables."""
+        """Create configuration from environment variables with validation."""
         import secrets
 
         # Generate secure secret key if not provided
@@ -161,31 +188,46 @@ class ServerConfig:
         if auth_mode not in ("bearer", "oauth", "none"):
             auth_mode = "bearer"
 
+        # Validate log level
+        log_level = os.getenv("LOG_LEVEL", "INFO").upper()
+        if log_level not in ("DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"):
+            log_level = "INFO"
+
         return cls(
             MCP_HOST=os.getenv("MCP_HOST", "0.0.0.0"),
-            MCP_PORT=int(os.getenv("MCP_PORT", "3000")),
+            MCP_PORT=validate_port(os.getenv("MCP_PORT", "3000"), "MCP_PORT"),
             AUTH_SECRET_KEY=auth_secret,
-            TOKEN_LIFETIME_HOURS=int(os.getenv("TOKEN_LIFETIME_HOURS", "24")),
+            TOKEN_LIFETIME_HOURS=validate_positive_int(
+                os.getenv("TOKEN_LIFETIME_HOURS", "24"), "TOKEN_LIFETIME_HOURS", max_val=8760
+            ),
             AUTH_MODE=auth_mode,
             OAUTH_ISSUER_URL=os.getenv("OAUTH_ISSUER_URL", ""),
             OAUTH_ENABLE_DCR=os.getenv("OAUTH_ENABLE_DCR", "true").lower() == "true",
-            OAUTH_ACCESS_TOKEN_TTL=int(os.getenv("OAUTH_ACCESS_TOKEN_TTL", "3600")),
-            OAUTH_REFRESH_TOKEN_TTL=int(os.getenv("OAUTH_REFRESH_TOKEN_TTL", "86400")),
-            OAUTH_AUTHORIZATION_CODE_TTL=int(os.getenv("OAUTH_AUTHORIZATION_CODE_TTL", "600")),
+            OAUTH_ACCESS_TOKEN_TTL=validate_positive_int(
+                os.getenv("OAUTH_ACCESS_TOKEN_TTL", "3600"), "OAUTH_ACCESS_TOKEN_TTL"
+            ),
+            OAUTH_REFRESH_TOKEN_TTL=validate_positive_int(
+                os.getenv("OAUTH_REFRESH_TOKEN_TTL", "86400"), "OAUTH_REFRESH_TOKEN_TTL"
+            ),
+            OAUTH_AUTHORIZATION_CODE_TTL=validate_positive_int(
+                os.getenv("OAUTH_AUTHORIZATION_CODE_TTL", "600"), "OAUTH_AUTHORIZATION_CODE_TTL"
+            ),
             ALLOWED_ORIGINS=os.getenv("ALLOWED_ORIGINS", "https://claude.ai,http://localhost:*"),
             WAZUH_HOST=os.getenv("WAZUH_HOST", ""),
             WAZUH_USER=os.getenv("WAZUH_USER", ""),
             WAZUH_PASS=os.getenv("WAZUH_PASS", ""),
-            WAZUH_PORT=int(os.getenv("WAZUH_PORT", "55000")),
+            WAZUH_PORT=validate_port(os.getenv("WAZUH_PORT", "55000"), "WAZUH_PORT"),
             WAZUH_VERIFY_SSL=os.getenv("WAZUH_VERIFY_SSL", "false").lower() == "true",
             WAZUH_ALLOW_SELF_SIGNED=os.getenv("WAZUH_ALLOW_SELF_SIGNED", "true").lower() == "true",
             # Wazuh Indexer settings (for vulnerability tools in Wazuh 4.8.0+)
             WAZUH_INDEXER_HOST=os.getenv("WAZUH_INDEXER_HOST", ""),
-            WAZUH_INDEXER_PORT=int(os.getenv("WAZUH_INDEXER_PORT", "9200")),
+            WAZUH_INDEXER_PORT=validate_port(
+                os.getenv("WAZUH_INDEXER_PORT", "9200"), "WAZUH_INDEXER_PORT"
+            ),
             WAZUH_INDEXER_USER=os.getenv("WAZUH_INDEXER_USER", ""),
             WAZUH_INDEXER_PASS=os.getenv("WAZUH_INDEXER_PASS", ""),
             WAZUH_INDEXER_VERIFY_SSL=os.getenv("WAZUH_INDEXER_VERIFY_SSL", "false").lower() == "true",
-            LOG_LEVEL=os.getenv("LOG_LEVEL", "INFO").upper()
+            LOG_LEVEL=log_level
         )
 
     @property

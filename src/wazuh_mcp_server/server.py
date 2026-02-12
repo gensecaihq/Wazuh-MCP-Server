@@ -2467,7 +2467,7 @@ async def startup_event():
     """Initialize server on startup with graceful shutdown support."""
     global _oauth_manager
 
-    logger.info("🚀 Wazuh MCP Server v4.0.5 starting up...")
+    logger.info("🚀 Wazuh MCP Server v4.0.6 starting up...")
     logger.info(f"📡 MCP Protocol: {MCP_PROTOCOL_VERSION}")
     logger.info(f"🔗 Wazuh Host: {config.WAZUH_HOST}")
     logger.info(f"🌐 CORS Origins: {config.ALLOWED_ORIGINS}")

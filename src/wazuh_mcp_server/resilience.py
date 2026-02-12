@@ -231,12 +231,11 @@ class ErrorRecovery:
         """Recover session storage."""
         try:
             # Clear corrupted sessions and reinitialize
-            from wazuh_mcp_server.sse_server import session_manager
-            session_manager.sessions.clear()
-            session_manager.token_to_session.clear()
+            from wazuh_mcp_server.server import sessions
+            await sessions.clear()
             logger.info("Session storage recovered")
             return True
-            
+
         except Exception as e:
             logger.error(f"Failed to recover session storage: {e}")
             return False
@@ -285,20 +284,23 @@ class HealthRecovery:
             # Clear caches and force garbage collection
             import gc
             gc.collect()
-            
-            # Clear old sessions
-            from wazuh_mcp_server.sse_server import session_manager
-            expired_sessions = [
-                sid for sid, session in session_manager.sessions.items()
-                if session.is_expired(15)  # Expire sessions older than 15 minutes
-            ]
-            
-            for sid in expired_sessions:
-                session_manager.remove_session(sid)
-                
-            logger.info(f"Memory recovery: cleared {len(expired_sessions)} expired sessions")
+
+            # Clear expired sessions
+            from wazuh_mcp_server.server import sessions
+            expired_count = await sessions.cleanup_expired(timeout_minutes=15)
+
+            # Clear Wazuh client cache if available
+            try:
+                from wazuh_mcp_server.server import get_wazuh_client
+                client = await get_wazuh_client()
+                if hasattr(client, '_cache'):
+                    client._cache.clear()
+            except Exception:
+                pass  # Client may not be initialized
+
+            logger.info(f"Memory recovery: cleared {expired_count} expired sessions")
             return True
-            
+
         except Exception as e:
             logger.error(f"Memory recovery failed: {e}")
             return False
