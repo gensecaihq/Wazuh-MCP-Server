@@ -21,7 +21,7 @@ logging.basicConfig(
 logger = logging.getLogger("wazuh_mcp_server.main")
 
 
-def main():
+def main() -> None:
     """Main entry point for the Wazuh MCP Server."""
     try:
         from wazuh_mcp_server.server import app

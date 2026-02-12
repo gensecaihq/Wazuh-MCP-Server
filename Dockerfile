@@ -52,13 +52,17 @@ LABEL stage=scanner
 COPY --from=builder /root/.local /scan
 
 # Run comprehensive security scan
+# Set TRIVY_EXIT_CODE=1 in production builds to fail on HIGH/CRITICAL findings
+ARG TRIVY_EXIT_CODE=0
 RUN trivy fs \
     --no-progress \
     --security-checks vuln,secret,config \
     --severity HIGH,CRITICAL \
     --format json \
     --output /scan-results.json \
-    /scan || echo "Security scan completed with findings"
+    --exit-code ${TRIVY_EXIT_CODE} \
+    /scan && echo "Security scan passed" || \
+    (echo "Security scan found HIGH/CRITICAL vulnerabilities - review /scan-results.json" && exit ${TRIVY_EXIT_CODE})
 
 # Stage 3: Production image with latest Alpine
 FROM python:${PYTHON_VERSION}-alpine AS production

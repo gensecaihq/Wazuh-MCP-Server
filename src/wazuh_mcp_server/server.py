@@ -161,7 +161,7 @@ class MCPSession:
         self.client_info = {}
         self.authenticated = False
         
-    def update_activity(self):
+    def update_activity(self) -> None:
         """Update last activity timestamp."""
         self.last_activity = datetime.now(timezone.utc)
         
