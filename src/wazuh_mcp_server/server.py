@@ -27,6 +27,7 @@ import threading
 from typing import Dict, Any, Optional, List, Union
 from datetime import datetime, timezone, timedelta
 from urllib.parse import urlparse
+from contextlib import asynccontextmanager
 import uuid
 
 from fastapi import FastAPI, Request, Response, HTTPException, Header
@@ -304,13 +305,101 @@ async def get_or_create_session(session_id: Optional[str], origin: Optional[str]
     
     return session
 
+# Lifespan context manager for startup/shutdown events (modern FastAPI pattern)
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Manage application lifecycle with proper startup and shutdown handling."""
+    global _oauth_manager
+
+    # === STARTUP ===
+    logger.info("🚀 Wazuh MCP Server v4.0.6 starting up...")
+    logger.info(f"📡 MCP Protocol: {MCP_PROTOCOL_VERSION}")
+    logger.info(f"🔗 Wazuh Host: {get_config().WAZUH_HOST}")
+    logger.info(f"🌐 CORS Origins: {get_config().ALLOWED_ORIGINS}")
+    logger.info(f"🔐 Auth Mode: {get_config().AUTH_MODE}")
+
+    # Log Indexer configuration status
+    cfg = get_config()
+    if cfg.WAZUH_INDEXER_HOST:
+        logger.info(f"📊 Wazuh Indexer: {cfg.WAZUH_INDEXER_HOST}:{cfg.WAZUH_INDEXER_PORT}")
+    else:
+        logger.warning("⚠️  Wazuh Indexer not configured. Vulnerability tools require Wazuh 4.8.0+")
+        logger.warning("   Set WAZUH_INDEXER_HOST, WAZUH_INDEXER_USER, WAZUH_INDEXER_PASS to enable.")
+
+    # Initialize OAuth if enabled
+    if cfg.is_oauth:
+        try:
+            from wazuh_mcp_server.oauth import init_oauth_manager, create_oauth_router
+            _oauth_manager = init_oauth_manager(cfg)
+            oauth_router = create_oauth_router(_oauth_manager)
+            app.include_router(oauth_router)
+            logger.info("✅ OAuth 2.0 with DCR initialized")
+            logger.info("   OAuth endpoints: /oauth/authorize, /oauth/token, /oauth/register")
+            logger.info("   Discovery: /.well-known/oauth-authorization-server")
+        except Exception as e:
+            logger.error(f"❌ OAuth initialization failed: {e}")
+
+    # Log auth mode status
+    if cfg.is_authless:
+        logger.warning("⚠️  Running in AUTHLESS mode - no authentication required!")
+    elif cfg.is_bearer:
+        logger.info("🔐 Bearer token authentication enabled")
+        # Display auto-generated API key if not configured via environment
+        if not os.getenv("MCP_API_KEY"):
+            from wazuh_mcp_server.auth import auth_manager
+            default_key = auth_manager.get_default_api_key()
+            if default_key:
+                logger.info("=" * 60)
+                logger.info("🔑 AUTO-GENERATED API KEY (save this for client auth):")
+                logger.info(f"   {default_key}")
+                logger.info("   Set MCP_API_KEY environment variable in production")
+                logger.info("=" * 60)
+
+    # Initialize Wazuh client (will be available after yield)
+    logger.info("✅ Server startup complete with high availability features enabled")
+
+    yield  # Server is running
+
+    # === SHUTDOWN ===
+    logger.info("🛑 Wazuh MCP Server initiating graceful shutdown...")
+
+    try:
+        # Initiate graceful shutdown (waits for active connections)
+        await shutdown_manager.initiate_shutdown()
+
+        # Clear and cleanup auth manager
+        from wazuh_mcp_server.auth import auth_manager
+        auth_manager.cleanup_expired()
+        auth_manager.tokens.clear()
+        logger.info("Authentication tokens cleared")
+
+        # Clear sessions with proper cleanup
+        await sessions.clear()
+        logger.info("Sessions cleared")
+
+        # Cleanup rate limiter
+        if hasattr(rate_limiter, 'cleanup'):
+            rate_limiter.cleanup()
+
+        # Force garbage collection
+        import gc
+        gc.collect()
+        logger.info("Garbage collection completed")
+
+    except Exception as e:
+        logger.error(f"Error during shutdown: {e}")
+    finally:
+        logger.info("✅ Graceful shutdown completed")
+
+
 # Initialize FastAPI app for MCP compliance
 app = FastAPI(
     title="Wazuh MCP Server",
     description="MCP-compliant remote server for Wazuh SIEM integration. Supports Streamable HTTP, SSE, OAuth, and authless modes.",
     version="4.0.6",
     docs_url="/docs",
-    openapi_url="/openapi.json"
+    openapi_url="/openapi.json",
+    lifespan=lifespan
 )
 
 # Get configuration
@@ -2489,112 +2578,6 @@ async def get_auth_token(request: Request):
     except Exception as e:
         logger.error(f"Token generation error: {e}")
         raise HTTPException(status_code=500, detail="Internal server error")
-
-# Startup event
-@app.on_event("startup")
-async def startup_event():
-    """Initialize server on startup with graceful shutdown support."""
-    global _oauth_manager
-
-    logger.info("🚀 Wazuh MCP Server v4.0.6 starting up...")
-    logger.info(f"📡 MCP Protocol: {MCP_PROTOCOL_VERSION}")
-    logger.info(f"🔗 Wazuh Host: {config.WAZUH_HOST}")
-    logger.info(f"🌐 CORS Origins: {config.ALLOWED_ORIGINS}")
-    logger.info(f"🔐 Auth Mode: {config.AUTH_MODE}")
-
-    # Log Indexer configuration status
-    if config.WAZUH_INDEXER_HOST:
-        logger.info(f"📊 Wazuh Indexer: {config.WAZUH_INDEXER_HOST}:{config.WAZUH_INDEXER_PORT}")
-    else:
-        logger.warning("⚠️  Wazuh Indexer not configured. Vulnerability tools require Wazuh 4.8.0+")
-        logger.warning("   Set WAZUH_INDEXER_HOST, WAZUH_INDEXER_USER, WAZUH_INDEXER_PASS to enable.")
-
-    # Initialize OAuth if enabled
-    if config.is_oauth:
-        try:
-            from wazuh_mcp_server.oauth import init_oauth_manager, create_oauth_router
-            _oauth_manager = init_oauth_manager(config)
-            oauth_router = create_oauth_router(_oauth_manager)
-            app.include_router(oauth_router)
-            logger.info("✅ OAuth 2.0 with DCR initialized")
-            logger.info(f"   OAuth endpoints: /oauth/authorize, /oauth/token, /oauth/register")
-            logger.info(f"   Discovery: /.well-known/oauth-authorization-server")
-        except Exception as e:
-            logger.error(f"❌ OAuth initialization failed: {e}")
-
-    # Log auth mode status
-    if config.is_authless:
-        logger.warning("⚠️  Running in AUTHLESS mode - no authentication required!")
-    elif config.is_bearer:
-        logger.info("🔐 Bearer token authentication enabled")
-        # Display auto-generated API key if not configured via environment
-        if not os.getenv("MCP_API_KEY"):
-            from wazuh_mcp_server.auth import auth_manager
-            default_key = auth_manager.get_default_api_key()
-            if default_key:
-                logger.info("=" * 60)
-                logger.info("🔑 AUTO-GENERATED API KEY (save this for client auth):")
-                logger.info(f"   {default_key}")
-                logger.info("   Set MCP_API_KEY environment variable in production")
-                logger.info("=" * 60)
-
-    # Initialize Wazuh client
-    try:
-        await wazuh_client.initialize()
-        logger.info("✅ Wazuh client initialized successfully")
-
-        # Register Wazuh client cleanup
-        async def cleanup_wazuh():
-            if hasattr(wazuh_client, 'close'):
-                await wazuh_client.close()
-                logger.info("Wazuh client connections closed")
-
-        shutdown_manager.add_cleanup_task(cleanup_wazuh)
-
-    except Exception as e:
-        logger.warning(f"⚠️  Wazuh client initialization failed: {e}")
-
-    # Test Wazuh connectivity
-    try:
-        await wazuh_client.get_manager_info()
-        logger.info("✅ Wazuh connectivity test passed")
-    except Exception as e:
-        logger.warning(f"⚠️  Wazuh connectivity test failed: {e}")
-
-    logger.info("✅ Server startup complete with high availability features enabled")
-
-@app.on_event("shutdown")
-async def shutdown_event():
-    """Cleanup on server shutdown with graceful resource management."""
-    logger.info("🛑 Wazuh MCP Server initiating graceful shutdown...")
-
-    try:
-        # Initiate graceful shutdown (waits for active connections)
-        await shutdown_manager.initiate_shutdown()
-
-        # Clear and cleanup auth manager
-        from wazuh_mcp_server.auth import auth_manager
-        auth_manager.cleanup_expired()
-        auth_manager.tokens.clear()
-        logger.info("Authentication tokens cleared")
-
-        # Clear sessions with proper cleanup
-        await sessions.clear()
-        logger.info("Sessions cleared")
-
-        # Cleanup rate limiter
-        if hasattr(rate_limiter, 'cleanup'):
-            rate_limiter.cleanup()
-
-        # Force garbage collection
-        import gc
-        gc.collect()
-        logger.info("Garbage collection completed")
-
-    except Exception as e:
-        logger.error(f"Error during shutdown: {e}")
-    finally:
-        logger.info("✅ Graceful shutdown completed")
 
 if __name__ == "__main__":
     import uvicorn
