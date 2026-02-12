@@ -485,6 +485,76 @@ _current_log_level: str = "info"
 
 
 # MCP Protocol Handlers
+
+def _compact_alert(alert: dict) -> dict:
+    """Strip a raw Wazuh alert to essential fields for MCP output."""
+    compact = {}
+    if "timestamp" in alert:
+        compact["timestamp"] = alert["timestamp"]
+    agent = alert.get("agent", {})
+    if agent:
+        compact["agent"] = {"id": agent.get("id", ""), "name": agent.get("name", "")}
+    rule = alert.get("rule", {})
+    if rule:
+        compact["rule"] = {
+            "id": rule.get("id", ""),
+            "level": rule.get("level", 0),
+            "description": rule.get("description", ""),
+            "groups": rule.get("groups", []),
+        }
+        if rule.get("mitre"):
+            compact["rule"]["mitre"] = rule["mitre"]
+    src = alert.get("data", {})
+    if src.get("srcip"):
+        compact["srcip"] = src["srcip"]
+    if src.get("dstip"):
+        compact["dstip"] = src["dstip"]
+    if alert.get("syscheck"):
+        sc = alert["syscheck"]
+        compact["syscheck"] = {"path": sc.get("path", ""), "event": sc.get("event", "")}
+    if alert.get("full_log"):
+        log = alert["full_log"]
+        compact["full_log"] = (log[:300] + "...") if len(log) > 300 else log
+    return compact
+
+
+def _compact_alerts_result(result: dict) -> dict:
+    """Apply compaction to a standard alerts result dict."""
+    data = result.get("data", {})
+    items = data.get("affected_items", [])
+    data["affected_items"] = [_compact_alert(a) for a in items]
+    return result
+
+
+def _compact_vulnerability(vuln: dict) -> dict:
+    """Strip a raw Wazuh vulnerability to essential fields for MCP output."""
+    compact = {}
+    for key in ("id", "severity"):
+        if key in vuln:
+            compact[key] = vuln[key]
+    if "description" in vuln:
+        desc = vuln["description"]
+        compact["description"] = (desc[:120] + "...") if len(desc) > 120 else desc
+    if "published_at" in vuln:
+        compact["published_at"] = vuln["published_at"]
+    pkg = vuln.get("package", {})
+    if pkg:
+        compact["package"] = {"name": pkg.get("name", ""), "version": pkg.get("version", "")}
+    agent = vuln.get("agent", {})
+    if agent:
+        compact["agent"] = {"id": agent.get("id", ""), "name": agent.get("name", "")}
+    return compact
+
+
+def _compact_vulns_result(result: dict) -> dict:
+    """Apply compaction to a standard vulnerabilities result dict."""
+    data = result.get("data", {})
+    items = data.get("affected_items", [])
+    if items:
+        data["affected_items"] = [_compact_vulnerability(v) for v in items]
+    return result
+
+
 async def handle_initialize(params: Dict[str, Any], session: MCPSession) -> Dict[str, Any]:
     """Handle MCP initialize method per MCP specification."""
     client_protocol_version = params.get("protocolVersion", "2025-03-26")
@@ -940,7 +1010,8 @@ async def handle_tools_list(params: Dict[str, Any], session: MCPSession) -> Dict
                     "level": {"type": "string", "description": "Filter by alert level (e.g., '12', '10+')"},
                     "agent_id": {"type": "string", "description": "Filter by agent ID"},
                     "timestamp_start": {"type": "string", "description": "Start timestamp (ISO format)"},
-                    "timestamp_end": {"type": "string", "description": "End timestamp (ISO format)"}
+                    "timestamp_end": {"type": "string", "description": "End timestamp (ISO format)"},
+                    "compact": {"type": "boolean", "default": True, "description": "Return compact alerts with essential fields only (recommended to avoid token limits)"}
                 },
                 "required": []
             }
@@ -977,7 +1048,8 @@ async def handle_tools_list(params: Dict[str, Any], session: MCPSession) -> Dict
                 "properties": {
                     "query": {"type": "string", "description": "Search query or pattern"},
                     "time_range": {"type": "string", "enum": ["1h", "6h", "24h", "7d"], "default": "24h"},
-                    "limit": {"type": "integer", "minimum": 1, "maximum": 1000, "default": 100}
+                    "limit": {"type": "integer", "minimum": 1, "maximum": 1000, "default": 100},
+                    "compact": {"type": "boolean", "default": True, "description": "Return compact events with essential fields only (recommended to avoid token limits)"}
                 },
                 "required": ["query"]
             }
@@ -1062,7 +1134,8 @@ async def handle_tools_list(params: Dict[str, Any], session: MCPSession) -> Dict
                 "properties": {
                     "agent_id": {"type": "string", "description": "Filter by specific agent ID"},
                     "severity": {"type": "string", "enum": ["low", "medium", "high", "critical"], "description": "Filter by severity level"},
-                    "limit": {"type": "integer", "minimum": 1, "maximum": 500, "default": 100}
+                    "limit": {"type": "integer", "minimum": 1, "maximum": 500, "default": 100},
+                    "compact": {"type": "boolean", "default": True, "description": "Return compact vulnerabilities with essential fields only (recommended to avoid token limits)"}
                 },
                 "required": []
             }
@@ -1073,7 +1146,8 @@ async def handle_tools_list(params: Dict[str, Any], session: MCPSession) -> Dict
             "inputSchema": {
                 "type": "object",
                 "properties": {
-                    "limit": {"type": "integer", "minimum": 1, "maximum": 500, "default": 50}
+                    "limit": {"type": "integer", "minimum": 1, "maximum": 500, "default": 50},
+                    "compact": {"type": "boolean", "default": True, "description": "Return compact vulnerabilities with essential fields only (recommended to avoid token limits)"}
                 },
                 "required": []
             }
@@ -1287,12 +1361,15 @@ async def handle_tools_call(params: Dict[str, Any], session: MCPSession) -> Dict
             agent_id = arguments.get("agent_id")
             timestamp_start = arguments.get("timestamp_start")
             timestamp_end = arguments.get("timestamp_end")
+            compact = arguments.get("compact", True)
             result = await wazuh_client.get_alerts(
-                limit=limit, rule_id=rule_id, level=level, 
-                agent_id=agent_id, timestamp_start=timestamp_start, 
+                limit=limit, rule_id=rule_id, level=level,
+                agent_id=agent_id, timestamp_start=timestamp_start,
                 timestamp_end=timestamp_end
             )
-            return {"content": [{"type": "text", "text": f"Wazuh Alerts:\n{json.dumps(result, indent=2)}"}]}
+            if compact:
+                result = _compact_alerts_result(result)
+            return {"content": [{"type": "text", "text": f"Wazuh Alerts:\n{json.dumps(result, indent=2 if not compact else None)}"}]}
             
         elif tool_name == "get_wazuh_alert_summary":
             time_range = arguments.get("time_range", "24h")
@@ -1310,8 +1387,11 @@ async def handle_tools_call(params: Dict[str, Any], session: MCPSession) -> Dict
             query = arguments.get("query")
             time_range = arguments.get("time_range", "24h")
             limit = arguments.get("limit", 100)
+            compact = arguments.get("compact", True)
             result = await wazuh_client.search_security_events(query, time_range, limit)
-            return {"content": [{"type": "text", "text": f"Security Events:\n{json.dumps(result, indent=2)}"}]}
+            if compact:
+                result = _compact_alerts_result(result)
+            return {"content": [{"type": "text", "text": f"Security Events:\n{json.dumps(result, indent=2 if not compact else None)}"}]}
 
         # Agent Management Tools
         elif tool_name == "get_wazuh_agents":
@@ -1352,13 +1432,19 @@ async def handle_tools_call(params: Dict[str, Any], session: MCPSession) -> Dict
             agent_id = arguments.get("agent_id")
             severity = arguments.get("severity")
             limit = arguments.get("limit", 100)
+            compact = arguments.get("compact", True)
             result = await wazuh_client.get_vulnerabilities(agent_id=agent_id, severity=severity, limit=limit)
-            return {"content": [{"type": "text", "text": f"Vulnerabilities:\n{json.dumps(result, indent=2)}"}]}
+            if compact:
+                result = _compact_vulns_result(result)
+            return {"content": [{"type": "text", "text": f"Vulnerabilities:\n{json.dumps(result, indent=2 if not compact else None)}"}]}
             
         elif tool_name == "get_wazuh_critical_vulnerabilities":
             limit = arguments.get("limit", 50)
+            compact = arguments.get("compact", True)
             result = await wazuh_client.get_critical_vulnerabilities(limit)
-            return {"content": [{"type": "text", "text": f"Critical Vulnerabilities:\n{json.dumps(result, indent=2)}"}]}
+            if compact:
+                result = _compact_vulns_result(result)
+            return {"content": [{"type": "text", "text": f"Critical Vulnerabilities:\n{json.dumps(result, indent=2 if not compact else None)}"}]}
             
         elif tool_name == "get_wazuh_vulnerability_summary":
             time_range = arguments.get("time_range", "7d")
