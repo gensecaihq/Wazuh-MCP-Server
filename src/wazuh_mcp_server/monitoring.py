@@ -411,7 +411,7 @@ health_checker.register_check("wazuh_api", check_wazuh_connectivity)
 
 # Set up server info metric
 SERVER_INFO.info({
-    'version': '3.0.0',
+    'version': '4.0.6',
     'python_version': f"{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}",
     'start_time': datetime.now(timezone.utc).isoformat()
 })
