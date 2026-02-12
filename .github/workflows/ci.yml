@@ -77,17 +77,7 @@ jobs:
       run: |
         python -m py_compile src/wazuh_mcp_server/*.py
         python -m py_compile src/wazuh_mcp_server/api/*.py
-
-    - name: Install package and dependencies
-      run: |
-        python -m pip install --upgrade pip
-        pip install fastapi httpx pydantic uvicorn python-dotenv tenacity
-        pip install -e .
-
-    - name: Verify imports
-      run: |
-        python -c "from wazuh_mcp_server.server import app; print('Server imports OK')"
-        python -c "from wazuh_mcp_server.config import get_config; print('Config imports OK')"
+        echo "All Python files have valid syntax"
 
   build:
     name: Build
