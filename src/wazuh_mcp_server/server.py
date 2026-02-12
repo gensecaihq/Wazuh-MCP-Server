@@ -95,11 +95,38 @@ class MCPRequest(BaseModel):
     params: Optional[Dict[str, Any]] = Field(default=None, description="Method parameters")
 
 class MCPResponse(BaseModel):
-    """MCP JSON-RPC 2.0 Response."""
+    """
+    MCP JSON-RPC 2.0 Response.
+
+    Compliant with JSON-RPC 2.0 specification:
+    - On success: includes 'result', excludes 'error'
+    - On error: includes 'error', excludes 'result'
+    """
     jsonrpc: str = Field(default="2.0", description="JSON-RPC version")
     id: Optional[Union[str, int]] = Field(default=None, description="Request ID")
     result: Optional[Any] = Field(default=None, description="Result data")
     error: Optional[Dict[str, Any]] = Field(default=None, description="Error object")
+
+    def dict(self, *args, **kwargs) -> Dict[str, Any]:
+        """
+        Override dict() to comply with JSON-RPC 2.0 specification.
+
+        Per JSON-RPC 2.0 spec:
+        - "result" and "error" MUST NOT both exist in the same response
+        - On success: include 'result', exclude 'error'
+        - On error: include 'error', exclude 'result'
+        """
+        d = super().dict(*args, **kwargs)
+
+        # Remove error field on success (when result is present and error is None)
+        if d.get("result") is not None and d.get("error") is None:
+            d.pop("error", None)
+
+        # Remove result field on error (when error is present)
+        elif d.get("error") is not None:
+            d.pop("result", None)
+
+        return d
 
 class MCPError(BaseModel):
     """MCP JSON-RPC 2.0 Error object."""
@@ -280,7 +307,12 @@ wazuh_config = WazuhConfig(
     wazuh_user=config.WAZUH_USER,
     wazuh_pass=config.WAZUH_PASS,
     wazuh_port=config.WAZUH_PORT,
-    verify_ssl=config.WAZUH_VERIFY_SSL
+    verify_ssl=config.WAZUH_VERIFY_SSL,
+    # Wazuh Indexer settings (required for vulnerability tools in Wazuh 4.8.0+)
+    wazuh_indexer_host=config.WAZUH_INDEXER_HOST if config.WAZUH_INDEXER_HOST else None,
+    wazuh_indexer_port=config.WAZUH_INDEXER_PORT,
+    wazuh_indexer_user=config.WAZUH_INDEXER_USER if config.WAZUH_INDEXER_USER else None,
+    wazuh_indexer_pass=config.WAZUH_INDEXER_PASS if config.WAZUH_INDEXER_PASS else None,
 )
 
 # Initialize Wazuh client
@@ -1622,11 +1654,18 @@ async def startup_event():
     """Initialize server on startup with graceful shutdown support."""
     global _oauth_manager
 
-    logger.info("🚀 Wazuh MCP Server v4.0.1 starting up...")
+    logger.info("🚀 Wazuh MCP Server v4.0.3 starting up...")
     logger.info(f"📡 MCP Protocol: {MCP_PROTOCOL_VERSION}")
     logger.info(f"🔗 Wazuh Host: {config.WAZUH_HOST}")
     logger.info(f"🌐 CORS Origins: {config.ALLOWED_ORIGINS}")
     logger.info(f"🔐 Auth Mode: {config.AUTH_MODE}")
+
+    # Log Indexer configuration status
+    if config.WAZUH_INDEXER_HOST:
+        logger.info(f"📊 Wazuh Indexer: {config.WAZUH_INDEXER_HOST}:{config.WAZUH_INDEXER_PORT}")
+    else:
+        logger.warning("⚠️  Wazuh Indexer not configured. Vulnerability tools require Wazuh 4.8.0+")
+        logger.warning("   Set WAZUH_INDEXER_HOST, WAZUH_INDEXER_USER, WAZUH_INDEXER_PASS to enable.")
 
     # Initialize OAuth if enabled
     if config.is_oauth:

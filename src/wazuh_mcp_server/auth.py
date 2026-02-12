@@ -254,17 +254,71 @@ class TokenResponse(BaseModel):
     token_type: str = Field(default="Bearer")
 
 async def verify_bearer_token(authorization: str) -> AuthToken:
-    """Verify bearer token from Authorization header."""
+    """
+    Verify bearer token from Authorization header.
+
+    Supports two token types:
+    1. Session tokens (wst_*) - Created via auth_manager.create_token()
+    2. JWT tokens - Created via /auth/token endpoint
+
+    Args:
+        authorization: The Authorization header value (e.g., "Bearer <token>")
+
+    Returns:
+        AuthToken object representing the validated token
+
+    Raises:
+        ValueError: If the token is invalid or expired
+    """
     if not authorization.startswith("Bearer "):
         raise ValueError("Invalid authorization header format")
-        
+
     token = authorization[7:]  # Remove "Bearer " prefix
-    token_obj = auth_manager.validate_token(token)
-    
-    if not token_obj:
+
+    # First, try session token validation (wst_* tokens)
+    if token.startswith("wst_"):
+        token_obj = auth_manager.validate_token(token)
+        if token_obj:
+            return token_obj
+        raise ValueError("Invalid or expired session token")
+
+    # Second, try JWT token validation (tokens from /auth/token endpoint)
+    try:
+        # Verify and decode the JWT token using the auth_manager's secret key
+        payload = verify_token(token, auth_manager.secret_key)
+
+        # Extract timestamps from JWT payload
+        exp_timestamp = payload.get("exp")
+        iat_timestamp = payload.get("iat")
+
+        expires_at = None
+        if exp_timestamp:
+            expires_at = datetime.fromtimestamp(exp_timestamp, tz=timezone.utc)
+
+        created_at = datetime.now(timezone.utc)
+        if iat_timestamp:
+            created_at = datetime.fromtimestamp(iat_timestamp, tz=timezone.utc)
+
+        # Parse scopes from JWT payload
+        scope_string = payload.get("scope", "")
+        scopes = scope_string.split() if scope_string else ["wazuh:read", "wazuh:write"]
+
+        # Create AuthToken object from JWT payload
+        return AuthToken(
+            token=token,
+            api_key_id="jwt_auth",
+            created_at=created_at,
+            expires_at=expires_at,
+            scopes=scopes,
+            metadata={
+                "sub": payload.get("sub"),
+                "token_type": "jwt"
+            }
+        )
+
+    except ValueError:
+        # JWT validation failed
         raise ValueError("Invalid or expired token")
-        
-    return token_obj
 
 def create_access_token(data: Dict[str, Any], secret_key: str, expires_delta: Optional[timedelta] = None) -> str:
     """Create JWT access token."""

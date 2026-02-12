@@ -136,6 +136,13 @@ class ServerConfig:
     WAZUH_VERIFY_SSL: bool = False
     WAZUH_ALLOW_SELF_SIGNED: bool = True
 
+    # Wazuh Indexer settings (Required for Wazuh 4.8.0+ vulnerability tools)
+    WAZUH_INDEXER_HOST: str = ""
+    WAZUH_INDEXER_PORT: int = 9200
+    WAZUH_INDEXER_USER: str = ""
+    WAZUH_INDEXER_PASS: str = ""
+    WAZUH_INDEXER_VERIFY_SSL: bool = False
+
     # Logging
     LOG_LEVEL: str = "INFO"
 
@@ -172,6 +179,12 @@ class ServerConfig:
             WAZUH_PORT=int(os.getenv("WAZUH_PORT", "55000")),
             WAZUH_VERIFY_SSL=os.getenv("WAZUH_VERIFY_SSL", "false").lower() == "true",
             WAZUH_ALLOW_SELF_SIGNED=os.getenv("WAZUH_ALLOW_SELF_SIGNED", "true").lower() == "true",
+            # Wazuh Indexer settings (for vulnerability tools in Wazuh 4.8.0+)
+            WAZUH_INDEXER_HOST=os.getenv("WAZUH_INDEXER_HOST", ""),
+            WAZUH_INDEXER_PORT=int(os.getenv("WAZUH_INDEXER_PORT", "9200")),
+            WAZUH_INDEXER_USER=os.getenv("WAZUH_INDEXER_USER", ""),
+            WAZUH_INDEXER_PASS=os.getenv("WAZUH_INDEXER_PASS", ""),
+            WAZUH_INDEXER_VERIFY_SSL=os.getenv("WAZUH_INDEXER_VERIFY_SSL", "false").lower() == "true",
             LOG_LEVEL=os.getenv("LOG_LEVEL", "INFO").upper()
         )
 
