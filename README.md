@@ -32,6 +32,7 @@ A **production-ready, enterprise-grade** MCP-compliant remote server that provid
 - **🌍 Zero Host Dependencies**: No Python, tools, or libraries needed on host system
 - **🔄 High Availability**: Integrated circuit breakers, exponential backoff retry logic, graceful shutdown with connection draining
 - **☁️ Serverless Ready**: Pluggable session storage (Redis or in-memory), stateless operations, horizontal scaling support
+- **📦 Compact Output Mode**: Token-efficient responses reducing output by ~66%, ideal for LLM context limits
 
 ### 🏅 MCP 2025-11-25 Specification Compliance
 
@@ -73,6 +74,8 @@ This implementation **100% complies** with the latest MCP specification:
 
 ### 29 Specialized Tools
 Comprehensive toolkit for security operations including:
+
+> **💡 Compact Mode**: Alert and vulnerability tools support `compact: true` (default) for token-efficient output, reducing response size by ~66%. Set `compact: false` for full raw data.
 
 **Alert Management (4 tools)**
 - **get_wazuh_alerts**: Retrieve security alerts with filtering
@@ -406,6 +409,36 @@ curl http://localhost:3000/health | jq '.session_storage'
 #   "sessions_count": 5
 # }
 ```
+
+### Compact Output Mode
+
+Reduce token usage by ~66% with compact output mode (enabled by default):
+
+**Supported Tools:**
+- `get_wazuh_alerts` - Strips to: timestamp, agent, rule, IPs, syscheck, truncated logs
+- `search_security_events` - Same compact format as alerts
+- `get_wazuh_vulnerabilities` - Strips to: id, severity, description (120 chars), package, agent
+- `get_wazuh_critical_vulnerabilities` - Same compact format as vulnerabilities
+
+**Usage:**
+```bash
+# Compact mode (default) - minimal JSON, essential fields only
+curl -X POST http://localhost:3000/mcp \
+  -H "Authorization: Bearer <token>" \
+  -d '{"jsonrpc":"2.0","method":"tools/call","params":{"name":"get_wazuh_alerts","arguments":{"limit":10}},"id":"1"}'
+
+# Full mode - complete data with pretty-printing
+curl -X POST http://localhost:3000/mcp \
+  -H "Authorization: Bearer <token>" \
+  -d '{"jsonrpc":"2.0","method":"tools/call","params":{"name":"get_wazuh_alerts","arguments":{"limit":10,"compact":false}},"id":"1"}'
+```
+
+**Token Savings:**
+| Mode | Chars/alert | 100 alerts | Estimated Tokens |
+|------|-------------|------------|------------------|
+| Full | ~1,350 | 135K | ~33,750 |
+| Compact | ~450 | 45K | ~11,300 |
+| **Savings** | **67%** | **90K** | **~22,000** |
 
 ## 📊 Monitoring & Operations  
 
