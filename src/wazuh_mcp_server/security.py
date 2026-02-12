@@ -539,48 +539,52 @@ class RateLimiter:
 
 class SecurityValidator:
     """Validate requests for security threats."""
-    
+
+    # Pre-compiled regex patterns for performance (class-level constants)
+    MAX_PAYLOAD_SIZE = 1024 * 1024  # 1MB
+
     def __init__(self):
-        self.suspicious_patterns = [
+        import re
+        # Pre-compile patterns at initialization for O(1) matching per pattern
+        self._compiled_patterns = [
             # SQL Injection patterns
-            r"(?i)(union|select|insert|delete|drop|create|alter|exec|execute)",
+            re.compile(r"(?i)(union|select|insert|delete|drop|create|alter|exec|execute)"),
             # XSS patterns
-            r"(?i)(<script|javascript:|onload=|onerror=)",
+            re.compile(r"(?i)(<script|javascript:|onload=|onerror=)"),
             # Path traversal
-            r"(\.\./|\.\.\\|%2e%2e)",
+            re.compile(r"(\.\./|\.\.\\|%2e%2e)"),
             # Command injection
-            r"(;|\||&|`|\$\(|\$\{)",
+            re.compile(r"(;|\||&|`|\$\(|\$\{)"),
         ]
-        self.max_payload_size = 1024 * 1024  # 1MB
-        
+        self.max_payload_size = self.MAX_PAYLOAD_SIZE
+
     def validate_request(self, request: Request, body: Optional[str] = None) -> tuple[bool, Optional[str]]:
         """Validate request for security threats. Returns (is_safe, reason)."""
-        
+
         # Check payload size
         if body and len(body) > self.max_payload_size:
             return False, "Payload too large"
-            
+
         # Check for suspicious patterns in headers
         for header_name, header_value in request.headers.items():
             if self._contains_suspicious_pattern(header_value):
                 return False, f"Suspicious pattern in header {header_name}"
-                
+
         # Check query parameters
         for key, value in request.query_params.items():
             if self._contains_suspicious_pattern(value):
                 return False, f"Suspicious pattern in query parameter {key}"
-                
+
         # Check body content
         if body and self._contains_suspicious_pattern(body):
             return False, "Suspicious pattern in request body"
-            
+
         return True, None
-    
+
     def _contains_suspicious_pattern(self, text: str) -> bool:
-        """Check if text contains suspicious patterns."""
-        import re
-        for pattern in self.suspicious_patterns:
-            if re.search(pattern, text):
+        """Check if text contains suspicious patterns using pre-compiled regex."""
+        for pattern in self._compiled_patterns:
+            if pattern.search(text):
                 return True
         return False
 

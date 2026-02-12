@@ -8,17 +8,20 @@ This provides just enough interface to prevent import errors.
 
 import sys
 import asyncio
-from typing import Any, Callable, Dict, Optional
+import logging
+from typing import Callable, Optional
+
+logger = logging.getLogger(__name__)
 
 
 class FastMCP:
     """Minimal FastMCP stub for basic MCP server operations."""
-    
+
     def __init__(self, name: str, version: str = "2.1.2"):
         self.name = name
         self.version = version
         self.tools = {}
-        
+
     def tool(self, name: Optional[str] = None, description: str = ""):
         """Tool decorator stub."""
         def decorator(func: Callable) -> Callable:
@@ -26,18 +29,18 @@ class FastMCP:
             self.tools[tool_name] = func
             return func
         return decorator
-    
+
     def run(self, transport: str = "stdio"):
-        """Run stub - prints message and exits gracefully."""
-        print(f"🚀 {self.name} v{self.version}", file=sys.stderr)
-        print("⚠️  Running in stub mode - FastMCP not available", file=sys.stderr)
-        print("📦 Install FastMCP with Python 3.10+ for full functionality", file=sys.stderr)
-        print("✅ Server configuration validated successfully", file=sys.stderr)
-        
+        """Run stub - logs message and exits gracefully."""
+        logger.info(f"{self.name} v{self.version}")
+        logger.warning("Running in stub mode - FastMCP not available")
+        logger.info("Install FastMCP with Python 3.10+ for full functionality")
+        logger.info("Server configuration validated successfully")
+
         # Keep running to simulate server
         try:
             while True:
                 asyncio.run(asyncio.sleep(1))
         except KeyboardInterrupt:
-            print("\n🛑 Server stopped", file=sys.stderr)
+            logger.info("Server stopped")
             sys.exit(0)
