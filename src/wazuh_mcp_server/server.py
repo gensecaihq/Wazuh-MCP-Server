@@ -216,23 +216,38 @@ class SessionManager:
         """Store session."""
         return await self._store.set(session_id, session.to_dict())
 
+    def _run_sync(self, coro):
+        """Run coroutine synchronously, handling existing event loop safely."""
+        try:
+            # Check if we're in an async context
+            loop = asyncio.get_running_loop()
+            # If we get here, there's a running loop - this is not safe
+            raise RuntimeError(
+                "Synchronous SessionManager methods cannot be called from async context. "
+                "Use async methods like 'await sessions.get()' instead."
+            )
+        except RuntimeError:
+            # No running loop - safe to create one
+            loop = asyncio.new_event_loop()
+            try:
+                return loop.run_until_complete(coro)
+            finally:
+                loop.close()
+
     def __getitem__(self, session_id: str) -> MCPSession:
-        """Synchronous dict-like access (blocks)."""
-        loop = asyncio.get_event_loop()
-        session = loop.run_until_complete(self.get(session_id))
+        """Synchronous dict-like access (blocks). Not for use in async context."""
+        session = self._run_sync(self.get(session_id))
         if session is None:
             raise KeyError(f"Session {session_id} not found")
         return session
 
     def __setitem__(self, session_id: str, session: MCPSession) -> None:
-        """Synchronous dict-like access (blocks)."""
-        loop = asyncio.get_event_loop()
-        loop.run_until_complete(self.set(session_id, session))
+        """Synchronous dict-like access (blocks). Not for use in async context."""
+        self._run_sync(self.set(session_id, session))
 
     def __delitem__(self, session_id: str) -> None:
-        """Synchronous delete (blocks)."""
-        loop = asyncio.get_event_loop()
-        loop.run_until_complete(self.remove(session_id))
+        """Synchronous delete (blocks). Not for use in async context."""
+        self._run_sync(self.remove(session_id))
 
     async def __contains__(self, session_id: str) -> bool:
         """Check if session exists."""
@@ -243,28 +258,27 @@ class SessionManager:
         return await self._store.delete(session_id)
 
     def pop(self, session_id: str, default=None) -> Optional[MCPSession]:
-        """Remove and return session (synchronous, blocks)."""
-        loop = asyncio.get_event_loop()
-        session = loop.run_until_complete(self.get(session_id))
-        if session:
-            loop.run_until_complete(self.remove(session_id))
-            return session
-        return default
+        """Remove and return session (synchronous, blocks). Not for use in async context."""
+        async def _pop():
+            session = await self.get(session_id)
+            if session:
+                await self.remove(session_id)
+                return session
+            return default
+        return self._run_sync(_pop())
 
     async def clear(self) -> bool:
         """Clear all sessions."""
         return await self._store.clear()
 
     def values(self) -> List[MCPSession]:
-        """Get all session values (synchronous, blocks)."""
-        loop = asyncio.get_event_loop()
-        sessions_dict = loop.run_until_complete(self.get_all())
+        """Get all session values (synchronous, blocks). Not for use in async context."""
+        sessions_dict = self._run_sync(self.get_all())
         return list(sessions_dict.values())
 
     def keys(self) -> List[str]:
-        """Get all session keys (synchronous, blocks)."""
-        loop = asyncio.get_event_loop()
-        sessions_dict = loop.run_until_complete(self.get_all())
+        """Get all session keys (synchronous, blocks). Not for use in async context."""
+        sessions_dict = self._run_sync(self.get_all())
         return list(sessions_dict.keys())
 
     async def get_all(self) -> Dict[str, MCPSession]:

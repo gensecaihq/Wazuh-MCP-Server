@@ -343,7 +343,10 @@ class WazuhClient:
 
     async def _execute_request(self, method: str, endpoint: str, **kwargs) -> Dict[str, Any]:
         """Execute the actual HTTP request to Wazuh API."""
-        if not self.token:
+        # Ensure client is initialized
+        if not self.client:
+            await self.initialize()
+        elif not self.token:
             await self._authenticate()
 
         url = f"{self.config.base_url}{endpoint}"

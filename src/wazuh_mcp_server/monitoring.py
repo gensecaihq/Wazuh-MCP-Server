@@ -459,8 +459,8 @@ async def check_memory_usage():
     try:
         process = psutil.Process()
         memory_mb = process.memory_info().rss / 1024 / 1024
-        max_memory_mb = int(os.getenv("MAX_MEMORY_MB", "512"))
-        
+        max_memory_mb = max(1, int(os.getenv("MAX_MEMORY_MB", "512")))  # Prevent division by zero
+
         usage_percent = (memory_mb / max_memory_mb) * 100
         
         if usage_percent > 90:

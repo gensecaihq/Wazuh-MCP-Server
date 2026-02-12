@@ -258,12 +258,15 @@ class BulkheadIsolation:
             "authentication": asyncio.Semaphore(AUTH_MAX_CONCURRENT_REQUESTS),
         }
 
-    async def acquire_resource(self, resource_type: str):
-        """Acquire resource from pool."""
+    def get_semaphore(self, resource_type: str) -> asyncio.Semaphore:
+        """Get semaphore for resource type (synchronous, returns semaphore for use in async with)."""
         if resource_type in self.resource_pools:
             return self.resource_pools[resource_type]
         else:
-            return asyncio.Semaphore(FALLBACK_SEMAPHORE_LIMIT)
+            # Create and cache fallback semaphore to avoid creating new ones each time
+            if resource_type not in self.resource_pools:
+                self.resource_pools[resource_type] = asyncio.Semaphore(FALLBACK_SEMAPHORE_LIMIT)
+            return self.resource_pools[resource_type]
 
 class HealthRecovery:
     """Automatic health recovery mechanisms."""
@@ -354,7 +357,7 @@ def with_wazuh_resilience(func: Callable) -> Callable:
     @TimeoutManager.with_timeout("http_request")
     @functools.wraps(func)
     async def wrapper(*args, **kwargs):
-        async with bulkhead_isolation.acquire_resource("wazuh_api"):
+        async with bulkhead_isolation.get_semaphore("wazuh_api"):
             return await func(*args, **kwargs)
     return wrapper
 
@@ -364,6 +367,6 @@ def with_auth_resilience(func: Callable) -> Callable:
     @TimeoutManager.with_timeout("authentication")
     @functools.wraps(func)
     async def wrapper(*args, **kwargs):
-        async with bulkhead_isolation.acquire_resource("authentication"):
+        async with bulkhead_isolation.get_semaphore("authentication"):
             return await func(*args, **kwargs)
     return wrapper
