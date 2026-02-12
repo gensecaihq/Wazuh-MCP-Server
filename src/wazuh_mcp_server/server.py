@@ -1590,9 +1590,20 @@ async def mcp_endpoint(
         if not allowed:
             headers = {"Retry-After": str(retry_after)} if retry_after else {}
             raise HTTPException(status_code=429, detail="Rate limit exceeded", headers=headers)
-        
-        # Get or create session
-        session = await get_or_create_session(mcp_session_id, origin)
+
+        # Session validation per MCP Streamable HTTP spec
+        if mcp_session_id:
+            existing_session = await sessions.get(mcp_session_id)
+            if not existing_session:
+                raise HTTPException(
+                    status_code=404,
+                    detail="Session not found. Please start a new session with InitializeRequest."
+                )
+            session = existing_session
+            session.update_activity()
+            await sessions.set(mcp_session_id, session)
+        else:
+            session = await get_or_create_session(None, origin)
 
         # Handle GET request (SSE)
         if request.method == "GET":
@@ -1905,9 +1916,23 @@ async def mcp_streamable_http_endpoint(
     ACTIVE_CONNECTIONS.inc()
 
     try:
-        # Get or create session
-        session = await get_or_create_session(mcp_session_id, origin)
-        session.authenticated = True  # Mark as authenticated via bearer token
+        # Session validation per MCP Streamable HTTP spec:
+        # If client provides session ID but session doesn't exist, return 404
+        if mcp_session_id:
+            existing_session = await sessions.get(mcp_session_id)
+            if not existing_session:
+                raise HTTPException(
+                    status_code=404,
+                    detail="Session not found. Please start a new session with InitializeRequest."
+                )
+            session = existing_session
+            session.update_activity()
+            await sessions.set(mcp_session_id, session)
+        else:
+            # Create new session only if no session ID provided
+            session = await get_or_create_session(None, origin)
+
+        session.authenticated = True  # Mark as authenticated
 
         # Common response headers
         response_headers = {
@@ -1916,9 +1941,9 @@ async def mcp_streamable_http_endpoint(
             "Access-Control-Expose-Headers": "Mcp-Session-Id, MCP-Protocol-Version"
         }
 
-        # Handle GET request
+        # Handle GET request per MCP Streamable HTTP spec
         if request.method == "GET":
-            # Check if client wants SSE stream
+            # Per spec: server MUST return text/event-stream OR HTTP 405
             if accept and "text/event-stream" in accept:
                 # Return SSE stream for real-time communication
                 response = StreamingResponse(
@@ -1932,27 +1957,10 @@ async def mcp_streamable_http_endpoint(
                 )
                 return response
             else:
-                # Return session information as JSON
-                return JSONResponse(
-                    content={
-                        "jsonrpc": "2.0",
-                        "id": None,
-                        "result": {
-                            "protocolVersion": protocol_version,
-                            "serverInfo": {
-                                "name": "Wazuh MCP Server",
-                                "version": "4.0.5"
-                            },
-                            "capabilities": {
-                                "tools": True,
-                                "resources": True,
-                                "prompts": True,
-                                "logging": True
-                            },
-                            "session": session.to_dict()
-                        }
-                    },
-                    headers=response_headers
+                # Per MCP spec: GET without Accept: text/event-stream MUST return 405
+                raise HTTPException(
+                    status_code=405,
+                    detail="GET requires Accept: text/event-stream header for SSE stream"
                 )
 
         # Handle POST request (JSON-RPC)
