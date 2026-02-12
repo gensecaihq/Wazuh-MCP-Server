@@ -918,6 +918,7 @@ A huge thank you to everyone who has contributed to this project through issues,
 | <img src="https://github.com/lwsinclair.png" width="40" height="40" style="border-radius: 50%"/> | [@lwsinclair](https://github.com/lwsinclair) | 💻 Code, 🔀 PRs |
 | <img src="https://github.com/taylorwalton.png" width="40" height="40" style="border-radius: 50%"/> | [@taylorwalton](https://github.com/taylorwalton) | 🔀 PRs |
 | <img src="https://github.com/MilkyWay88.png" width="40" height="40" style="border-radius: 50%"/> | [@MilkyWay88](https://github.com/MilkyWay88) | 🔀 PRs |
+| <img src="https://github.com/kanylbullen.png" width="40" height="40" style="border-radius: 50%"/> | [@kanylbullen](https://github.com/kanylbullen) | 💻 Code, 🔀 PRs |
 | <img src="https://github.com/Uberkarhu.png" width="40" height="40" style="border-radius: 50%"/> | [@Uberkarhu](https://github.com/Uberkarhu) | 🐛 Issues |
 | <img src="https://github.com/cbassonbgroup.png" width="40" height="40" style="border-radius: 50%"/> | [@cbassonbgroup](https://github.com/cbassonbgroup) | 🐛 Issues |
 | <img src="https://github.com/cybersentinel-06.png" width="40" height="40" style="border-radius: 50%"/> | [@cybersentinel-06](https://github.com/cybersentinel-06) | 🐛 Issues |
