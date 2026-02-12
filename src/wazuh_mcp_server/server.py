@@ -2435,19 +2435,37 @@ async def oauth_metadata(request: Request):
 # Authentication endpoint for API key validation
 @app.post("/auth/token")
 async def get_auth_token(request: Request):
-    """Get JWT token using API key."""
+    """Get JWT token using API key.
+
+    Accepts API key in request body as JSON: {"api_key": "wazuh_..."}
+    Validates against configured API keys (MCP_API_KEY env var or auto-generated).
+    """
     try:
         body = await request.json()
         api_key = body.get("api_key")
-        
+
         if not api_key:
             raise HTTPException(status_code=400, detail="API key required")
-        
-        # In a real implementation, validate API key against database
-        # For now, accept any key that starts with "wazuh_" 
-        if not api_key.startswith("wazuh_"):
-            raise HTTPException(status_code=401, detail="Invalid API key")
-        
+
+        # Validate API key format
+        if not isinstance(api_key, str) or not api_key.startswith("wazuh_"):
+            raise HTTPException(status_code=401, detail="Invalid API key format")
+
+        # Validate against configured API key
+        # Priority: MCP_API_KEY env var > auto-generated key
+        configured_key = os.getenv("MCP_API_KEY", "")
+
+        if configured_key:
+            # Use constant-time comparison to prevent timing attacks
+            import hmac
+            if not hmac.compare_digest(api_key, configured_key):
+                raise HTTPException(status_code=401, detail="Invalid API key")
+        else:
+            # Fall back to auth_manager validation
+            from wazuh_mcp_server.auth import auth_manager
+            if not auth_manager.validate_api_key(api_key):
+                raise HTTPException(status_code=401, detail="Invalid API key")
+
         # Create JWT token with safe payload (no API key exposure)
         token = create_access_token(
             data={
@@ -2457,15 +2475,17 @@ async def get_auth_token(request: Request):
             },
             secret_key=config.AUTH_SECRET_KEY
         )
-        
+
         return {
             "access_token": token,
             "token_type": "bearer",
             "expires_in": 86400  # 24 hours
         }
-    
+
     except json.JSONDecodeError:
         raise HTTPException(status_code=400, detail="Invalid JSON")
+    except HTTPException:
+        raise  # Re-raise HTTP exceptions as-is
     except Exception as e:
         logger.error(f"Token generation error: {e}")
         raise HTTPException(status_code=500, detail="Internal server error")
@@ -2507,6 +2527,16 @@ async def startup_event():
         logger.warning("⚠️  Running in AUTHLESS mode - no authentication required!")
     elif config.is_bearer:
         logger.info("🔐 Bearer token authentication enabled")
+        # Display auto-generated API key if not configured via environment
+        if not os.getenv("MCP_API_KEY"):
+            from wazuh_mcp_server.auth import auth_manager
+            default_key = auth_manager.get_default_api_key()
+            if default_key:
+                logger.info("=" * 60)
+                logger.info("🔑 AUTO-GENERATED API KEY (save this for client auth):")
+                logger.info(f"   {default_key}")
+                logger.info("   Set MCP_API_KEY environment variable in production")
+                logger.info("=" * 60)
 
     # Initialize Wazuh client
     try:
