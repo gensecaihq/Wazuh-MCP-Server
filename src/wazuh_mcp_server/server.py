@@ -1,13 +1,14 @@
 #!/usr/bin/env python3
 """
 Wazuh MCP Server - Complete MCP-Compliant Remote Server
-Full compliance with Model Context Protocol 2025-06-18 specification
+Full compliance with Model Context Protocol 2025-11-25 specification
 Production-ready with Streamable HTTP and legacy SSE transport, authentication, and monitoring
 """
 
 # MCP Protocol Version Support
-MCP_PROTOCOL_VERSION = "2025-06-18"
-SUPPORTED_PROTOCOL_VERSIONS = ["2025-06-18", "2025-03-26", "2024-11-05"]
+# Latest: 2025-11-25, also supports backwards compatibility with older versions
+MCP_PROTOCOL_VERSION = "2025-11-25"
+SUPPORTED_PROTOCOL_VERSIONS = ["2025-11-25", "2025-03-26", "2024-11-05"]
 
 import os
 import json
@@ -354,6 +355,51 @@ def validate_cors_origins(origins_config: str) -> List[str]:
     
     return origins if origins else ["https://claude.ai"]
 
+
+def validate_origin_header(origin: Optional[str], allowed_origins_config: str) -> None:
+    """
+    Validate Origin header per MCP 2025-11-25 spec.
+
+    Per spec: "Servers MUST validate the Origin header on all incoming connections
+    to prevent DNS rebinding attacks. If the Origin header is present and invalid,
+    servers MUST respond with HTTP 403 Forbidden."
+
+    Note: If Origin header is NOT present, that's acceptable (no 403).
+    Only reject if Origin IS present but invalid.
+
+    Args:
+        origin: The Origin header value (may be None)
+        allowed_origins_config: Comma-separated list of allowed origins
+
+    Raises:
+        HTTPException: 403 if Origin is present but not in allowed list
+    """
+    # Per 2025-11-25 spec: only validate if Origin is present
+    if not origin:
+        return  # No Origin header = acceptable
+
+    # Parse allowed origins
+    allowed_origins_list = allowed_origins_config.split(",") if allowed_origins_config else []
+
+    # Check if origin is allowed
+    for allowed in allowed_origins_list:
+        allowed = allowed.strip()
+        if allowed == "*":
+            return  # Wildcard allows everything
+        if allowed == origin:
+            return  # Exact match
+        if allowed.startswith("*") and origin.endswith(allowed[1:]):
+            return  # Wildcard suffix match
+        if "localhost" in allowed and "localhost" in origin:
+            return  # Localhost match (for development)
+
+    # Origin present but not in allowed list - per spec MUST return 403
+    raise HTTPException(
+        status_code=403,
+        detail=f"Origin not allowed: {origin}"
+    )
+
+
 allowed_origins = validate_cors_origins(config.ALLOWED_ORIGINS)
 
 app.add_middleware(
@@ -369,10 +415,10 @@ app.add_middleware(
         "Authorization",
         "X-Requested-With",
         "MCP-Protocol-Version",  # MCP protocol version header
-        "Mcp-Session-Id",  # Session ID header
+        "MCP-Session-Id",  # Session ID header
         "Last-Event-ID"  # SSE reconnection header
     ],  # Specific headers only, no wildcard
-    expose_headers=["Mcp-Session-Id", "MCP-Protocol-Version", "Content-Type"],
+    expose_headers=["MCP-Session-Id", "MCP-Protocol-Version", "Content-Type"],
     max_age=600  # Cache preflight for 10 minutes
 )
 
@@ -397,10 +443,20 @@ def create_success_response(request_id: Optional[Union[str, int]], result: Any) 
     """Create MCP success response."""
     return MCPResponse(id=request_id, result=result)
 
-def validate_protocol_version(version: Optional[str]) -> str:
+def validate_protocol_version(version: Optional[str], strict: bool = False) -> str:
     """
     Validate and normalize MCP protocol version.
-    Returns the validated version or defaults to 2025-03-26 for backwards compatibility.
+
+    Per MCP 2025-11-25 spec:
+    - If no header provided, assume 2025-03-26 for backwards compatibility
+    - If invalid/unsupported version, MUST return 400 Bad Request (when strict=True)
+
+    Args:
+        version: The protocol version from MCP-Protocol-Version header
+        strict: If True, raise HTTPException for invalid versions (2025-11-25 behavior)
+
+    Returns:
+        The validated protocol version string
     """
     if not version:
         # Per spec: assume 2025-03-26 if no header provided (backwards compatibility)
@@ -409,13 +465,16 @@ def validate_protocol_version(version: Optional[str]) -> str:
     if version in SUPPORTED_PROTOCOL_VERSIONS:
         return version
 
-    # Check if it's a newer version we might support
-    if version > MCP_PROTOCOL_VERSION:
-        logger.warning(f"Client requested newer protocol version {version}, using {MCP_PROTOCOL_VERSION}")
-        return MCP_PROTOCOL_VERSION
+    # Per 2025-11-25 spec: "If the server receives a request with an invalid or
+    # unsupported MCP-Protocol-Version, it MUST respond with 400 Bad Request"
+    if strict:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Unsupported protocol version: {version}. Supported versions: {', '.join(SUPPORTED_PROTOCOL_VERSIONS)}"
+        )
 
-    # Unknown or too old version
-    logger.warning(f"Unsupported protocol version {version}, using 2025-03-26 for compatibility")
+    # For backwards compatibility (non-strict mode), try to handle gracefully
+    logger.warning(f"Unsupported protocol version {version}, falling back to 2025-03-26")
     return "2025-03-26"
 
 # Track initialized sessions (for notifications/initialized handling)
@@ -1488,10 +1547,18 @@ async def generate_sse_events(session: MCPSession, event_id_counter: int = 0):
     """
     Generate Server-Sent Events for MCP Streamable HTTP transport.
 
-    Per MCP spec, SSE events may include an 'id' field for resumability.
-    The data field contains JSON-RPC formatted messages.
+    Per MCP 2025-11-25 spec:
+    - SSE events MUST include an 'id' field for resumability
+    - Server SHOULD immediately send a priming event with event ID and empty data
+    - Server SHOULD send retry field to indicate reconnection delay
     """
     event_id = event_id_counter
+
+    # Per 2025-11-25 spec: "The server SHOULD immediately send an SSE event
+    # consisting of an event ID and an empty data field in order to prime
+    # the client to reconnect (using that event ID as Last-Event-ID)"
+    event_id += 1
+    yield f"id: {event_id}\nretry: 3000\ndata: \n\n"
 
     # Send session info as a JSON-RPC notification
     event_id += 1
@@ -1543,7 +1610,7 @@ async def mcp_endpoint(
     request: Request,
     origin: Optional[str] = Header(None),
     accept: Optional[str] = Header(None),
-    mcp_session_id: Optional[str] = Header(None, alias="Mcp-Session-Id"),
+    mcp_session_id: Optional[str] = Header(None, alias="MCP-Session-Id"),
     last_event_id: Optional[str] = Header(None, alias="Last-Event-ID")
 ):
     """
@@ -1561,29 +1628,9 @@ async def mcp_endpoint(
     ACTIVE_CONNECTIONS.inc()
     
     try:
-        # Origin validation for security
-        if not origin:
-            raise HTTPException(status_code=403, detail="Origin header required")
-        
-        # Validate origin against allowed list
-        allowed_origins_list = config.ALLOWED_ORIGINS.split(",") if config.ALLOWED_ORIGINS else []
-        if allowed_origins_list and origin not in allowed_origins_list:
-            # Check for wildcard patterns
-            origin_allowed = False
-            for allowed in allowed_origins_list:
-                if allowed == "*" or allowed == origin:
-                    origin_allowed = True
-                    break
-                elif allowed.startswith("*") and origin.endswith(allowed[1:]):
-                    origin_allowed = True
-                    break
-                elif "localhost" in allowed and "localhost" in origin:
-                    origin_allowed = True
-                    break
-            
-            if not origin_allowed:
-                raise HTTPException(status_code=403, detail="Origin not allowed")
-        
+        # Origin validation per MCP 2025-11-25 spec
+        validate_origin_header(origin, config.ALLOWED_ORIGINS)
+
         # Rate limiting
         client_ip = request.client.host if request.client else "unknown"
         allowed, retry_after = rate_limiter.is_allowed(client_ip)
@@ -1614,8 +1661,8 @@ async def mcp_endpoint(
                     headers={
                         "Cache-Control": "no-cache",
                         "Connection": "keep-alive",
-                        "Mcp-Session-Id": session.session_id,
-                        "Access-Control-Expose-Headers": "Mcp-Session-Id"
+                        "MCP-Session-Id": session.session_id,
+                        "Access-Control-Expose-Headers": "MCP-Session-Id"
                     }
                 )
                 return response
@@ -1635,8 +1682,8 @@ async def mcp_endpoint(
                         }
                     },
                     headers={
-                        "Mcp-Session-Id": session.session_id,
-                        "Access-Control-Expose-Headers": "Mcp-Session-Id"
+                        "MCP-Session-Id": session.session_id,
+                        "Access-Control-Expose-Headers": "MCP-Session-Id"
                     }
                 )
         
@@ -1684,8 +1731,8 @@ async def mcp_endpoint(
                     return Response(
                         status_code=202,
                         headers={
-                            "Mcp-Session-Id": session.session_id,
-                            "Access-Control-Expose-Headers": "Mcp-Session-Id"
+                            "MCP-Session-Id": session.session_id,
+                            "Access-Control-Expose-Headers": "MCP-Session-Id"
                         }
                     )
 
@@ -1715,8 +1762,8 @@ async def mcp_endpoint(
                 return JSONResponse(
                     content=responses,
                     headers={
-                        "Mcp-Session-Id": session.session_id,
-                        "Access-Control-Expose-Headers": "Mcp-Session-Id"
+                        "MCP-Session-Id": session.session_id,
+                        "Access-Control-Expose-Headers": "MCP-Session-Id"
                     }
                 )
             
@@ -1733,8 +1780,8 @@ async def mcp_endpoint(
                         return Response(
                             status_code=202,
                             headers={
-                                "Mcp-Session-Id": session.session_id,
-                                "Access-Control-Expose-Headers": "Mcp-Session-Id"
+                                "MCP-Session-Id": session.session_id,
+                                "Access-Control-Expose-Headers": "MCP-Session-Id"
                             }
                         )
                     elif is_json_rpc_response(body):
@@ -1743,8 +1790,8 @@ async def mcp_endpoint(
                         return Response(
                             status_code=202,
                             headers={
-                                "Mcp-Session-Id": session.session_id,
-                                "Access-Control-Expose-Headers": "Mcp-Session-Id"
+                                "MCP-Session-Id": session.session_id,
+                                "Access-Control-Expose-Headers": "MCP-Session-Id"
                             }
                         )
 
@@ -1755,8 +1802,8 @@ async def mcp_endpoint(
                     return JSONResponse(
                         content=response.dict(),
                         headers={
-                            "Mcp-Session-Id": session.session_id,
-                            "Access-Control-Expose-Headers": "Mcp-Session-Id"
+                            "MCP-Session-Id": session.session_id,
+                            "Access-Control-Expose-Headers": "MCP-Session-Id"
                         }
                     )
                 except ValidationError as e:
@@ -1781,7 +1828,7 @@ async def mcp_sse_endpoint(
     request: Request,
     authorization: str = Header(None),
     origin: Optional[str] = Header(None),
-    mcp_session_id: Optional[str] = Header(None, alias="Mcp-Session-Id"),
+    mcp_session_id: Optional[str] = Header(None, alias="MCP-Session-Id"),
     last_event_id: Optional[str] = Header(None, alias="Last-Event-ID")
 ):
     """
@@ -1794,29 +1841,9 @@ async def mcp_sse_endpoint(
     # Verify authentication based on configured mode
     await verify_authentication(authorization, config)
 
-    # Origin validation for security
-    if not origin:
-        raise HTTPException(status_code=403, detail="Origin header required")
-    
-    # Validate origin against allowed list
-    allowed_origins_list = config.ALLOWED_ORIGINS.split(",") if config.ALLOWED_ORIGINS else []
-    if allowed_origins_list and origin not in allowed_origins_list:
-        # Check for wildcard patterns
-        origin_allowed = False
-        for allowed in allowed_origins_list:
-            if allowed == "*" or allowed == origin:
-                origin_allowed = True
-                break
-            elif allowed.startswith("*") and origin.endswith(allowed[1:]):
-                origin_allowed = True
-                break
-            elif "localhost" in allowed and "localhost" in origin:
-                origin_allowed = True
-                break
-        
-        if not origin_allowed:
-            raise HTTPException(status_code=403, detail="Origin not allowed")
-    
+    # Origin validation per MCP 2025-11-25 spec
+    validate_origin_header(origin, config.ALLOWED_ORIGINS)
+
     # Rate limiting
     client_ip = request.client.host if request.client else "unknown"
     allowed, retry_after = rate_limiter.is_allowed(client_ip)
@@ -1840,8 +1867,8 @@ async def mcp_sse_endpoint(
             headers={
                 "Cache-Control": "no-cache",
                 "Connection": "keep-alive",
-                "Mcp-Session-Id": session.session_id,
-                "Access-Control-Expose-Headers": "Mcp-Session-Id"
+                "MCP-Session-Id": session.session_id,
+                "Access-Control-Expose-Headers": "MCP-Session-Id"
             }
         )
         return response
@@ -1861,48 +1888,30 @@ async def mcp_streamable_http_endpoint(
     authorization: str = Header(None),
     origin: Optional[str] = Header(None),
     mcp_protocol_version: Optional[str] = Header(None, alias="MCP-Protocol-Version"),
-    mcp_session_id: Optional[str] = Header(None, alias="Mcp-Session-Id"),
+    mcp_session_id: Optional[str] = Header(None, alias="MCP-Session-Id"),
     accept: Optional[str] = Header("application/json"),
     last_event_id: Optional[str] = Header(None, alias="Last-Event-ID")
 ):
     """
-    Standard MCP endpoint using Streamable HTTP transport (2025-06-18 spec).
+    Standard MCP endpoint using Streamable HTTP transport (2025-11-25 spec).
 
     Supports:
-    - POST: JSON-RPC requests with optional SSE streaming for long operations
-    - GET: Session information or SSE stream initiation
+    - POST: JSON-RPC requests (single message per 2025-11-25 spec)
+    - GET: SSE stream initiation (requires Accept: text/event-stream)
     - DELETE: Session termination (see separate endpoint)
 
     This is the RECOMMENDED endpoint for MCP clients. Legacy /sse remains for backwards compatibility.
     Supports authentication modes: bearer (default), oauth, none (authless)
     """
-    # Validate protocol version
-    protocol_version = validate_protocol_version(mcp_protocol_version)
+    # Validate protocol version per 2025-11-25 spec (strict mode returns 400 for invalid)
+    protocol_version = validate_protocol_version(mcp_protocol_version, strict=True)
 
     # Verify authentication based on configured mode
     await verify_authentication(authorization, config)
 
-    # Origin validation for security (DNS rebinding protection)
-    if not origin:
-        raise HTTPException(status_code=403, detail="Origin header required")
-
-    # Validate origin against allowed list
-    allowed_origins_list = config.ALLOWED_ORIGINS.split(",") if config.ALLOWED_ORIGINS else []
-    if allowed_origins_list and origin not in allowed_origins_list:
-        origin_allowed = False
-        for allowed in allowed_origins_list:
-            if allowed == "*" or allowed == origin:
-                origin_allowed = True
-                break
-            elif allowed.startswith("*") and origin.endswith(allowed[1:]):
-                origin_allowed = True
-                break
-            elif "localhost" in allowed and "localhost" in origin:
-                origin_allowed = True
-                break
-
-        if not origin_allowed:
-            raise HTTPException(status_code=403, detail="Origin not allowed")
+    # Origin validation per 2025-11-25 spec
+    # Only validate if Origin is present; if present and invalid, return 403
+    validate_origin_header(origin, config.ALLOWED_ORIGINS)
 
     # Rate limiting
     client_ip = request.client.host if request.client else "unknown"
@@ -1936,9 +1945,9 @@ async def mcp_streamable_http_endpoint(
 
         # Common response headers
         response_headers = {
-            "Mcp-Session-Id": session.session_id,
+            "MCP-Session-Id": session.session_id,
             "MCP-Protocol-Version": protocol_version,
-            "Access-Control-Expose-Headers": "Mcp-Session-Id, MCP-Protocol-Version"
+            "Access-Control-Expose-Headers": "MCP-Session-Id, MCP-Protocol-Version"
         }
 
         # Handle GET request per MCP Streamable HTTP spec
@@ -2103,7 +2112,7 @@ async def mcp_streamable_http_endpoint(
 
 @app.delete("/mcp")
 async def close_mcp_session(
-    mcp_session_id: str = Header(..., alias="Mcp-Session-Id"),
+    mcp_session_id: str = Header(..., alias="MCP-Session-Id"),
     authorization: str = Header(None)
 ):
     """
