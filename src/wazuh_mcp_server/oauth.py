@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 OAuth 2.0 implementation with Dynamic Client Registration (DCR) support.
-Implements MCP 2025-06-18 authentication specification for Claude Desktop integration.
+Implements MCP 2025-11-25 authentication specification for Claude Desktop integration.
 """
 
 import os

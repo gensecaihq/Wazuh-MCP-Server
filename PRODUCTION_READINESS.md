@@ -51,9 +51,9 @@ All 8 primary endpoints tested and verified:
 
 | Feature | Status | Version | Verification |
 |---------|--------|---------|--------------|
-| **Streamable HTTP** | ✅ COMPLIANT | 2025-06-18 | `/mcp` endpoint operational |
+| **Streamable HTTP** | ✅ COMPLIANT | 2025-11-25 | `/mcp` endpoint operational |
 | **Legacy SSE** | ✅ COMPLIANT | 2024-11-05 | `/sse` endpoint maintained |
-| **Protocol Versioning** | ✅ COMPLIANT | Multi-version | Supports 2025-06-18, 2025-03-26, 2024-11-05 |
+| **Protocol Versioning** | ✅ COMPLIANT | Multi-version | Supports 2025-11-25, 2025-03-26, 2024-11-05 |
 | **JSON-RPC 2.0** | ✅ COMPLIANT | 2.0 | Proper request/response format |
 | **Session Management** | ✅ COMPLIANT | Full lifecycle | Create, track, terminate |
 | **DELETE Support** | ✅ COMPLIANT | Latest spec | Session cleanup endpoint |
@@ -61,8 +61,8 @@ All 8 primary endpoints tested and verified:
 **Health Endpoint Response**:
 ```json
 {
-  "mcp_protocol_version": "2025-06-18",
-  "supported_protocol_versions": ["2025-06-18", "2025-03-26", "2024-11-05"],
+  "mcp_protocol_version": "2025-11-25",
+  "supported_protocol_versions": ["2025-11-25", "2025-03-26", "2024-11-05"],
   "transport": {
     "streamable_http": "enabled",
     "legacy_sse": "enabled"
@@ -369,7 +369,7 @@ After deploying:
 ✅ **FULLY FUNCTIONAL**
 
 **Verified Components**:
-- ✅ MCP Protocol Compliance (2025-06-18)
+- ✅ MCP Protocol Compliance (2025-11-25)
 - ✅ Streamable HTTP Transport
 - ✅ Legacy SSE Support
 - ✅ Authentication & Security

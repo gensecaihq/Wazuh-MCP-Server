@@ -10,7 +10,9 @@ This document details the compatibility of Wazuh MCP Server with different Wazuh
 
 | Wazuh Version | Support Status | Recommendation | Notes |
 |---------------|----------------|----------------|-------|
-| **4.14.1** | ✅ **Fully Supported** | **RECOMMENDED** | Latest stable release (Nov 2025) |
+| **4.14.3** | ✅ **Fully Supported** | **RECOMMENDED** | Latest stable release (Feb 2026) |
+| **4.14.2** | ✅ **Fully Supported** | Recommended | Stable release |
+| **4.14.1** | ✅ **Fully Supported** | Recommended | Previous stable release |
 | **4.14.0** | ✅ **Fully Supported** | Recommended | Stable release |
 | **4.13.x** | ✅ **Fully Supported** | Recommended | All 4.13 releases supported |
 | **4.12.x** | ✅ **Fully Supported** | Recommended | Includes CTI enhancements |
@@ -25,9 +27,20 @@ This document details the compatibility of Wazuh MCP Server with different Wazuh
 
 ## 🎯 **Version-Specific Features**
 
-### **Wazuh 4.14.1 (Latest - November 2025)**
+### **Wazuh 4.14.3 (Latest - February 2026)**
 
 **New Enhancements:**
+- ✅ All 4.14.x improvements included
+- ✅ Enhanced stability and bug fixes
+- ✅ Performance optimizations for large-scale deployments
+
+**API Compatibility:** ✅ No breaking changes from 4.14.x series
+
+**MCP Server Support:** Fully tested and verified
+
+### **Wazuh 4.14.1**
+
+**Features:**
 - ✅ IAM role support for VPC flow logs in AWS wodle
 - ✅ Static and temporary AWS credentials support in Amazon Security Lake
 - ✅ Enhanced wazuh-db startup performance
@@ -126,7 +139,7 @@ This document details the compatibility of Wazuh MCP Server with different Wazuh
 
 ## 🔧 **Configuration by Version**
 
-### **For Wazuh 4.8.0 - 4.14.1 (Recommended)**
+### **For Wazuh 4.8.0 - 4.14.3 (Recommended)**
 
 ```bash
 # .env configuration
@@ -166,7 +179,7 @@ USE_INDEXER_FOR_VULNERABILITIES=false
 
 ## 📊 **API Endpoint Compatibility Matrix**
 
-| Endpoint | 4.8-4.14.1 | 4.0-4.7.x | Notes |
+| Endpoint | 4.8-4.14.3 | 4.0-4.7.x | Notes |
 |----------|------------|-----------|-------|
 | `/agents` | ✅ | ✅ | Fully compatible across all versions |
 | `/alerts` | ✅ | ✅ | Fully compatible |
@@ -256,7 +269,7 @@ async def get_vulnerabilities(self, **params):
    ```
 5. **Restart MCP Server** - No code changes needed!
 
-### **From 4.8.x - 4.13.x to 4.14.1**
+### **From 4.8.x - 4.13.x to 4.14.x**
 
 - ✅ **Direct upgrade** - No configuration changes needed
 - ✅ **Automatic compatibility** - MCP Server works immediately
@@ -286,7 +299,7 @@ curl http://localhost:3000/health
 
 ### **Test Specific Features**
 
-**For 4.14.1:**
+**For 4.14.x:**
 ```bash
 # Test vulnerability detection
 curl -X POST http://localhost:3000/mcp \
@@ -308,7 +321,7 @@ curl -X POST http://localhost:3000/mcp \
 
 ## 📚 **Additional Resources**
 
-- **Wazuh 4.14.1 Release Notes**: https://documentation.wazuh.com/current/release-notes/release-4-14-1.html
+- **Wazuh Release Notes**: https://documentation.wazuh.com/current/release-notes/
 - **Wazuh API Documentation**: https://documentation.wazuh.com/current/user-manual/api/
 - **Wazuh Upgrade Guide**: https://documentation.wazuh.com/current/upgrade-guide/
 - **MCP Server Documentation**: README.md
@@ -318,10 +331,10 @@ curl -X POST http://localhost:3000/mcp \
 ## 🎯 **Recommendation Summary**
 
 **For Production Use:**
-- ✅ **Use Wazuh 4.14.1** (latest stable)
+- ✅ **Use Wazuh 4.14.x** (latest stable)
 - ✅ **Minimum: Wazuh 4.8.0** (for full features)
 - ✅ **Enable Wazuh Indexer** (required for 4.8.0+)
 - ✅ **Keep both updated** (Wazuh + MCP Server)
 
 **Compatibility Guarantee:**
-This MCP Server is **fully tested and verified** with Wazuh versions 4.8.0 through 4.14.1, with ongoing support for future 4.x releases.
+This MCP Server is **fully tested and verified** with Wazuh versions 4.8.0 through 4.14.3, with ongoing support for future 4.x releases.

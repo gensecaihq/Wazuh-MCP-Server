@@ -280,7 +280,7 @@ Utilities:
 
 ### 10. MCP Compliance ✅
 
-**Protocol Version: 2025-06-18**
+**Protocol Version: 2025-11-25**
 ```
 ✅ Streamable HTTP transport (/mcp endpoint)
 ✅ Legacy SSE support (/sse endpoint)

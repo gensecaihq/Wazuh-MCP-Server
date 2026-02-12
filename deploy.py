@@ -289,7 +289,7 @@ def show_deployment_info(api_key: str):
     print(f'        "url": "http://localhost:{port}/mcp",')
     print('        "headers": {')
     print('          "Authorization": "Bearer YOUR_JWT_TOKEN_HERE",')
-    print('          "MCP-Protocol-Version": "2025-06-18"')
+    print('          "MCP-Protocol-Version": "2025-11-25"')
     print('        }')
     print('      }')
     print('    }')

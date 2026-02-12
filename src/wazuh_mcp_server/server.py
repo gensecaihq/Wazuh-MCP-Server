@@ -1880,7 +1880,7 @@ async def mcp_sse_endpoint(
     finally:
         ACTIVE_CONNECTIONS.dec()
 
-# Standard MCP Endpoint - Streamable HTTP Transport (2025-06-18 Specification)
+# Standard MCP Endpoint - Streamable HTTP Transport (2025-11-25 Specification)
 @app.post("/mcp")
 @app.get("/mcp")
 async def mcp_streamable_http_endpoint(
@@ -2116,7 +2116,7 @@ async def close_mcp_session(
     authorization: str = Header(None)
 ):
     """
-    Close MCP session explicitly (2025-06-18 spec).
+    Close MCP session explicitly (2025-11-25 spec).
     Allows clients to cleanly terminate sessions.
     """
     # Authentication required
@@ -2211,7 +2211,7 @@ async def health_check():
                 "total_sessions": len(all_sessions)
             },
             "endpoints": {
-                "recommended": "/mcp (Streamable HTTP - 2025-06-18)",
+                "recommended": "/mcp (Streamable HTTP - 2025-11-25)",
                 "legacy": "/sse (SSE only)",
                 "authentication": "/auth/token" if config.is_bearer else ("/oauth/token" if config.is_oauth else None),
                 "monitoring": ["/health", "/metrics"]
