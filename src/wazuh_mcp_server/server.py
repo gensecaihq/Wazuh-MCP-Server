@@ -692,8 +692,7 @@ async def handle_tools_list(params: Dict[str, Any], session: MCPSession) -> Dict
             "inputSchema": {
                 "type": "object",
                 "properties": {
-                    "time_range": {"type": "string", "enum": ["1d", "7d", "30d"], "default": "7d"},
-                    "compact": {"type": "boolean", "default": True, "description": "Return compact summary with essential fields only (recommended to avoid token limits)"}
+                    "time_range": {"type": "string", "enum": ["1d", "7d", "30d"], "default": "7d"}
                 },
                 "required": []
             }
@@ -979,11 +978,8 @@ async def handle_tools_call(params: Dict[str, Any], session: MCPSession) -> Dict
             
         elif tool_name == "get_wazuh_vulnerability_summary":
             time_range = arguments.get("time_range", "7d")
-            compact = arguments.get("compact", True)
             result = await wazuh_client.get_vulnerability_summary(time_range)
-            if compact:
-                result = _compact_vulns_result(result)
-            return {"content": [{"type": "text", "text": f"Vulnerability Summary:\n{json.dumps(result, indent=2 if not compact else None)}"}]}
+            return {"content": [{"type": "text", "text": f"Vulnerability Summary:\n{json.dumps(result, indent=2)}"}]}
 
         # Security Analysis Tools  
         elif tool_name == "analyze_security_threat":
