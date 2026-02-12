@@ -480,8 +480,8 @@ def create_oauth_router(oauth_manager: OAuthManager) -> APIRouter:
                 try:
                     decoded = base64.b64decode(auth_header[6:]).decode()
                     client_id, client_secret = decoded.split(":", 1)
-                except Exception:
-                    pass
+                except (ValueError, UnicodeDecodeError) as e:
+                    logger.debug(f"Failed to decode Basic auth header: {e}")
 
         if not client_id:
             return JSONResponse(

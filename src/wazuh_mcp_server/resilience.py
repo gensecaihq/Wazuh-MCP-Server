@@ -22,6 +22,14 @@ from fastapi import HTTPException
 
 logger = logging.getLogger(__name__)
 
+# Production Constants
+GRACEFUL_SHUTDOWN_TIMEOUT_SECONDS = 30
+WAZUH_API_MAX_CONCURRENT = 10
+SSE_MAX_CONCURRENT_CONNECTIONS = 100
+AUTH_MAX_CONCURRENT_REQUESTS = 20
+FALLBACK_SEMAPHORE_LIMIT = 5
+
+
 class CircuitBreakerState(Enum):
     """Circuit breaker states."""
     CLOSED = "closed"
@@ -188,7 +196,7 @@ class GracefulShutdown:
         self.shutdown_event.set()
         
         # Wait for active connections to complete (with timeout)
-        max_wait = 30  # seconds
+        max_wait = GRACEFUL_SHUTDOWN_TIMEOUT_SECONDS
         start_time = time.time()
         
         while self.active_connections and (time.time() - start_time) < max_wait:
@@ -242,21 +250,20 @@ class ErrorRecovery:
 
 class BulkheadIsolation:
     """Isolate different components to prevent cascade failures."""
-    
+
     def __init__(self):
         self.resource_pools = {
-            "wazuh_api": asyncio.Semaphore(10),  # Max 10 concurrent Wazuh API calls
-            "sse_connections": asyncio.Semaphore(100),  # Max 100 SSE connections
-            "authentication": asyncio.Semaphore(20),  # Max 20 concurrent auth requests
+            "wazuh_api": asyncio.Semaphore(WAZUH_API_MAX_CONCURRENT),
+            "sse_connections": asyncio.Semaphore(SSE_MAX_CONCURRENT_CONNECTIONS),
+            "authentication": asyncio.Semaphore(AUTH_MAX_CONCURRENT_REQUESTS),
         }
-    
+
     async def acquire_resource(self, resource_type: str):
         """Acquire resource from pool."""
         if resource_type in self.resource_pools:
             return self.resource_pools[resource_type]
         else:
-            # Fallback semaphore
-            return asyncio.Semaphore(5)
+            return asyncio.Semaphore(FALLBACK_SEMAPHORE_LIMIT)
 
 class HealthRecovery:
     """Automatic health recovery mechanisms."""
@@ -295,8 +302,8 @@ class HealthRecovery:
                 client = await get_wazuh_client()
                 if hasattr(client, '_cache'):
                     client._cache.clear()
-            except Exception:
-                pass  # Client may not be initialized
+            except (ImportError, RuntimeError):
+                pass  # Client may not be initialized yet
 
             logger.info(f"Memory recovery: cleared {expired_count} expired sessions")
             return True

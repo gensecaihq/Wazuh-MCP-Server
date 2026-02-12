@@ -10,6 +10,14 @@ Production-ready with Streamable HTTP and legacy SSE transport, authentication, 
 MCP_PROTOCOL_VERSION = "2025-11-25"
 SUPPORTED_PROTOCOL_VERSIONS = ["2025-11-25", "2025-03-26", "2024-11-05"]
 
+# Production Constants
+SESSION_TIMEOUT_MINUTES = 30
+RATE_LIMIT_REQUESTS = 100
+RATE_LIMIT_WINDOW_SECONDS = 60
+CORS_MAX_AGE_SECONDS = 600
+DEFAULT_QUERY_LIMIT = 100
+MAX_QUERY_LIMIT = 1000
+
 import os
 import json
 import asyncio
@@ -157,7 +165,7 @@ class MCPSession:
         """Update last activity timestamp."""
         self.last_activity = datetime.now(timezone.utc)
         
-    def is_expired(self, timeout_minutes: int = 30) -> bool:
+    def is_expired(self, timeout_minutes: int = SESSION_TIMEOUT_MINUTES) -> bool:
         """Check if session is expired."""
         timeout = timedelta(minutes=timeout_minutes)
         return datetime.now(timezone.utc) - self.last_activity > timeout
@@ -326,7 +334,7 @@ wazuh_config = WazuhConfig(
 wazuh_client = WazuhClient(wazuh_config)
 
 # Initialize rate limiter
-rate_limiter = RateLimiter(max_requests=100, window_seconds=60)
+rate_limiter = RateLimiter(max_requests=RATE_LIMIT_REQUESTS, window_seconds=RATE_LIMIT_WINDOW_SECONDS)
 
 # Initialize graceful shutdown manager
 shutdown_manager = GracefulShutdown()
@@ -354,7 +362,8 @@ def validate_cors_origins(origins_config: str) -> List[str]:
                     parsed = urlparse(origin)
                     if parsed.netloc:
                         origins.append(origin)
-                except Exception:
+                except ValueError as e:
+                    logger.debug(f"Skipping invalid origin '{origin}': {e}")
                     continue
             else:
                 origins.append(origin)
@@ -425,7 +434,7 @@ app.add_middleware(
         "Last-Event-ID"  # SSE reconnection header
     ],  # Specific headers only, no wildcard
     expose_headers=["MCP-Session-Id", "MCP-Protocol-Version", "Content-Type"],
-    max_age=600  # Cache preflight for 10 minutes
+    max_age=CORS_MAX_AGE_SECONDS
 )
 
 # MCP Protocol Error Codes

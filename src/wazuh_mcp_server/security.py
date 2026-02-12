@@ -688,7 +688,8 @@ class SecurityManager:
             try:
                 body = await request.body()
                 body = body.decode('utf-8') if body else None
-            except Exception:
+            except (UnicodeDecodeError, RuntimeError) as e:
+                logger.debug(f"Failed to read request body: {e}")
                 body = None
                 
         # Validate for security threats
