@@ -8,17 +8,21 @@ import os
 import secrets
 import hashlib
 import hmac
-from typing import Optional, Dict, Any, List
+import logging
+from typing import Optional, Dict, Any, List, Tuple
 from datetime import datetime, timezone, timedelta
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 import json
 import base64
+import uuid
 from jose import jwt
 from jose.exceptions import JWTError, ExpiredSignatureError
 
 from pydantic import BaseModel, Field
 import httpx
 from fastapi import HTTPException, Header
+
+logger = logging.getLogger(__name__)
 
 @dataclass
 class AuthToken:
@@ -76,7 +80,7 @@ class AuthManager:
                     api_key = APIKey(**key_data)
                     self.api_keys[api_key.id] = api_key
             except Exception as e:
-                print(f"Error loading API keys: {e}")
+                logger.error(f"Error loading API keys: {e}", exc_info=True)
         
         # Create default API key if none exist
         if not self.api_keys:
@@ -85,7 +89,7 @@ class AuthManager:
                 scopes=["wazuh:read", "wazuh:write"]
             )
             # Only log that a key was created, not the actual key value
-            print("Created default API key - save this securely for client authentication")
+            logger.info("Created default API key - save this securely for client authentication")
     
     def hash_api_key(self, api_key: str) -> str:
         """Hash an API key using HMAC-SHA256."""
@@ -145,7 +149,7 @@ class AuthManager:
                 # Check expiration with timezone awareness
                 if key_obj.expires_at and datetime.now(timezone.utc) > key_obj.expires_at:
                     # Log expiration attempt (without exposing key)
-                    print(f"Attempted use of expired API key (ID: {key_obj.id[:8]}...)")
+                    logger.warning(f"Attempted use of expired API key (ID: {key_obj.id[:8]}...)")
                     return None
                 return key_obj
                 

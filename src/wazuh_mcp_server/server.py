@@ -435,8 +435,15 @@ MCP_ERRORS = {
 }
 
 def create_error_response(request_id: Optional[Union[str, int]], code: int, message: str, data: Any = None) -> MCPResponse:
-    """Create MCP error response."""
-    error = MCPError(code=code, message=message, data=data)
+    """Create MCP error response with correlation ID for tracing."""
+    from wazuh_mcp_server.monitoring import get_correlation_id
+    # Include correlation ID in error data for request tracing
+    error_data = data if data else {}
+    if isinstance(error_data, dict):
+        error_data = {**error_data, "correlation_id": get_correlation_id()}
+    elif data is None:
+        error_data = {"correlation_id": get_correlation_id()}
+    error = MCPError(code=code, message=message, data=error_data)
     return MCPResponse(id=request_id, error=error.dict())
 
 def create_success_response(request_id: Optional[Union[str, int]], result: Any) -> MCPResponse:
@@ -1622,7 +1629,15 @@ async def process_mcp_request(request: MCPRequest, session: MCPSession) -> MCPRe
             str(e)
         )
     except Exception as e:
-        logger.error(f"Internal error processing {request.method}: {e}")
+        from wazuh_mcp_server.monitoring import get_correlation_id, structured_logger
+        structured_logger.error(
+            f"Internal error processing {request.method}",
+            exc_info=True,
+            method=request.method,
+            request_id=str(request.id) if request.id else None,
+            error_type=type(e).__name__,
+            error_message=str(e)
+        )
         return create_error_response(
             request.id,
             MCP_ERRORS["INTERNAL_ERROR"],

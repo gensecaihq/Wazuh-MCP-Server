@@ -52,6 +52,100 @@ def validate_input(value: str, max_length: int = 1000, allowed_chars: Optional[s
 
     return True
 
+
+def validate_batch_items(items: List[Any], max_batch_size: int = 100) -> List[Dict[str, Any]]:
+    """
+    Validate batch request items for security.
+
+    Args:
+        items: List of batch request items
+        max_batch_size: Maximum allowed batch size
+
+    Returns:
+        List of validated items
+
+    Raises:
+        ValueError: If validation fails
+    """
+    if not isinstance(items, list):
+        raise ValueError("Batch items must be a list")
+
+    if len(items) > max_batch_size:
+        raise ValueError(f"Batch size {len(items)} exceeds maximum of {max_batch_size}")
+
+    validated = []
+    for idx, item in enumerate(items):
+        if not isinstance(item, dict):
+            raise ValueError(f"Batch item at index {idx} must be a dictionary")
+
+        # Validate required fields
+        if "jsonrpc" not in item:
+            raise ValueError(f"Batch item at index {idx} missing 'jsonrpc' field")
+
+        if "method" not in item:
+            raise ValueError(f"Batch item at index {idx} missing 'method' field")
+
+        # Validate method name
+        method = item.get("method", "")
+        if not isinstance(method, str) or len(method) > 256:
+            raise ValueError(f"Invalid method name at index {idx}")
+
+        # Check for suspicious patterns in method
+        if any(p in method.lower() for p in ['<', '>', '"', "'", ';', '|', '&']):
+            raise ValueError(f"Invalid characters in method name at index {idx}")
+
+        validated.append(item)
+
+    return validated
+
+
+# Sensitive data patterns for log sanitization
+SENSITIVE_PATTERNS = [
+    (r'(password["\']?\s*[:=]\s*["\']?)[^"\'\s,}]+', r'\1[REDACTED]'),
+    (r'(token["\']?\s*[:=]\s*["\']?)[^"\'\s,}]+', r'\1[REDACTED]'),
+    (r'(api[_-]?key["\']?\s*[:=]\s*["\']?)[^"\'\s,}]+', r'\1[REDACTED]'),
+    (r'(secret["\']?\s*[:=]\s*["\']?)[^"\'\s,}]+', r'\1[REDACTED]'),
+    (r'(authorization["\']?\s*[:=]\s*["\']?)[^"\'\s,}]+', r'\1[REDACTED]'),
+    (r'(bearer\s+)[a-zA-Z0-9._-]+', r'\1[REDACTED]'),
+    (r'wst_[a-zA-Z0-9_-]+', 'wst_[REDACTED]'),
+    (r'wazuh_[a-zA-Z0-9_-]{40,}', 'wazuh_[REDACTED]'),
+]
+
+
+def sanitize_log_message(message: str) -> str:
+    """
+    Sanitize log messages to remove sensitive data.
+
+    Args:
+        message: The log message to sanitize
+
+    Returns:
+        Sanitized message with sensitive data redacted
+    """
+    import re
+    result = message
+    for pattern, replacement in SENSITIVE_PATTERNS:
+        result = re.sub(pattern, replacement, result, flags=re.IGNORECASE)
+    return result
+
+
+class SanitizingLogFilter(logging.Filter):
+    """Log filter that sanitizes sensitive data."""
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        """Filter and sanitize log record."""
+        if hasattr(record, 'msg') and isinstance(record.msg, str):
+            record.msg = sanitize_log_message(record.msg)
+        if hasattr(record, 'args') and record.args:
+            sanitized_args = []
+            for arg in record.args:
+                if isinstance(arg, str):
+                    sanitized_args.append(sanitize_log_message(arg))
+                else:
+                    sanitized_args.append(arg)
+            record.args = tuple(sanitized_args)
+        return True
+
 @dataclass
 class SecurityMetrics:
     """Track security-related metrics."""

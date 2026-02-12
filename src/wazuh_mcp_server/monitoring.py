@@ -10,7 +10,9 @@ import time
 import asyncio
 import logging
 import psutil
-from typing import Dict, Any, Optional, List
+import uuid
+import contextvars
+from typing import Dict, Any, Optional, List, Callable
 from datetime import datetime, timezone, timedelta
 from dataclasses import dataclass, field
 from collections import defaultdict, deque
@@ -21,6 +23,56 @@ from fastapi import Request, Response
 from fastapi.responses import PlainTextResponse
 
 logger = logging.getLogger(__name__)
+
+# Context variable for request correlation ID
+correlation_id_var: contextvars.ContextVar[str] = contextvars.ContextVar('correlation_id', default='')
+
+
+def get_correlation_id() -> str:
+    """Get the current correlation ID from context."""
+    return correlation_id_var.get() or str(uuid.uuid4())[:8]
+
+
+def set_correlation_id(correlation_id: Optional[str] = None) -> str:
+    """Set correlation ID in context. Generates one if not provided."""
+    cid = correlation_id or str(uuid.uuid4())[:8]
+    correlation_id_var.set(cid)
+    return cid
+
+
+class StructuredLogger:
+    """Structured logging helper for consistent log format."""
+
+    def __init__(self, name: str):
+        self._logger = logging.getLogger(name)
+
+    def _format_extra(self, extra: Dict[str, Any]) -> Dict[str, Any]:
+        """Add correlation ID and timestamp to log extra."""
+        return {
+            "correlation_id": get_correlation_id(),
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            **extra
+        }
+
+    def info(self, message: str, **extra: Any) -> None:
+        """Log info with structured data."""
+        self._logger.info(message, extra=self._format_extra(extra))
+
+    def warning(self, message: str, **extra: Any) -> None:
+        """Log warning with structured data."""
+        self._logger.warning(message, extra=self._format_extra(extra))
+
+    def error(self, message: str, exc_info: bool = False, **extra: Any) -> None:
+        """Log error with structured data."""
+        self._logger.error(message, exc_info=exc_info, extra=self._format_extra(extra))
+
+    def debug(self, message: str, **extra: Any) -> None:
+        """Log debug with structured data."""
+        self._logger.debug(message, extra=self._format_extra(extra))
+
+
+# Structured logger instance
+structured_logger = StructuredLogger(__name__)
 
 # Prometheus metrics registry
 REGISTRY = CollectorRegistry()
@@ -96,6 +148,64 @@ CIRCUIT_BREAKER_STATE = Gauge(
 SERVER_INFO = Info(
     'wazuh_mcp_server_info',
     'Server information',
+    registry=REGISTRY
+)
+
+# Session metrics for improved observability
+SESSION_ACTIVE = Gauge(
+    'wazuh_mcp_sessions_active',
+    'Number of active sessions',
+    registry=REGISTRY
+)
+
+SESSION_CREATED = Counter(
+    'wazuh_mcp_sessions_created_total',
+    'Total sessions created',
+    registry=REGISTRY
+)
+
+SESSION_EXPIRED = Counter(
+    'wazuh_mcp_sessions_expired_total',
+    'Total sessions expired',
+    registry=REGISTRY
+)
+
+# Cache metrics for performance monitoring
+CACHE_HITS = Counter(
+    'wazuh_mcp_cache_hits_total',
+    'Cache hits',
+    ['cache_type'],
+    registry=REGISTRY
+)
+
+CACHE_MISSES = Counter(
+    'wazuh_mcp_cache_misses_total',
+    'Cache misses',
+    ['cache_type'],
+    registry=REGISTRY
+)
+
+# Rate limiter metrics
+RATE_LIMIT_HITS = Counter(
+    'wazuh_mcp_rate_limit_hits_total',
+    'Rate limit enforcement count',
+    ['endpoint'],
+    registry=REGISTRY
+)
+
+# MCP tool execution metrics
+TOOL_EXECUTION_COUNT = Counter(
+    'wazuh_mcp_tool_executions_total',
+    'Total tool executions',
+    ['tool_name', 'status'],
+    registry=REGISTRY
+)
+
+TOOL_EXECUTION_DURATION = Histogram(
+    'wazuh_mcp_tool_duration_seconds',
+    'Tool execution duration in seconds',
+    ['tool_name'],
+    buckets=(0.1, 0.25, 0.5, 1.0, 2.5, 5.0, 10.0),
     registry=REGISTRY
 )
 
@@ -405,9 +515,100 @@ async def check_wazuh_connectivity():
             "message": f"Wazuh API unreachable: {str(e)}"
         }
 
+async def check_session_store() -> Dict[str, Any]:
+    """Check session store health."""
+    try:
+        from wazuh_mcp_server.server import sessions
+        active_count = len(sessions._sessions) if hasattr(sessions, '_sessions') else 0
+        SESSION_ACTIVE.set(active_count)
+
+        return {
+            "status": "healthy",
+            "message": f"Session store operational ({active_count} active sessions)",
+            "details": {"active_sessions": active_count}
+        }
+    except Exception as e:
+        return {
+            "status": "unhealthy",
+            "message": f"Session store check failed: {str(e)}"
+        }
+
+
+async def check_rate_limiter() -> Dict[str, Any]:
+    """Check rate limiter health."""
+    try:
+        from wazuh_mcp_server.server import get_wazuh_client
+        client = await get_wazuh_client()
+        if hasattr(client, '_request_times'):
+            current_requests = len(client._request_times)
+            max_requests = client._max_requests_per_minute
+
+            usage_percent = (current_requests / max_requests) * 100 if max_requests > 0 else 0
+
+            if usage_percent > 90:
+                return {
+                    "status": "degraded",
+                    "message": f"Rate limiter near capacity: {usage_percent:.1f}%",
+                    "details": {"current": current_requests, "max": max_requests}
+                }
+            return {
+                "status": "healthy",
+                "message": f"Rate limiter OK: {usage_percent:.1f}% capacity",
+                "details": {"current": current_requests, "max": max_requests}
+            }
+        return {"status": "healthy", "message": "Rate limiter not configured"}
+    except Exception as e:
+        return {
+            "status": "unhealthy",
+            "message": f"Rate limiter check failed: {str(e)}"
+        }
+
+
+async def check_circuit_breaker() -> Dict[str, Any]:
+    """Check circuit breaker health."""
+    try:
+        from wazuh_mcp_server.server import get_wazuh_client
+        client = await get_wazuh_client()
+        if hasattr(client, '_circuit_breaker'):
+            cb = client._circuit_breaker
+            state = cb._state if hasattr(cb, '_state') else "unknown"
+            failure_count = cb.failure_count if hasattr(cb, 'failure_count') else 0
+
+            # Update Prometheus metric
+            state_value = {"closed": 0, "open": 1, "half_open": 2}.get(state, -1)
+            CIRCUIT_BREAKER_STATE.labels(service="wazuh_api").set(state_value)
+
+            if state == "open":
+                return {
+                    "status": "unhealthy",
+                    "message": f"Circuit breaker OPEN (failures: {failure_count})",
+                    "details": {"state": state, "failure_count": failure_count}
+                }
+            elif state == "half_open":
+                return {
+                    "status": "degraded",
+                    "message": f"Circuit breaker HALF-OPEN (recovering)",
+                    "details": {"state": state, "failure_count": failure_count}
+                }
+            return {
+                "status": "healthy",
+                "message": "Circuit breaker CLOSED",
+                "details": {"state": state, "failure_count": failure_count}
+            }
+        return {"status": "healthy", "message": "Circuit breaker not configured"}
+    except Exception as e:
+        return {
+            "status": "unhealthy",
+            "message": f"Circuit breaker check failed: {str(e)}"
+        }
+
+
 # Register health checks
 health_checker.register_check("memory", check_memory_usage)
 health_checker.register_check("wazuh_api", check_wazuh_connectivity)
+health_checker.register_check("session_store", check_session_store)
+health_checker.register_check("rate_limiter", check_rate_limiter)
+health_checker.register_check("circuit_breaker", check_circuit_breaker)
 
 # Set up server info metric
 SERVER_INFO.info({
@@ -449,32 +650,79 @@ async def health_endpoint() -> Dict[str, Any]:
 
 def setup_monitoring_middleware():
     """Set up monitoring middleware for FastAPI."""
-    
+
     async def monitoring_middleware(request: Request, call_next):
-        """Monitoring middleware."""
+        """Monitoring middleware with correlation ID tracking."""
+        # Extract or generate correlation ID
+        correlation_id = request.headers.get("X-Correlation-ID") or request.headers.get("X-Request-ID")
+        correlation_id = set_correlation_id(correlation_id)
+
         # Record request start
         start_time = time.time()
         method = request.method
         path = request.url.path
-        
+
         # Process request
         try:
             response = await call_next(request)
             status_code = response.status_code
+
+            # Add correlation ID to response headers
+            response.headers["X-Correlation-ID"] = correlation_id
+
         except Exception as e:
             status_code = 500
             ERROR_RATE.labels(error_type=type(e).__name__, component="request_processing").inc()
+            structured_logger.error(
+                f"Request failed: {method} {path}",
+                error_type=type(e).__name__,
+                error_message=str(e),
+                method=method,
+                path=path
+            )
             raise
         finally:
             # Record metrics
             duration = time.time() - start_time
-            
+
             REQUEST_COUNT.labels(method=method, endpoint=path, status_code=status_code).inc()
             REQUEST_DURATION.labels(method=method, endpoint=path).observe(duration)
-            
-            # Record slow requests
+
+            # Record slow requests with correlation ID
+            if duration > performance_profiler.slow_threshold:
+                structured_logger.warning(
+                    f"Slow request detected: {method} {path}",
+                    duration_seconds=duration,
+                    status_code=status_code,
+                    method=method,
+                    path=path
+                )
+
             performance_profiler.record_request(method, path, duration, status_code)
-            
+
         return response
-    
+
     return monitoring_middleware
+
+
+def record_tool_execution(tool_name: str, duration: float, success: bool) -> None:
+    """Record tool execution metrics."""
+    status = "success" if success else "error"
+    TOOL_EXECUTION_COUNT.labels(tool_name=tool_name, status=status).inc()
+    TOOL_EXECUTION_DURATION.labels(tool_name=tool_name).observe(duration)
+
+
+def record_cache_access(cache_type: str, hit: bool) -> None:
+    """Record cache access metrics."""
+    if hit:
+        CACHE_HITS.labels(cache_type=cache_type).inc()
+    else:
+        CACHE_MISSES.labels(cache_type=cache_type).inc()
+
+
+def record_session_event(event: str) -> None:
+    """Record session lifecycle events."""
+    if event == "created":
+        SESSION_CREATED.inc()
+    elif event == "expired":
+        SESSION_EXPIRED.inc()
