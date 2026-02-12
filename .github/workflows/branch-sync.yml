@@ -20,25 +20,34 @@ jobs:
     name: Sync Branches
     runs-on: ubuntu-latest
     if: github.repository_owner == 'gensecaihq'
-    
+
     steps:
     - uses: actions/checkout@v4
       with:
         fetch-depth: 0
         token: ${{ secrets.GITHUB_TOKEN }}
-    
+
     - name: Set up Git
       run: |
         git config --global user.name 'GitHub Actions'
         git config --global user.email 'actions@github.com'
-    
+
     - name: Fetch all branches
       run: |
-        # Fetch remote tracking branches without updating the checked-out branch
         git fetch origin
-        # Create local tracking branches if they don't exist
-        git branch --track mcp-remote origin/mcp-remote 2>/dev/null || git checkout mcp-remote && git checkout -
-    
+
+    - name: Check branch existence
+      id: branches
+      run: |
+        if git ls-remote --exit-code --heads origin mcp-remote >/dev/null 2>&1; then
+          echo "mcp_remote_exists=true" >> $GITHUB_OUTPUT
+          git checkout -b mcp-remote origin/mcp-remote
+          git checkout main
+        else
+          echo "mcp_remote_exists=false" >> $GITHUB_OUTPUT
+          echo "::notice::mcp-remote branch does not exist yet"
+        fi
+
     - name: Check for version management tools
       run: |
         if [ -f tools/branch-sync.py ]; then
@@ -47,28 +56,35 @@ jobs:
         else
           echo "Version management tools not found"
         fi
-    
+
     - name: Create sync report
       run: |
         echo "# Branch Sync Report" >> $GITHUB_STEP_SUMMARY
         echo "## Current Status" >> $GITHUB_STEP_SUMMARY
-        echo "- Main branch: $(git rev-parse --short main)" >> $GITHUB_STEP_SUMMARY
-        echo "- MCP-Remote branch: $(git rev-parse --short mcp-remote)" >> $GITHUB_STEP_SUMMARY
-        echo "" >> $GITHUB_STEP_SUMMARY
-        
-        echo "## Differences" >> $GITHUB_STEP_SUMMARY
-        echo "### Main → MCP-Remote" >> $GITHUB_STEP_SUMMARY
-        echo '```' >> $GITHUB_STEP_SUMMARY
-        git log main..mcp-remote --oneline | head -10 >> $GITHUB_STEP_SUMMARY || echo "No differences" >> $GITHUB_STEP_SUMMARY
-        echo '```' >> $GITHUB_STEP_SUMMARY
-        
-        echo "### MCP-Remote → Main" >> $GITHUB_STEP_SUMMARY
-        echo '```' >> $GITHUB_STEP_SUMMARY
-        git log mcp-remote..main --oneline | head -10 >> $GITHUB_STEP_SUMMARY || echo "No differences" >> $GITHUB_STEP_SUMMARY
-        echo '```' >> $GITHUB_STEP_SUMMARY
-    
+        echo "- Main branch: $(git rev-parse --short HEAD)" >> $GITHUB_STEP_SUMMARY
+
+        if [ "${{ steps.branches.outputs.mcp_remote_exists }}" == "true" ]; then
+          echo "- MCP-Remote branch: $(git rev-parse --short origin/mcp-remote)" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          echo "## Differences" >> $GITHUB_STEP_SUMMARY
+          echo "### Main → MCP-Remote" >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          git log HEAD..origin/mcp-remote --oneline | head -10 >> $GITHUB_STEP_SUMMARY || echo "No differences" >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+
+          echo "### MCP-Remote → Main" >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          git log origin/mcp-remote..HEAD --oneline | head -10 >> $GITHUB_STEP_SUMMARY || echo "No differences" >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+        else
+          echo "- MCP-Remote branch: **does not exist**" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "> **Note:** Create the mcp-remote branch when ready to support MCP remote transport mode." >> $GITHUB_STEP_SUMMARY
+        fi
+
     - name: Sync based on input
-      if: github.event_name == 'workflow_dispatch'
+      if: github.event_name == 'workflow_dispatch' && steps.branches.outputs.mcp_remote_exists == 'true'
       run: |
         case "${{ github.event.inputs.sync_direction }}" in
           main-to-remote)
@@ -84,18 +100,19 @@ jobs:
             # Merge compatible changes both ways
             ;;
         esac
-    
+
     - name: Version check
       run: |
         echo "## Version Information" >> $GITHUB_STEP_SUMMARY
         echo "### Main Branch" >> $GITHUB_STEP_SUMMARY
-        git checkout main
         if [ -f pyproject.toml ]; then
           echo "Version: $(grep '^version' pyproject.toml | cut -d'"' -f2)" >> $GITHUB_STEP_SUMMARY
         fi
-        
-        echo "### MCP-Remote Branch" >> $GITHUB_STEP_SUMMARY
-        git checkout mcp-remote
-        if [ -f pyproject.toml ]; then
-          echo "Version: $(grep '^version' pyproject.toml | cut -d'"' -f2)" >> $GITHUB_STEP_SUMMARY
+
+        if [ "${{ steps.branches.outputs.mcp_remote_exists }}" == "true" ]; then
+          echo "### MCP-Remote Branch" >> $GITHUB_STEP_SUMMARY
+          git checkout mcp-remote
+          if [ -f pyproject.toml ]; then
+            echo "Version: $(grep '^version' pyproject.toml | cut -d'"' -f2)" >> $GITHUB_STEP_SUMMARY
+          fi
         fi
