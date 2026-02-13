@@ -10,6 +10,21 @@
 [![OAuth 2.0](https://img.shields.io/badge/OAuth%202.0-DCR-green.svg)](#)
 [![Bearer Auth](https://img.shields.io/badge/Bearer-Authentication-red.svg)](#)
 
+## 🎯 Why This MCP Server?
+
+**The Problem:** Security teams using Wazuh SIEM generate thousands of alerts, vulnerabilities, and events daily. Analyzing this data requires constant context-switching between dashboards, writing API queries, and manually correlating information. AI assistants like Claude could help, but they can't natively access your Wazuh infrastructure.
+
+**The Solution:** This MCP (Model Context Protocol) server acts as a secure bridge between AI assistants and your Wazuh deployment. It exposes 29 specialized security tools that let Claude directly query alerts, analyze threats, check agent health, assess vulnerabilities, and generate compliance reports—all through natural conversation.
+
+**How It Works:**
+1. **Deploy** the server alongside your Wazuh infrastructure (Docker or native)
+2. **Connect** Claude Desktop or any MCP-compatible client via the `/mcp` endpoint
+3. **Query** your security data naturally: *"Show me critical alerts from the last 24 hours"* or *"Which agents have unpatched critical vulnerabilities?"*
+
+The server handles authentication, rate limiting, and API translation—you get AI-powered security analysis without exposing raw API access or compromising security posture.
+
+---
+
 A **production-ready, enterprise-grade** MCP-compliant remote server that provides seamless integration with Wazuh SIEM platform using the latest **Streamable HTTP transport** (MCP 2025-11-25).
 
 > **Latest Standard**: Streamable HTTP transport with `/mcp` endpoint (2025-11-25)
@@ -77,11 +92,10 @@ Comprehensive toolkit for security operations including:
 
 > **💡 Compact Mode**: Alert and vulnerability tools support `compact: true` (default) for token-efficient output, reducing response size by ~66%. Set `compact: false` for full raw data.
 
-**Alert Management (4 tools)**
+**Alert Management (3 tools)**
 - **get_wazuh_alerts**: Retrieve security alerts with filtering
 - **get_wazuh_alert_summary**: Alert summaries grouped by field
 - **analyze_alert_patterns**: Pattern analysis and anomaly detection
-- **search_security_events**: Advanced security event search
 
 **Agent Management (6 tools)**
 - **get_wazuh_agents**: Agent information and status
@@ -96,13 +110,14 @@ Comprehensive toolkit for security operations including:
 - **get_wazuh_critical_vulnerabilities**: Critical vulnerability focus
 - **get_wazuh_vulnerability_summary**: Vulnerability statistics
 
-**Security Analysis (6 tools)**
+**Security Analysis (7 tools)**
+- **search_security_events**: Advanced security event search
 - **analyze_security_threat**: AI-powered threat analysis
 - **check_ioc_reputation**: IoC reputation checking
 - **perform_risk_assessment**: Comprehensive risk analysis
 - **get_top_security_threats**: Top threat identification
 - **generate_security_report**: Automated security reporting
-- **run_compliance_check**: Framework compliance validation
+- **run_compliance_check**: Framework compliance validation (PCI-DSS, HIPAA, SOX, GDPR, NIST)
 
 **System Monitoring (10 tools)**
 - **get_wazuh_statistics**: Comprehensive system metrics
@@ -120,14 +135,14 @@ Comprehensive toolkit for security operations including:
 
 ### Prerequisites
 - **Docker** 20.10+ with Compose v2.20+
-- **Python** 3.9+ (optional, for OS-agnostic deployment script)
-- **Wazuh** 4.8.0 - 4.14.x deployment with API access
+- **Python** 3.13+ (for native development; Docker deployment requires no Python on host)
+- **Wazuh** 4.8.0 - 4.14.3 deployment with API access
 
 > **OS-Agnostic Deployment**: Everything runs in Docker containers. Works on Windows, macOS, and Linux identically.
 
 ### 1. Clone Repository
 ```bash
-git clone <your-repository-url>
+git clone https://github.com/gensecaihq/Wazuh-MCP-Server.git
 cd Wazuh-MCP-Server
 ```
 
@@ -226,6 +241,7 @@ curl http://localhost:3000/health
 | `MCP_HOST` | Server bind address | `0.0.0.0` | ❌ |
 | `MCP_PORT` | Server port | `3000` | ❌ |
 | `AUTH_MODE` | Authentication mode: `oauth`, `bearer`, `none` | `bearer` | ❌ |
+| `MCP_API_KEY` | Pre-configured API key (format: `wazuh_<43-char-base64>`) | auto-generated | ❌ |
 | `AUTH_SECRET_KEY` | JWT signing key | auto-generated | ❌ |
 | `OAUTH_ENABLE_DCR` | Enable OAuth Dynamic Client Registration | `true` | ❌ |
 | `LOG_LEVEL` | Logging level | `INFO` | ❌ |
@@ -275,16 +291,18 @@ python -m wazuh_mcp_server
 ```
 src/wazuh_mcp_server/
 ├── __main__.py              # Application entry point
-├── server.py                # MCP-compliant FastAPI server
+├── server.py                # MCP server with all 29 tools (106KB)
 ├── config.py                # Configuration management
-├── auth.py                  # Authentication & authorization
-├── security.py              # Security middleware & validation
-├── monitoring.py            # Metrics & health checks
-├── resilience.py            # Circuit breakers & retry logic
+├── auth.py                  # JWT authentication & API keys
+├── oauth.py                 # OAuth 2.0 with Dynamic Client Registration
+├── security.py              # Rate limiting, input validation, CORS
+├── monitoring.py            # Prometheus metrics & health checks
+├── resilience.py            # Circuit breakers, retries, graceful shutdown
+├── session_store.py         # Pluggable sessions (in-memory/Redis)
 ├── api/
-│   └── wazuh_client.py      # Wazuh API client
-└── tools/                   # MCP tools implementation
-    └── core.py              # 3 essential security tools
+│   ├── wazuh_client.py      # Wazuh Manager API client
+│   └── wazuh_indexer.py     # Wazuh Indexer client (vulnerabilities)
+└── utils/                   # Utility functions
 ```
 
 ### Building Custom Images
