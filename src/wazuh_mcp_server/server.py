@@ -8,7 +8,7 @@ Production-ready with Streamable HTTP and legacy SSE transport, authentication, 
 # MCP Protocol Version Support
 # Latest: 2025-11-25, also supports backwards compatibility with older versions
 MCP_PROTOCOL_VERSION = "2025-11-25"
-SUPPORTED_PROTOCOL_VERSIONS = ["2025-11-25", "2025-03-26", "2024-11-05"]
+SUPPORTED_PROTOCOL_VERSIONS = ["2025-11-25", "2025-06-18", "2025-03-26", "2024-11-05"]
 
 # Production Constants
 SESSION_TIMEOUT_MINUTES = 30
