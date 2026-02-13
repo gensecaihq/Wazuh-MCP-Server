@@ -2,231 +2,201 @@
 """
 Comprehensive Business Logic Test Suite
 ======================================
-Tests all FastMCP tools and business logic components for error-free operation.
+Tests MCP server components and business logic for error-free operation.
 """
 
 import sys
+import os
 import asyncio
-import json
 from pathlib import Path
 
+import pytest
+
 # Add src to path
-src_path = Path(__file__).parent / "src"
+src_path = Path(__file__).parent.parent.parent / "src"
 sys.path.insert(0, str(src_path))
 
-async def test_fastmcp_server():
-    """Test FastMCP server functionality."""
-    print("🧪 Testing FastMCP Server Components...")
-    
-    try:
-        from wazuh_mcp_server.server import mcp, initialize_server
-        print("✅ FastMCP server import successful")
-        
-        # Test server initialization
-        await initialize_server()
-        print("✅ Server initialization successful")
-        
-        # Count tools
-        tools = [attr for attr in dir(mcp) if hasattr(getattr(mcp, attr), '_fastmcp_tool')]
-        print(f"✅ Found {len(tools)} FastMCP tools")
-        
-        return True
-        
-    except Exception as e:
-        print(f"❌ FastMCP server test failed: {e}")
-        return False
 
-async def test_client_manager():
-    """Test Wazuh Client Manager."""
-    print("\n🧪 Testing Wazuh Client Manager...")
-    
-    try:
-        from wazuh_mcp_server.config import WazuhConfig
-        from wazuh_mcp_server.api.wazuh_client_manager import WazuhClientManager
-        
-        config = WazuhConfig()
-        client_manager = WazuhClientManager(config)
-        print("✅ Client manager initialization successful")
-        
-        # Test required methods exist
-        required_methods = [
-            'get_alerts', 'get_agents', 'get_vulnerabilities',
-            'get_alert_summary', 'get_running_agents', 'get_cluster_health',
-            'get_rules_summary', 'get_weekly_stats', 'search_manager_logs',
-            'get_critical_vulnerabilities', 'get_vulnerability_summary',
-            'get_remoted_stats', 'get_log_collector_stats', 'get_manager_error_logs',
-            'check_agent_health', 'get_wazuh_statistics', 'search_security_events',
-            'get_agent_configuration', 'validate_connection'
-        ]
-        
-        for method in required_methods:
-            if hasattr(client_manager, method):
-                print(f"✅ Method {method} exists")
-            else:
-                print(f"❌ Method {method} missing")
-                return False
-        
-        return True
-        
-    except Exception as e:
-        print(f"❌ Client manager test failed: {e}")
-        return False
+@pytest.mark.asyncio
+async def test_server_imports():
+    """Test that server modules can be imported."""
+    from wazuh_mcp_server.server import app
+    from wazuh_mcp_server.config import get_config
+    assert app is not None
+    config = get_config()
+    assert config is not None
 
-async def test_analyzers():
-    """Test Security and Compliance Analyzers."""
-    print("\n🧪 Testing Analyzers...")
-    
-    try:
-        from wazuh_mcp_server.analyzers import SecurityAnalyzer, ComplianceAnalyzer
-        
-        security_analyzer = SecurityAnalyzer()
-        compliance_analyzer = ComplianceAnalyzer()
-        print("✅ Analyzers initialization successful")
-        
-        # Test required async methods exist
-        security_methods = [
-            'analyze_threat', 'check_ioc_reputation', 'perform_risk_assessment',
-            'analyze_alert_patterns', 'get_top_security_threats', 'generate_security_report'
-        ]
-        
-        for method in security_methods:
-            if hasattr(security_analyzer, method):
-                print(f"✅ SecurityAnalyzer method {method} exists")
-            else:
-                print(f"❌ SecurityAnalyzer method {method} missing")
-                return False
-        
-        # Test compliance methods
-        if hasattr(compliance_analyzer, 'run_compliance_check'):
-            print("✅ ComplianceAnalyzer method run_compliance_check exists")
-        else:
-            print("❌ ComplianceAnalyzer method run_compliance_check missing")
-            return False
-        
-        return True
-        
-    except Exception as e:
-        print(f"❌ Analyzers test failed: {e}")
-        return False
+
+@pytest.mark.asyncio
+async def test_wazuh_client_initialization():
+    """Test Wazuh Client initialization."""
+    from wazuh_mcp_server.config import WazuhConfig
+    from wazuh_mcp_server.api.wazuh_client import WazuhClient
+
+    config = WazuhConfig(
+        wazuh_host="localhost",
+        wazuh_user="test",
+        wazuh_pass="test",
+        wazuh_port=55000,
+        verify_ssl=False
+    )
+    client = WazuhClient(config)
+    assert client is not None
+    assert client.config.wazuh_host == "localhost"
+
+
+@pytest.mark.asyncio
+async def test_wazuh_indexer_client():
+    """Test Wazuh Indexer Client initialization."""
+    from wazuh_mcp_server.api.wazuh_indexer import WazuhIndexerClient
+
+    client = WazuhIndexerClient(
+        host="localhost",
+        port=9200,
+        username="admin",
+        password="admin",
+        verify_ssl=False
+    )
+    assert client is not None
+    assert client.host == "localhost"
+    assert client.port == 9200
+
 
 def test_configuration():
     """Test configuration loading."""
-    print("\n🧪 Testing Configuration...")
-    
-    try:
-        from wazuh_mcp_server.config import WazuhConfig
-        
-        config = WazuhConfig()
-        print("✅ Configuration loading successful")
-        print(f"✅ Wazuh host: {config.host}")
-        print(f"✅ Wazuh port: {config.port}")
-        
-        return True
-        
-    except Exception as e:
-        print(f"❌ Configuration test failed: {e}")
-        return False
+    from wazuh_mcp_server.config import ServerConfig
+
+    # Test with environment variables
+    os.environ.setdefault("WAZUH_HOST", "localhost")
+    os.environ.setdefault("WAZUH_USER", "test")
+    os.environ.setdefault("WAZUH_PASS", "test")
+
+    config = ServerConfig.from_env()
+    assert config is not None
+    assert config.MCP_PORT == 3000
+
+
+def test_security_validation():
+    """Test security validation functions."""
+    from wazuh_mcp_server.security import (
+        validate_limit,
+        validate_agent_id,
+        validate_time_range,
+        ToolValidationError
+    )
+
+    # Test validate_limit
+    assert validate_limit(50) == 50
+    assert validate_limit(None) == 100  # Default
+
+    # Test with invalid values
+    with pytest.raises(ToolValidationError):
+        validate_limit(0)  # Below min
+
+    with pytest.raises(ToolValidationError):
+        validate_limit(2000)  # Above max
+
+    # Test validate_agent_id
+    assert validate_agent_id("001") == "001"
+    assert validate_agent_id(None) is None
+
+    # Test validate_time_range
+    assert validate_time_range("24h") == "24h"
+    assert validate_time_range("7d") == "7d"
+
+
+def test_auth_manager():
+    """Test authentication manager."""
+    from wazuh_mcp_server.auth import AuthManager
+
+    manager = AuthManager()
+    assert manager is not None
+
+    # Test API key creation
+    api_key = manager.create_api_key(
+        name="Test Key",
+        scopes=["wazuh:read"]
+    )
+    assert api_key.startswith("wazuh_")
+    assert len(api_key) == 49  # wazuh_ (6) + base64 (43)
+
+    # Test API key validation
+    key_obj = manager.validate_api_key(api_key)
+    assert key_obj is not None
+    assert key_obj.name == "Test Key"
+
+
+def test_rate_limiter():
+    """Test rate limiter functionality."""
+    from wazuh_mcp_server.security import RateLimiter
+
+    limiter = RateLimiter(max_requests=5, window_seconds=60)
+    assert limiter is not None
+
+    # First 5 requests should be allowed
+    for _ in range(5):
+        allowed, retry_after = limiter.is_allowed("test_client")
+        assert allowed is True
+
+    # 6th request should be rate limited
+    allowed, retry_after = limiter.is_allowed("test_client")
+    assert allowed is False
+
 
 def test_docker_compatibility():
     """Test Docker environment compatibility."""
-    print("\n🧪 Testing Docker Compatibility...")
-    
-    try:
-        import os
-        import platform
-        import socket
-        
-        print(f"✅ Platform: {platform.system()} {platform.release()}")
-        print(f"✅ Python version: {platform.python_version()}")
-        print(f"✅ Working directory: {os.getcwd()}")
-        
-        # Test network connectivity
-        try:
-            socket.create_connection(("8.8.8.8", 53), timeout=3)
-            print("✅ Network connectivity available")
-        except:
-            print("⚠️  Limited network connectivity (expected in some environments)")
-        
-        # Test environment variables
-        python_path = os.environ.get('PYTHONPATH', 'Not set')
-        print(f"✅ PYTHONPATH: {python_path}")
-        
-        return True
-        
-    except Exception as e:
-        print(f"❌ Docker compatibility test failed: {e}")
-        return False
+    import platform
+    import socket
+
+    # Basic platform checks
+    assert platform.system() in ["Darwin", "Linux", "Windows"]
+    assert platform.python_version().startswith("3.")
+
+    # Test socket operations work
+    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    sock.close()
+
 
 def test_dependencies():
-    """Test all required dependencies."""
-    print("\n🧪 Testing Dependencies...")
-    
+    """Test all required dependencies are importable."""
     dependencies = [
-        'fastmcp', 'httpx', 'aiohttp', 'requests', 'pydantic', 'python-dotenv',
-        'urllib3', 'certifi', 'numpy', 'packaging', 'python_dateutil', 'psutil'
+        'httpx',
+        'pydantic',
+        'fastapi',
+        'uvicorn',
+        'jose',
+        'tenacity'
     ]
-    
-    failed = []
-    
-    for dep in dependencies:
-        try:
-            __import__(dep.replace('-', '_'))
-            print(f"✅ {dep} available")
-        except ImportError:
-            print(f"❌ {dep} missing")
-            failed.append(dep)
-    
-    if failed:
-        print(f"❌ Missing dependencies: {failed}")
-        return False
-    
-    return True
 
-async def run_comprehensive_test():
-    """Run all business logic tests."""
-    print("🚀 Wazuh MCP Server - Comprehensive Business Logic Test")
-    print("=" * 60)
-    
-    tests = [
-        ("Dependencies", test_dependencies),
-        ("Configuration", test_configuration),
-        ("Docker Compatibility", test_docker_compatibility),
-        ("Client Manager", test_client_manager),
-        ("Analyzers", test_analyzers),
-        ("FastMCP Server", test_fastmcp_server),
-    ]
-    
-    passed = 0
-    failed = 0
-    
-    for test_name, test_func in tests:
-        print(f"\n📋 Running {test_name} Test...")
-        try:
-            if asyncio.iscoroutinefunction(test_func):
-                result = await test_func()
-            else:
-                result = test_func()
-            
-            if result:
-                print(f"✅ {test_name} Test PASSED")
-                passed += 1
-            else:
-                print(f"❌ {test_name} Test FAILED")
-                failed += 1
-        except Exception as e:
-            print(f"❌ {test_name} Test ERROR: {e}")
-            failed += 1
-    
-    print("\n" + "=" * 60)
-    print(f"📊 Test Results: {passed} passed, {failed} failed")
-    
-    if failed == 0:
-        print("🎉 All business logic tests PASSED! Server is ready for production.")
-        return 0
-    else:
-        print(f"⚠️  {failed} tests FAILED. Please fix issues before deployment.")
-        return 1
+    for dep in dependencies:
+        module = __import__(dep.replace('-', '_'))
+        assert module is not None
+
+
+def test_resilience_patterns():
+    """Test resilience patterns."""
+    from wazuh_mcp_server.resilience import (
+        CircuitBreaker,
+        CircuitBreakerConfig,
+        CircuitBreakerState,
+        GracefulShutdown
+    )
+
+    # Test circuit breaker config
+    config = CircuitBreakerConfig(
+        failure_threshold=3,
+        recovery_timeout=30
+    )
+    assert config.failure_threshold == 3
+
+    # Test circuit breaker
+    cb = CircuitBreaker(config)
+    assert cb.state == CircuitBreakerState.CLOSED
+
+    # Test graceful shutdown
+    shutdown = GracefulShutdown()
+    assert shutdown is not None
+
 
 if __name__ == "__main__":
-    exit_code = asyncio.run(run_comprehensive_test())
-    sys.exit(exit_code)
+    pytest.main([__file__, "-v"])

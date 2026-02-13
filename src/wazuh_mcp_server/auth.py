@@ -8,17 +8,21 @@ import os
 import secrets
 import hashlib
 import hmac
-from typing import Optional, Dict, Any, List
+import logging
+from typing import Optional, Dict, Any, List, Tuple
 from datetime import datetime, timezone, timedelta
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 import json
 import base64
+import uuid
 from jose import jwt
 from jose.exceptions import JWTError, ExpiredSignatureError
 
 from pydantic import BaseModel, Field
 import httpx
 from fastapi import HTTPException, Header
+
+logger = logging.getLogger(__name__)
 
 @dataclass
 class AuthToken:
@@ -55,19 +59,55 @@ class APIKey(BaseModel):
 
 class AuthManager:
     """Manage authentication for MCP server."""
-    
+
     def __init__(self):
         self.secret_key = os.getenv("AUTH_SECRET_KEY", secrets.token_urlsafe(32))
         self.token_lifetime = int(os.getenv("TOKEN_LIFETIME_HOURS", "24"))
         self.api_keys: Dict[str, APIKey] = {}
         self.tokens: Dict[str, AuthToken] = {}
-        
+        self._default_api_key: Optional[str] = None  # Stores auto-generated key for display
+
         # Load API keys from environment or config
         self._load_api_keys()
+
+    def get_default_api_key(self) -> Optional[str]:
+        """Get the auto-generated default API key for display on startup.
+
+        Returns None if API key was configured via environment variable.
+        Only returns a value for auto-generated keys (development mode).
+        """
+        return self._default_api_key
     
     def _load_api_keys(self):
-        """Load API keys from configuration."""
-        # Load from environment variable (JSON format)
+        """Load API keys from configuration.
+
+        Priority order:
+        1. MCP_API_KEY environment variable (recommended for production)
+        2. API_KEYS environment variable (JSON array format)
+        3. Auto-generated key (displayed on startup for development)
+        """
+        # First, check for MCP_API_KEY (simple single-key configuration)
+        mcp_api_key = os.getenv("MCP_API_KEY", "").strip()
+        if mcp_api_key:
+            if mcp_api_key.startswith("wazuh_") and len(mcp_api_key) == 49:
+                key_id = secrets.token_urlsafe(16)
+                key_obj = APIKey(
+                    id=key_id,
+                    name="MCP API Key (from environment)",
+                    key_hash=self.hash_api_key(mcp_api_key),
+                    created_at=datetime.now(timezone.utc),
+                    scopes=["wazuh:read", "wazuh:write"]
+                )
+                self.api_keys[key_id] = key_obj
+                logger.info("Loaded API key from MCP_API_KEY environment variable")
+                return
+            else:
+                logger.warning(
+                    "MCP_API_KEY format invalid. Expected format: wazuh_<43-char-base64>. "
+                    "Generate with: python -c \"import secrets; print('wazuh_' + secrets.token_urlsafe(32))\""
+                )
+
+        # Load from API_KEYS environment variable (JSON format for multiple keys)
         api_keys_json = os.getenv("API_KEYS")
         if api_keys_json:
             try:
@@ -75,17 +115,20 @@ class AuthManager:
                 for key_data in keys_data:
                     api_key = APIKey(**key_data)
                     self.api_keys[api_key.id] = api_key
-            except Exception as e:
-                print(f"Error loading API keys: {e}")
-        
-        # Create default API key if none exist
+                logger.info(f"Loaded {len(self.api_keys)} API key(s) from API_KEYS environment")
+                return
+            except (json.JSONDecodeError, TypeError, KeyError) as e:
+                logger.error(f"Error loading API keys from API_KEYS env: {e}")
+
+        # Create default API key if none configured
         if not self.api_keys:
             default_key = self.create_api_key(
                 name="Default API Key",
                 scopes=["wazuh:read", "wazuh:write"]
             )
-            # Only log that a key was created, not the actual key value
-            print("Created default API key - save this securely for client authentication")
+            # Store the raw key for display
+            self._default_api_key = default_key
+            logger.info("Created default API key - save this securely for client authentication")
     
     def hash_api_key(self, api_key: str) -> str:
         """Hash an API key using HMAC-SHA256."""
@@ -145,7 +188,7 @@ class AuthManager:
                 # Check expiration with timezone awareness
                 if key_obj.expires_at and datetime.now(timezone.utc) > key_obj.expires_at:
                     # Log expiration attempt (without exposing key)
-                    print(f"Attempted use of expired API key (ID: {key_obj.id[:8]}...)")
+                    logger.warning(f"Attempted use of expired API key (ID: {key_obj.id[:8]}...)")
                     return None
                 return key_obj
                 

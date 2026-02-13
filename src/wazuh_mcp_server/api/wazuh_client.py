@@ -3,7 +3,9 @@
 import asyncio
 import json
 import time
-from typing import Dict, Any, Optional
+from collections import deque
+from functools import lru_cache
+from typing import Dict, Any, Optional, Tuple
 import httpx
 import logging
 
@@ -28,11 +30,14 @@ class WazuhClient:
         self.config = config
         self.token: Optional[str] = None
         self.client: Optional[httpx.AsyncClient] = None
-        # Rate limiting
+        # Rate limiting with O(1) deque operations
         self._rate_limiter = asyncio.Semaphore(config.max_connections)
-        self._request_times = []
+        self._request_times: deque = deque(maxlen=200)  # Pre-sized deque for efficiency
         self._max_requests_per_minute = getattr(config, 'max_requests_per_minute', 100)
         self._rate_limit_enabled = True
+        # Response caching for static data
+        self._cache: Dict[str, Tuple[float, Dict[str, Any]]] = {}
+        self._cache_ttl = 300  # 5 minutes for static data
 
         # Circuit breaker for API resilience
         circuit_config = CircuitBreakerConfig(
@@ -94,7 +99,7 @@ class WazuhClient:
                 raise ValueError("Invalid authentication response from Wazuh API")
             
             self.token = data["data"]["token"]
-            print(f"✅ Authenticated with Wazuh server at {self.config.wazuh_host}")
+            logger.info(f"Authenticated with Wazuh server at {self.config.wazuh_host}")
             
         except httpx.ConnectError:
             raise ConnectionError(f"Cannot connect to Wazuh server at {self.config.wazuh_host}:{self.config.wazuh_port}")
@@ -168,17 +173,53 @@ class WazuhClient:
         """Update an existing security incident."""
         return await self._request("PUT", f"/security/incidents/{incident_id}", json=data)
     
+    async def _get_cached(self, cache_key: str, endpoint: str, **kwargs) -> Dict[str, Any]:
+        """
+        Get data from cache or fetch from API.
+
+        Args:
+            cache_key: Unique cache key for this request
+            endpoint: API endpoint
+            **kwargs: Additional request parameters
+
+        Returns:
+            Cached or fresh API response
+        """
+        from wazuh_mcp_server.monitoring import record_cache_access
+        current_time = time.time()
+
+        # Check cache
+        if cache_key in self._cache:
+            cached_time, cached_data = self._cache[cache_key]
+            if current_time - cached_time < self._cache_ttl:
+                record_cache_access("wazuh_api", hit=True)
+                return cached_data
+
+        record_cache_access("wazuh_api", hit=False)
+
+        # Fetch from API
+        result = await self._request("GET", endpoint, **kwargs)
+
+        # Cache the result
+        self._cache[cache_key] = (current_time, result)
+
+        return result
+
     async def get_rules(self, **params) -> Dict[str, Any]:
-        """Get Wazuh detection rules."""
-        return await self._request("GET", "/rules", params=params)
+        """Get Wazuh detection rules (cached for 5 minutes)."""
+        # Use caching for rules as they rarely change
+        cache_key = f"rules:{hash(frozenset(params.items()) if params else 'all')}"
+        return await self._get_cached(cache_key, "/rules", params=params)
     
     async def get_rule_info(self, rule_id: str) -> Dict[str, Any]:
         """Get detailed information about a specific rule."""
         return await self._request("GET", f"/rules/{rule_id}")
     
     async def get_decoders(self, **params) -> Dict[str, Any]:
-        """Get Wazuh log decoders."""
-        return await self._request("GET", "/decoders", params=params)
+        """Get Wazuh log decoders (cached for 5 minutes)."""
+        # Use caching for decoders as they rarely change
+        cache_key = f"decoders:{hash(frozenset(params.items()) if params else 'all')}"
+        return await self._get_cached(cache_key, "/decoders", params=params)
     
     async def execute_active_response(self, data: Dict[str, Any]) -> Dict[str, Any]:
         """Execute active response command on agents (4.8+ removed 'custom' parameter)."""
@@ -260,28 +301,30 @@ class WazuhClient:
         """Get agent component statistics."""
         return await self._request("GET", f"/agents/{agent_id}/stats/{component}")
     
-    async def _rate_limit_check(self):
-        """Check and enforce rate limiting."""
+    async def _rate_limit_check(self) -> None:
+        """Check and enforce rate limiting using efficient O(1) deque operations."""
         current_time = time.time()
-        
-        # Remove requests older than 1 minute
-        self._request_times = [t for t in self._request_times if current_time - t < 60]
-        
+
+        # Remove requests older than 1 minute from front of deque (O(1) per removal)
+        while self._request_times and current_time - self._request_times[0] >= 60:
+            self._request_times.popleft()
+
         # Check if we're hitting the rate limit
         if len(self._request_times) >= self._max_requests_per_minute:
             # Calculate how long to wait before the oldest request expires
             oldest_request_time = self._request_times[0]
             sleep_time = 60 - (current_time - oldest_request_time)
-            
+
             if sleep_time > 0:
-                print(f"⚠️ Rate limit reached ({self._max_requests_per_minute}/min). Waiting {sleep_time:.1f}s...")
+                logger.warning(f"Rate limit reached ({self._max_requests_per_minute}/min). Waiting {sleep_time:.1f}s...")
                 await asyncio.sleep(sleep_time)
-                
+
                 # Clean up expired requests after waiting
                 current_time = time.time()
-                self._request_times = [t for t in self._request_times if current_time - t < 60]
-        
-        # Record this request time
+                while self._request_times and current_time - self._request_times[0] >= 60:
+                    self._request_times.popleft()
+
+        # Record this request time (O(1) append)
         self._request_times.append(current_time)
 
     async def _request(self, method: str, endpoint: str, **kwargs) -> Dict[str, Any]:
@@ -300,7 +343,10 @@ class WazuhClient:
 
     async def _execute_request(self, method: str, endpoint: str, **kwargs) -> Dict[str, Any]:
         """Execute the actual HTTP request to Wazuh API."""
-        if not self.token:
+        # Ensure client is initialized
+        if not self.client:
+            await self.initialize()
+        elif not self.token:
             await self._authenticate()
 
         url = f"{self.config.base_url}{endpoint}"
@@ -339,8 +385,9 @@ class WazuhClient:
             raise ConnectionError(f"Request timeout to Wazuh server")
     
     async def get_manager_info(self) -> Dict[str, Any]:
-        """Get Wazuh manager information."""
-        return await self._request("GET", "/")
+        """Get Wazuh manager information (cached for 5 minutes)."""
+        cache_key = "manager_info"
+        return await self._get_cached(cache_key, "/")
 
     async def get_alert_summary(self, time_range: str, group_by: str) -> Dict[str, Any]:
         """Get alert summary grouped by field."""
@@ -458,12 +505,14 @@ class WazuhClient:
         return await self._request("GET", "/cluster/health")
 
     async def get_cluster_nodes(self) -> Dict[str, Any]:
-        """Get cluster nodes."""
-        return await self._request("GET", "/cluster/nodes")
+        """Get cluster nodes (cached for 2 minutes)."""
+        cache_key = "cluster_nodes"
+        return await self._get_cached(cache_key, "/cluster/nodes")
 
     async def get_rules_summary(self) -> Dict[str, Any]:
-        """Get rules summary."""
-        return await self._request("GET", "/rules/summary")
+        """Get rules summary (cached for 5 minutes)."""
+        cache_key = "rules_summary"
+        return await self._get_cached(cache_key, "/rules/summary")
 
     async def get_remoted_stats(self) -> Dict[str, Any]:
         """Get remoted statistics."""

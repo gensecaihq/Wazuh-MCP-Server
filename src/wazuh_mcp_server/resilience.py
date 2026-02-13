@@ -22,6 +22,14 @@ from fastapi import HTTPException
 
 logger = logging.getLogger(__name__)
 
+# Production Constants
+GRACEFUL_SHUTDOWN_TIMEOUT_SECONDS = 30
+WAZUH_API_MAX_CONCURRENT = 10
+SSE_MAX_CONCURRENT_CONNECTIONS = 100
+AUTH_MAX_CONCURRENT_REQUESTS = 20
+FALLBACK_SEMAPHORE_LIMIT = 5
+
+
 class CircuitBreakerState(Enum):
     """Circuit breaker states."""
     CLOSED = "closed"
@@ -188,7 +196,7 @@ class GracefulShutdown:
         self.shutdown_event.set()
         
         # Wait for active connections to complete (with timeout)
-        max_wait = 30  # seconds
+        max_wait = GRACEFUL_SHUTDOWN_TIMEOUT_SECONDS
         start_time = time.time()
         
         while self.active_connections and (time.time() - start_time) < max_wait:
@@ -231,33 +239,34 @@ class ErrorRecovery:
         """Recover session storage."""
         try:
             # Clear corrupted sessions and reinitialize
-            from wazuh_mcp_server.sse_server import session_manager
-            session_manager.sessions.clear()
-            session_manager.token_to_session.clear()
+            from wazuh_mcp_server.server import sessions
+            await sessions.clear()
             logger.info("Session storage recovered")
             return True
-            
+
         except Exception as e:
             logger.error(f"Failed to recover session storage: {e}")
             return False
 
 class BulkheadIsolation:
     """Isolate different components to prevent cascade failures."""
-    
+
     def __init__(self):
         self.resource_pools = {
-            "wazuh_api": asyncio.Semaphore(10),  # Max 10 concurrent Wazuh API calls
-            "sse_connections": asyncio.Semaphore(100),  # Max 100 SSE connections
-            "authentication": asyncio.Semaphore(20),  # Max 20 concurrent auth requests
+            "wazuh_api": asyncio.Semaphore(WAZUH_API_MAX_CONCURRENT),
+            "sse_connections": asyncio.Semaphore(SSE_MAX_CONCURRENT_CONNECTIONS),
+            "authentication": asyncio.Semaphore(AUTH_MAX_CONCURRENT_REQUESTS),
         }
-    
-    async def acquire_resource(self, resource_type: str):
-        """Acquire resource from pool."""
+
+    def get_semaphore(self, resource_type: str) -> asyncio.Semaphore:
+        """Get semaphore for resource type (synchronous, returns semaphore for use in async with)."""
         if resource_type in self.resource_pools:
             return self.resource_pools[resource_type]
         else:
-            # Fallback semaphore
-            return asyncio.Semaphore(5)
+            # Create and cache fallback semaphore to avoid creating new ones each time
+            if resource_type not in self.resource_pools:
+                self.resource_pools[resource_type] = asyncio.Semaphore(FALLBACK_SEMAPHORE_LIMIT)
+            return self.resource_pools[resource_type]
 
 class HealthRecovery:
     """Automatic health recovery mechanisms."""
@@ -285,20 +294,23 @@ class HealthRecovery:
             # Clear caches and force garbage collection
             import gc
             gc.collect()
-            
-            # Clear old sessions
-            from wazuh_mcp_server.sse_server import session_manager
-            expired_sessions = [
-                sid for sid, session in session_manager.sessions.items()
-                if session.is_expired(15)  # Expire sessions older than 15 minutes
-            ]
-            
-            for sid in expired_sessions:
-                session_manager.remove_session(sid)
-                
-            logger.info(f"Memory recovery: cleared {len(expired_sessions)} expired sessions")
+
+            # Clear expired sessions
+            from wazuh_mcp_server.server import sessions
+            expired_count = await sessions.cleanup_expired(timeout_minutes=15)
+
+            # Clear Wazuh client cache if available
+            try:
+                from wazuh_mcp_server.server import get_wazuh_client
+                client = await get_wazuh_client()
+                if hasattr(client, '_cache'):
+                    client._cache.clear()
+            except (ImportError, RuntimeError):
+                pass  # Client may not be initialized yet
+
+            logger.info(f"Memory recovery: cleared {expired_count} expired sessions")
             return True
-            
+
         except Exception as e:
             logger.error(f"Memory recovery failed: {e}")
             return False
@@ -345,7 +357,7 @@ def with_wazuh_resilience(func: Callable) -> Callable:
     @TimeoutManager.with_timeout("http_request")
     @functools.wraps(func)
     async def wrapper(*args, **kwargs):
-        async with bulkhead_isolation.acquire_resource("wazuh_api"):
+        async with bulkhead_isolation.get_semaphore("wazuh_api"):
             return await func(*args, **kwargs)
     return wrapper
 
@@ -355,6 +367,6 @@ def with_auth_resilience(func: Callable) -> Callable:
     @TimeoutManager.with_timeout("authentication")
     @functools.wraps(func)
     async def wrapper(*args, **kwargs):
-        async with bulkhead_isolation.acquire_resource("authentication"):
+        async with bulkhead_isolation.get_semaphore("authentication"):
             return await func(*args, **kwargs)
     return wrapper

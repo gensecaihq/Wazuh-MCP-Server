@@ -10,6 +10,14 @@ Production-ready with Streamable HTTP and legacy SSE transport, authentication, 
 MCP_PROTOCOL_VERSION = "2025-11-25"
 SUPPORTED_PROTOCOL_VERSIONS = ["2025-11-25", "2025-03-26", "2024-11-05"]
 
+# Production Constants
+SESSION_TIMEOUT_MINUTES = 30
+RATE_LIMIT_REQUESTS = 100
+RATE_LIMIT_WINDOW_SECONDS = 60
+CORS_MAX_AGE_SECONDS = 600
+DEFAULT_QUERY_LIMIT = 100
+MAX_QUERY_LIMIT = 1000
+
 import os
 import json
 import asyncio
@@ -19,6 +27,7 @@ import threading
 from typing import Dict, Any, Optional, List, Union
 from datetime import datetime, timezone, timedelta
 from urllib.parse import urlparse
+from contextlib import asynccontextmanager
 import uuid
 
 from fastapi import FastAPI, Request, Response, HTTPException, Header
@@ -31,7 +40,13 @@ from wazuh_mcp_server.config import get_config, WazuhConfig
 from wazuh_mcp_server.api.wazuh_client import WazuhClient
 from wazuh_mcp_server.api.wazuh_indexer import IndexerNotConfiguredError
 from wazuh_mcp_server.auth import create_access_token, verify_token
-from wazuh_mcp_server.security import RateLimiter, validate_input
+from wazuh_mcp_server.security import (
+    RateLimiter, validate_input, ToolValidationError,
+    validate_limit, validate_agent_id, validate_rule_id, validate_time_range,
+    validate_severity, validate_agent_status, validate_timestamp,
+    validate_indicator, validate_indicator_type, validate_report_type,
+    validate_compliance_framework, validate_query, validate_boolean
+)
 from wazuh_mcp_server.monitoring import REQUEST_COUNT, REQUEST_DURATION, ACTIVE_CONNECTIONS
 from wazuh_mcp_server.resilience import GracefulShutdown
 from wazuh_mcp_server.session_store import create_session_store, SessionStore
@@ -147,11 +162,11 @@ class MCPSession:
         self.client_info = {}
         self.authenticated = False
         
-    def update_activity(self):
+    def update_activity(self) -> None:
         """Update last activity timestamp."""
         self.last_activity = datetime.now(timezone.utc)
         
-    def is_expired(self, timeout_minutes: int = 30) -> bool:
+    def is_expired(self, timeout_minutes: int = SESSION_TIMEOUT_MINUTES) -> bool:
         """Check if session is expired."""
         timeout = timedelta(minutes=timeout_minutes)
         return datetime.now(timezone.utc) - self.last_activity > timeout
@@ -201,23 +216,38 @@ class SessionManager:
         """Store session."""
         return await self._store.set(session_id, session.to_dict())
 
+    def _run_sync(self, coro):
+        """Run coroutine synchronously, handling existing event loop safely."""
+        try:
+            # Check if we're in an async context
+            loop = asyncio.get_running_loop()
+            # If we get here, there's a running loop - this is not safe
+            raise RuntimeError(
+                "Synchronous SessionManager methods cannot be called from async context. "
+                "Use async methods like 'await sessions.get()' instead."
+            )
+        except RuntimeError:
+            # No running loop - safe to create one
+            loop = asyncio.new_event_loop()
+            try:
+                return loop.run_until_complete(coro)
+            finally:
+                loop.close()
+
     def __getitem__(self, session_id: str) -> MCPSession:
-        """Synchronous dict-like access (blocks)."""
-        loop = asyncio.get_event_loop()
-        session = loop.run_until_complete(self.get(session_id))
+        """Synchronous dict-like access (blocks). Not for use in async context."""
+        session = self._run_sync(self.get(session_id))
         if session is None:
             raise KeyError(f"Session {session_id} not found")
         return session
 
     def __setitem__(self, session_id: str, session: MCPSession) -> None:
-        """Synchronous dict-like access (blocks)."""
-        loop = asyncio.get_event_loop()
-        loop.run_until_complete(self.set(session_id, session))
+        """Synchronous dict-like access (blocks). Not for use in async context."""
+        self._run_sync(self.set(session_id, session))
 
     def __delitem__(self, session_id: str) -> None:
-        """Synchronous delete (blocks)."""
-        loop = asyncio.get_event_loop()
-        loop.run_until_complete(self.remove(session_id))
+        """Synchronous delete (blocks). Not for use in async context."""
+        self._run_sync(self.remove(session_id))
 
     async def __contains__(self, session_id: str) -> bool:
         """Check if session exists."""
@@ -228,28 +258,27 @@ class SessionManager:
         return await self._store.delete(session_id)
 
     def pop(self, session_id: str, default=None) -> Optional[MCPSession]:
-        """Remove and return session (synchronous, blocks)."""
-        loop = asyncio.get_event_loop()
-        session = loop.run_until_complete(self.get(session_id))
-        if session:
-            loop.run_until_complete(self.remove(session_id))
-            return session
-        return default
+        """Remove and return session (synchronous, blocks). Not for use in async context."""
+        async def _pop():
+            session = await self.get(session_id)
+            if session:
+                await self.remove(session_id)
+                return session
+            return default
+        return self._run_sync(_pop())
 
     async def clear(self) -> bool:
         """Clear all sessions."""
         return await self._store.clear()
 
     def values(self) -> List[MCPSession]:
-        """Get all session values (synchronous, blocks)."""
-        loop = asyncio.get_event_loop()
-        sessions_dict = loop.run_until_complete(self.get_all())
+        """Get all session values (synchronous, blocks). Not for use in async context."""
+        sessions_dict = self._run_sync(self.get_all())
         return list(sessions_dict.values())
 
     def keys(self) -> List[str]:
-        """Get all session keys (synchronous, blocks)."""
-        loop = asyncio.get_event_loop()
-        sessions_dict = loop.run_until_complete(self.get_all())
+        """Get all session keys (synchronous, blocks). Not for use in async context."""
+        sessions_dict = self._run_sync(self.get_all())
         return list(sessions_dict.keys())
 
     async def get_all(self) -> Dict[str, MCPSession]:
@@ -290,13 +319,111 @@ async def get_or_create_session(session_id: Optional[str], origin: Optional[str]
     
     return session
 
+# Lifespan context manager for startup/shutdown events (modern FastAPI pattern)
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Manage application lifecycle with proper startup and shutdown handling."""
+    global _oauth_manager
+
+    # === STARTUP ===
+    logger.info("🚀 Wazuh MCP Server v4.0.6 starting up...")
+    logger.info(f"📡 MCP Protocol: {MCP_PROTOCOL_VERSION}")
+    logger.info(f"🔗 Wazuh Host: {get_config().WAZUH_HOST}")
+    logger.info(f"🌐 CORS Origins: {get_config().ALLOWED_ORIGINS}")
+    logger.info(f"🔐 Auth Mode: {get_config().AUTH_MODE}")
+
+    # Log Indexer configuration status
+    cfg = get_config()
+    if cfg.WAZUH_INDEXER_HOST:
+        logger.info(f"📊 Wazuh Indexer: {cfg.WAZUH_INDEXER_HOST}:{cfg.WAZUH_INDEXER_PORT}")
+    else:
+        logger.warning("⚠️  Wazuh Indexer not configured. Vulnerability tools require Wazuh 4.8.0+")
+        logger.warning("   Set WAZUH_INDEXER_HOST, WAZUH_INDEXER_USER, WAZUH_INDEXER_PASS to enable.")
+
+    # Initialize OAuth if enabled
+    if cfg.is_oauth:
+        try:
+            from wazuh_mcp_server.oauth import init_oauth_manager, create_oauth_router
+            _oauth_manager = init_oauth_manager(cfg)
+            oauth_router = create_oauth_router(_oauth_manager)
+            app.include_router(oauth_router)
+            logger.info("✅ OAuth 2.0 with DCR initialized")
+            logger.info("   OAuth endpoints: /oauth/authorize, /oauth/token, /oauth/register")
+            logger.info("   Discovery: /.well-known/oauth-authorization-server")
+        except Exception as e:
+            logger.error(f"❌ OAuth initialization failed: {e}")
+
+    # Log auth mode status
+    if cfg.is_authless:
+        logger.warning("⚠️  Running in AUTHLESS mode - no authentication required!")
+    elif cfg.is_bearer:
+        logger.info("🔐 Bearer token authentication enabled")
+        # Display auto-generated API key if not configured via environment
+        if not os.getenv("MCP_API_KEY"):
+            from wazuh_mcp_server.auth import auth_manager
+            default_key = auth_manager.get_default_api_key()
+            if default_key:
+                logger.info("=" * 60)
+                logger.info("🔑 AUTO-GENERATED API KEY (save this for client auth):")
+                logger.info(f"   {default_key}")
+                logger.info("   Set MCP_API_KEY environment variable in production")
+                logger.info("=" * 60)
+
+    # Initialize Wazuh client (will be available after yield)
+    logger.info("✅ Server startup complete with high availability features enabled")
+
+    yield  # Server is running
+
+    # === SHUTDOWN ===
+    logger.info("🛑 Wazuh MCP Server initiating graceful shutdown...")
+
+    try:
+        # Initiate graceful shutdown (waits for active connections)
+        await shutdown_manager.initiate_shutdown()
+
+        # Clear and cleanup auth manager
+        from wazuh_mcp_server.auth import auth_manager
+        auth_manager.cleanup_expired()
+        auth_manager.tokens.clear()
+        logger.info("Authentication tokens cleared")
+
+        # Clear sessions with proper cleanup
+        await sessions.clear()
+        logger.info("Sessions cleared")
+
+        # Close Wazuh client to release HTTP connections
+        if wazuh_client and hasattr(wazuh_client, 'close'):
+            await wazuh_client.close()
+            logger.info("Wazuh client closed")
+
+        # Cleanup rate limiter
+        if hasattr(rate_limiter, 'cleanup'):
+            rate_limiter.cleanup()
+
+        # Close connection pools
+        from wazuh_mcp_server.security import connection_pool_manager
+        await connection_pool_manager.close_all()
+        logger.info("Connection pools closed")
+
+        # Force garbage collection
+        import gc
+        gc.collect()
+        logger.info("Garbage collection completed")
+
+    except Exception as e:
+        logger.error(f"Error during shutdown: {e}")
+    finally:
+        logger.info("✅ Graceful shutdown completed")
+
+
 # Initialize FastAPI app for MCP compliance
 app = FastAPI(
     title="Wazuh MCP Server",
     description="MCP-compliant remote server for Wazuh SIEM integration. Supports Streamable HTTP, SSE, OAuth, and authless modes.",
-    version="4.0.5",
+    version="4.0.6",
     docs_url="/docs",
-    openapi_url="/openapi.json"
+    openapi_url="/openapi.json",
+    lifespan=lifespan
 )
 
 # Get configuration
@@ -319,8 +446,17 @@ wazuh_config = WazuhConfig(
 # Initialize Wazuh client
 wazuh_client = WazuhClient(wazuh_config)
 
+
+async def get_wazuh_client() -> WazuhClient:
+    """Get the global Wazuh client instance.
+
+    Used by monitoring health checks to access client state.
+    """
+    return wazuh_client
+
+
 # Initialize rate limiter
-rate_limiter = RateLimiter(max_requests=100, window_seconds=60)
+rate_limiter = RateLimiter(max_requests=RATE_LIMIT_REQUESTS, window_seconds=RATE_LIMIT_WINDOW_SECONDS)
 
 # Initialize graceful shutdown manager
 shutdown_manager = GracefulShutdown()
@@ -348,7 +484,8 @@ def validate_cors_origins(origins_config: str) -> List[str]:
                     parsed = urlparse(origin)
                     if parsed.netloc:
                         origins.append(origin)
-                except Exception:
+                except ValueError as e:
+                    logger.debug(f"Skipping invalid origin '{origin}': {e}")
                     continue
             else:
                 origins.append(origin)
@@ -419,7 +556,7 @@ app.add_middleware(
         "Last-Event-ID"  # SSE reconnection header
     ],  # Specific headers only, no wildcard
     expose_headers=["MCP-Session-Id", "MCP-Protocol-Version", "Content-Type"],
-    max_age=600  # Cache preflight for 10 minutes
+    max_age=CORS_MAX_AGE_SECONDS
 )
 
 # MCP Protocol Error Codes
@@ -435,8 +572,15 @@ MCP_ERRORS = {
 }
 
 def create_error_response(request_id: Optional[Union[str, int]], code: int, message: str, data: Any = None) -> MCPResponse:
-    """Create MCP error response."""
-    error = MCPError(code=code, message=message, data=data)
+    """Create MCP error response with correlation ID for tracing."""
+    from wazuh_mcp_server.monitoring import get_correlation_id
+    # Include correlation ID in error data for request tracing
+    error_data = data if data else {}
+    if isinstance(error_data, dict):
+        error_data = {**error_data, "correlation_id": get_correlation_id()}
+    elif data is None:
+        error_data = {"correlation_id": get_correlation_id()}
+    error = MCPError(code=code, message=message, data=error_data)
     return MCPResponse(id=request_id, error=error.dict())
 
 def create_success_response(request_id: Optional[Union[str, int]], result: Any) -> MCPResponse:
@@ -591,7 +735,7 @@ async def handle_initialize(params: Dict[str, Any], session: MCPSession) -> Dict
     # Server information
     server_info = {
         "name": "Wazuh MCP Server",
-        "version": "4.0.5",
+        "version": "4.0.6",
         "vendor": "GenSec AI",
         "description": "MCP-compliant remote server for Wazuh SIEM integration"
     }
@@ -1342,26 +1486,34 @@ async def handle_tools_list(params: Dict[str, Any], session: MCPSession) -> Dict
     }
 
 async def handle_tools_call(params: Dict[str, Any], session: MCPSession) -> Dict[str, Any]:
-    """Handle tools/call method - All 29 Wazuh Security Tools."""
+    """Handle tools/call method - All 29 Wazuh Security Tools with comprehensive validation."""
     tool_name = params.get("name")
     arguments = params.get("arguments", {})
-    
+
     if not tool_name:
         raise ValueError("Tool name is required")
-    
-    # Validate input
+
+    # Validate tool name
     validate_input(tool_name, max_length=100)
-    
+
+    # Track tool execution for metrics
+    from wazuh_mcp_server.monitoring import record_tool_execution
+    import time as _time
+    _start_time = _time.time()
+    _success = False
+
     try:
         # Alert Management Tools
         if tool_name == "get_wazuh_alerts":
-            limit = arguments.get("limit", 100)
-            rule_id = arguments.get("rule_id")
-            level = arguments.get("level")
-            agent_id = arguments.get("agent_id")
-            timestamp_start = arguments.get("timestamp_start")
-            timestamp_end = arguments.get("timestamp_end")
-            compact = arguments.get("compact", True)
+            # Validate all parameters
+            limit = validate_limit(arguments.get("limit"), max_val=1000)
+            rule_id = validate_rule_id(arguments.get("rule_id"))
+            level = arguments.get("level")  # Free-form (e.g., "12", "10+")
+            agent_id = validate_agent_id(arguments.get("agent_id"))
+            timestamp_start = validate_timestamp(arguments.get("timestamp_start"), param_name="timestamp_start")
+            timestamp_end = validate_timestamp(arguments.get("timestamp_end"), param_name="timestamp_end")
+            compact = validate_boolean(arguments.get("compact"), default=True, param_name="compact")
+
             result = await wazuh_client.get_alerts(
                 limit=limit, rule_id=rule_id, level=level,
                 agent_id=agent_id, timestamp_start=timestamp_start,
@@ -1369,179 +1521,233 @@ async def handle_tools_call(params: Dict[str, Any], session: MCPSession) -> Dict
             )
             if compact:
                 result = _compact_alerts_result(result)
+            _success = True
             return {"content": [{"type": "text", "text": f"Wazuh Alerts:\n{json.dumps(result, indent=2 if not compact else None)}"}]}
-            
+
         elif tool_name == "get_wazuh_alert_summary":
-            time_range = arguments.get("time_range", "24h")
+            time_range = validate_time_range(arguments.get("time_range"))
             group_by = arguments.get("group_by", "rule.level")
             result = await wazuh_client.get_alert_summary(time_range, group_by)
+            _success = True
             return {"content": [{"type": "text", "text": f"Alert Summary:\n{json.dumps(result, indent=2)}"}]}
-            
+
         elif tool_name == "analyze_alert_patterns":
-            time_range = arguments.get("time_range", "24h")
-            min_frequency = arguments.get("min_frequency", 5)
+            time_range = validate_time_range(arguments.get("time_range"))
+            min_frequency = validate_limit(arguments.get("min_frequency"), min_val=1, max_val=1000, param_name="min_frequency")
             result = await wazuh_client.analyze_alert_patterns(time_range, min_frequency)
+            _success = True
             return {"content": [{"type": "text", "text": f"Alert Patterns:\n{json.dumps(result, indent=2)}"}]}
-            
+
         elif tool_name == "search_security_events":
-            query = arguments.get("query")
-            time_range = arguments.get("time_range", "24h")
-            limit = arguments.get("limit", 100)
-            compact = arguments.get("compact", True)
+            query = validate_query(arguments.get("query"), required=True)
+            time_range = validate_time_range(arguments.get("time_range"))
+            limit = validate_limit(arguments.get("limit"), max_val=1000)
+            compact = validate_boolean(arguments.get("compact"), default=True, param_name="compact")
+
             result = await wazuh_client.search_security_events(query, time_range, limit)
             if compact:
                 result = _compact_alerts_result(result)
+            _success = True
             return {"content": [{"type": "text", "text": f"Security Events:\n{json.dumps(result, indent=2 if not compact else None)}"}]}
 
         # Agent Management Tools
         elif tool_name == "get_wazuh_agents":
-            agent_id = arguments.get("agent_id")
-            status = arguments.get("status")
-            limit = arguments.get("limit", 100)
+            agent_id = validate_agent_id(arguments.get("agent_id"))
+            status = validate_agent_status(arguments.get("status"))
+            limit = validate_limit(arguments.get("limit"), max_val=1000)
+
             result = await wazuh_client.get_agents(agent_id=agent_id, status=status, limit=limit)
+            _success = True
             return {"content": [{"type": "text", "text": f"Wazuh Agents:\n{json.dumps(result, indent=2)}"}]}
             
         elif tool_name == "get_wazuh_running_agents":
             result = await wazuh_client.get_running_agents()
+            _success = True
             return {"content": [{"type": "text", "text": f"Running Agents:\n{json.dumps(result, indent=2)}"}]}
-            
+
         elif tool_name == "check_agent_health":
-            agent_id = arguments.get("agent_id")
+            agent_id = validate_agent_id(arguments.get("agent_id"), required=True)
             result = await wazuh_client.check_agent_health(agent_id)
+            _success = True
             return {"content": [{"type": "text", "text": f"Agent Health:\n{json.dumps(result, indent=2)}"}]}
-            
+
         elif tool_name == "get_agent_processes":
-            agent_id = arguments.get("agent_id")
-            limit = arguments.get("limit", 100)
+            agent_id = validate_agent_id(arguments.get("agent_id"), required=True)
+            limit = validate_limit(arguments.get("limit"), max_val=1000)
             result = await wazuh_client.get_agent_processes(agent_id, limit)
+            _success = True
             return {"content": [{"type": "text", "text": f"Agent Processes:\n{json.dumps(result, indent=2)}"}]}
-            
+
         elif tool_name == "get_agent_ports":
-            agent_id = arguments.get("agent_id")
-            limit = arguments.get("limit", 100)
+            agent_id = validate_agent_id(arguments.get("agent_id"), required=True)
+            limit = validate_limit(arguments.get("limit"), max_val=1000)
             result = await wazuh_client.get_agent_ports(agent_id, limit)
+            _success = True
             return {"content": [{"type": "text", "text": f"Agent Ports:\n{json.dumps(result, indent=2)}"}]}
-            
+
         elif tool_name == "get_agent_configuration":
-            agent_id = arguments.get("agent_id")
+            agent_id = validate_agent_id(arguments.get("agent_id"), required=True)
             result = await wazuh_client.get_agent_configuration(agent_id)
+            _success = True
             return {"content": [{"type": "text", "text": f"Agent Configuration:\n{json.dumps(result, indent=2)}"}]}
 
         # Vulnerability Management Tools
         elif tool_name == "get_wazuh_vulnerabilities":
-            agent_id = arguments.get("agent_id")
-            severity = arguments.get("severity")
-            limit = arguments.get("limit", 100)
-            compact = arguments.get("compact", True)
+            agent_id = validate_agent_id(arguments.get("agent_id"))
+            severity = validate_severity(arguments.get("severity"))
+            limit = validate_limit(arguments.get("limit"), max_val=500)
+            compact = validate_boolean(arguments.get("compact"), default=True, param_name="compact")
+
             result = await wazuh_client.get_vulnerabilities(agent_id=agent_id, severity=severity, limit=limit)
             if compact:
                 result = _compact_vulns_result(result)
+            _success = True
             return {"content": [{"type": "text", "text": f"Vulnerabilities:\n{json.dumps(result, indent=2 if not compact else None)}"}]}
-            
+
         elif tool_name == "get_wazuh_critical_vulnerabilities":
-            limit = arguments.get("limit", 50)
-            compact = arguments.get("compact", True)
+            limit = validate_limit(arguments.get("limit"), max_val=500, param_name="limit")
+            compact = validate_boolean(arguments.get("compact"), default=True, param_name="compact")
+
             result = await wazuh_client.get_critical_vulnerabilities(limit)
             if compact:
                 result = _compact_vulns_result(result)
+            _success = True
             return {"content": [{"type": "text", "text": f"Critical Vulnerabilities:\n{json.dumps(result, indent=2 if not compact else None)}"}]}
-            
+
         elif tool_name == "get_wazuh_vulnerability_summary":
-            time_range = arguments.get("time_range", "7d")
+            time_range = validate_time_range(arguments.get("time_range"))
             result = await wazuh_client.get_vulnerability_summary(time_range)
+            _success = True
             return {"content": [{"type": "text", "text": f"Vulnerability Summary:\n{json.dumps(result, indent=2)}"}]}
 
-        # Security Analysis Tools  
+        # Security Analysis Tools
         elif tool_name == "analyze_security_threat":
-            indicator = arguments.get("indicator")
-            indicator_type = arguments.get("indicator_type", "ip")
+            indicator_type = validate_indicator_type(arguments.get("indicator_type"))
+            indicator = validate_indicator(arguments.get("indicator"), indicator_type)
+
             result = await wazuh_client.analyze_security_threat(indicator, indicator_type)
+            _success = True
             return {"content": [{"type": "text", "text": f"Threat Analysis:\n{json.dumps(result, indent=2)}"}]}
-            
+
         elif tool_name == "check_ioc_reputation":
-            indicator = arguments.get("indicator")
-            indicator_type = arguments.get("indicator_type", "ip")
+            indicator_type = validate_indicator_type(arguments.get("indicator_type"))
+            indicator = validate_indicator(arguments.get("indicator"), indicator_type)
+
             result = await wazuh_client.check_ioc_reputation(indicator, indicator_type)
+            _success = True
             return {"content": [{"type": "text", "text": f"IoC Reputation:\n{json.dumps(result, indent=2)}"}]}
-            
+
         elif tool_name == "perform_risk_assessment":
-            agent_id = arguments.get("agent_id")
+            agent_id = validate_agent_id(arguments.get("agent_id"))
             result = await wazuh_client.perform_risk_assessment(agent_id)
+            _success = True
             return {"content": [{"type": "text", "text": f"Risk Assessment:\n{json.dumps(result, indent=2)}"}]}
-            
+
         elif tool_name == "get_top_security_threats":
-            limit = arguments.get("limit", 10)
-            time_range = arguments.get("time_range", "24h")
+            limit = validate_limit(arguments.get("limit"), min_val=1, max_val=50)
+            time_range = validate_time_range(arguments.get("time_range"))
+
             result = await wazuh_client.get_top_security_threats(limit, time_range)
+            _success = True
             return {"content": [{"type": "text", "text": f"Top Security Threats:\n{json.dumps(result, indent=2)}"}]}
-            
+
         elif tool_name == "generate_security_report":
-            report_type = arguments.get("report_type", "daily")
-            include_recommendations = arguments.get("include_recommendations", True)
+            report_type = validate_report_type(arguments.get("report_type"))
+            include_recommendations = validate_boolean(arguments.get("include_recommendations"), default=True, param_name="include_recommendations")
+
             result = await wazuh_client.generate_security_report(report_type, include_recommendations)
+            _success = True
             return {"content": [{"type": "text", "text": f"Security Report:\n{json.dumps(result, indent=2)}"}]}
-            
+
         elif tool_name == "run_compliance_check":
-            framework = arguments.get("framework", "PCI-DSS")
-            agent_id = arguments.get("agent_id")
+            framework = validate_compliance_framework(arguments.get("framework"))
+            agent_id = validate_agent_id(arguments.get("agent_id"))
+
             result = await wazuh_client.run_compliance_check(framework, agent_id)
+            _success = True
             return {"content": [{"type": "text", "text": f"Compliance Check:\n{json.dumps(result, indent=2)}"}]}
 
         # System Monitoring Tools
         elif tool_name == "get_wazuh_statistics":
             result = await wazuh_client.get_wazuh_statistics()
+            _success = True
             return {"content": [{"type": "text", "text": f"Wazuh Statistics:\n{json.dumps(result, indent=2)}"}]}
-            
+
         elif tool_name == "get_wazuh_weekly_stats":
             result = await wazuh_client.get_weekly_stats()
+            _success = True
             return {"content": [{"type": "text", "text": f"Weekly Statistics:\n{json.dumps(result, indent=2)}"}]}
-            
+
         elif tool_name == "get_wazuh_cluster_health":
             result = await wazuh_client.get_cluster_health()
+            _success = True
             return {"content": [{"type": "text", "text": f"Cluster Health:\n{json.dumps(result, indent=2)}"}]}
-            
+
         elif tool_name == "get_wazuh_cluster_nodes":
             result = await wazuh_client.get_cluster_nodes()
+            _success = True
             return {"content": [{"type": "text", "text": f"Cluster Nodes:\n{json.dumps(result, indent=2)}"}]}
-            
+
         elif tool_name == "get_wazuh_rules_summary":
             result = await wazuh_client.get_rules_summary()
+            _success = True
             return {"content": [{"type": "text", "text": f"Rules Summary:\n{json.dumps(result, indent=2)}"}]}
-            
+
         elif tool_name == "get_wazuh_remoted_stats":
             result = await wazuh_client.get_remoted_stats()
+            _success = True
             return {"content": [{"type": "text", "text": f"Remoted Statistics:\n{json.dumps(result, indent=2)}"}]}
-            
+
         elif tool_name == "get_wazuh_log_collector_stats":
             result = await wazuh_client.get_log_collector_stats()
+            _success = True
             return {"content": [{"type": "text", "text": f"Log Collector Statistics:\n{json.dumps(result, indent=2)}"}]}
-            
+
         elif tool_name == "search_wazuh_manager_logs":
-            query = arguments.get("query")
-            limit = arguments.get("limit", 100)
+            query = validate_query(arguments.get("query"), required=True)
+            limit = validate_limit(arguments.get("limit"), max_val=1000)
+
             result = await wazuh_client.search_manager_logs(query, limit)
+            _success = True
             return {"content": [{"type": "text", "text": f"Manager Logs:\n{json.dumps(result, indent=2)}"}]}
-            
+
         elif tool_name == "get_wazuh_manager_error_logs":
-            limit = arguments.get("limit", 100)
+            limit = validate_limit(arguments.get("limit"), max_val=1000)
             result = await wazuh_client.get_manager_error_logs(limit)
+            _success = True
             return {"content": [{"type": "text", "text": f"Manager Error Logs:\n{json.dumps(result, indent=2)}"}]}
-            
+
         elif tool_name == "validate_wazuh_connection":
             result = await wazuh_client.validate_connection()
+            _success = True
             return {"content": [{"type": "text", "text": f"Connection Validation:\n{json.dumps(result, indent=2)}"}]}
 
         else:
-            raise ValueError(f"Unknown tool: {tool_name}")
+            raise ValueError(f"Unknown tool: {tool_name}. Use 'tools/list' to see available tools.")
+
+    except ToolValidationError as e:
+        # Parameter validation errors - provide actionable guidance
+        logger.warning(f"Tool validation error in {tool_name}: {e}")
+        raise ValueError(str(e))
 
     except IndexerNotConfiguredError as e:
         # Provide helpful error for vulnerability tools when indexer is not configured
         logger.warning(f"Indexer not configured for tool {tool_name}: {e}")
         raise ValueError(str(e))
 
+    except ConnectionError as e:
+        # Network/connection errors - provide retry guidance
+        logger.error(f"Connection error in tool {tool_name}: {e}")
+        raise ValueError(f"Connection failed: {str(e)}. Check Wazuh server connectivity and try again.")
+
     except Exception as e:
-        logger.error(f"Tool execution error: {e}")
+        logger.error(f"Tool execution error in {tool_name}: {e}", exc_info=True)
         raise ValueError(f"Tool execution failed: {str(e)}")
+
+    finally:
+        # Record tool execution metrics
+        _duration = _time.time() - _start_time
+        record_tool_execution(tool_name, _duration, _success)
 
 # MCP Method Registry - Full MCP 2025-03-26 Compliance
 MCP_METHODS = {
@@ -1570,9 +1776,16 @@ MCP_METHODS = {
 }
 
 # Notification handlers (don't return responses)
+async def handle_cancelled_notification(params: Dict[str, Any], session: MCPSession) -> None:
+    """Handle notifications/cancelled - acknowledge cancellation request."""
+    request_id = params.get("requestId")
+    reason = params.get("reason", "Unknown")
+    logger.debug(f"Request {request_id} cancelled: {reason}")
+
+
 MCP_NOTIFICATIONS = {
     "notifications/initialized": handle_initialized_notification,
-    "notifications/cancelled": lambda params, session: None,  # Acknowledge cancellation
+    "notifications/cancelled": handle_cancelled_notification,
 }
 
 async def process_mcp_notification(method: str, params: Dict[str, Any], session: MCPSession) -> None:
@@ -1622,7 +1835,15 @@ async def process_mcp_request(request: MCPRequest, session: MCPSession) -> MCPRe
             str(e)
         )
     except Exception as e:
-        logger.error(f"Internal error processing {request.method}: {e}")
+        from wazuh_mcp_server.monitoring import get_correlation_id, structured_logger
+        structured_logger.error(
+            f"Internal error processing {request.method}",
+            exc_info=True,
+            method=request.method,
+            request_id=str(request.id) if request.id else None,
+            error_type=type(e).__name__,
+            error_message=str(e)
+        )
         return create_error_response(
             request.id,
             MCP_ERRORS["INTERNAL_ERROR"],
@@ -1762,7 +1983,7 @@ async def mcp_endpoint(
                             "protocolVersion": "2025-03-26",
                             "serverInfo": {
                                 "name": "Wazuh MCP Server",
-                                "version": "4.0.5"
+                                "version": "4.0.6"
                             },
                             "session": session.to_dict()
                         }
@@ -2275,7 +2496,7 @@ async def health_check():
         return {
             "status": "healthy",
             "timestamp": datetime.now(timezone.utc).isoformat(),
-            "version": "4.0.5",
+            "version": "4.0.6",
             "mcp_protocol_version": MCP_PROTOCOL_VERSION,
             "supported_protocol_versions": SUPPORTED_PROTOCOL_VERSIONS,
             "transport": {
@@ -2343,19 +2564,37 @@ async def oauth_metadata(request: Request):
 # Authentication endpoint for API key validation
 @app.post("/auth/token")
 async def get_auth_token(request: Request):
-    """Get JWT token using API key."""
+    """Get JWT token using API key.
+
+    Accepts API key in request body as JSON: {"api_key": "wazuh_..."}
+    Validates against configured API keys (MCP_API_KEY env var or auto-generated).
+    """
     try:
         body = await request.json()
         api_key = body.get("api_key")
-        
+
         if not api_key:
             raise HTTPException(status_code=400, detail="API key required")
-        
-        # In a real implementation, validate API key against database
-        # For now, accept any key that starts with "wazuh_" 
-        if not api_key.startswith("wazuh_"):
-            raise HTTPException(status_code=401, detail="Invalid API key")
-        
+
+        # Validate API key format
+        if not isinstance(api_key, str) or not api_key.startswith("wazuh_"):
+            raise HTTPException(status_code=401, detail="Invalid API key format")
+
+        # Validate against configured API key
+        # Priority: MCP_API_KEY env var > auto-generated key
+        configured_key = os.getenv("MCP_API_KEY", "")
+
+        if configured_key:
+            # Use constant-time comparison to prevent timing attacks
+            import hmac
+            if not hmac.compare_digest(api_key, configured_key):
+                raise HTTPException(status_code=401, detail="Invalid API key")
+        else:
+            # Fall back to auth_manager validation
+            from wazuh_mcp_server.auth import auth_manager
+            if not auth_manager.validate_api_key(api_key):
+                raise HTTPException(status_code=401, detail="Invalid API key")
+
         # Create JWT token with safe payload (no API key exposure)
         token = create_access_token(
             data={
@@ -2365,114 +2604,20 @@ async def get_auth_token(request: Request):
             },
             secret_key=config.AUTH_SECRET_KEY
         )
-        
+
         return {
             "access_token": token,
             "token_type": "bearer",
             "expires_in": 86400  # 24 hours
         }
-    
+
     except json.JSONDecodeError:
         raise HTTPException(status_code=400, detail="Invalid JSON")
+    except HTTPException:
+        raise  # Re-raise HTTP exceptions as-is
     except Exception as e:
         logger.error(f"Token generation error: {e}")
         raise HTTPException(status_code=500, detail="Internal server error")
-
-# Startup event
-@app.on_event("startup")
-async def startup_event():
-    """Initialize server on startup with graceful shutdown support."""
-    global _oauth_manager
-
-    logger.info("🚀 Wazuh MCP Server v4.0.5 starting up...")
-    logger.info(f"📡 MCP Protocol: {MCP_PROTOCOL_VERSION}")
-    logger.info(f"🔗 Wazuh Host: {config.WAZUH_HOST}")
-    logger.info(f"🌐 CORS Origins: {config.ALLOWED_ORIGINS}")
-    logger.info(f"🔐 Auth Mode: {config.AUTH_MODE}")
-
-    # Log Indexer configuration status
-    if config.WAZUH_INDEXER_HOST:
-        logger.info(f"📊 Wazuh Indexer: {config.WAZUH_INDEXER_HOST}:{config.WAZUH_INDEXER_PORT}")
-    else:
-        logger.warning("⚠️  Wazuh Indexer not configured. Vulnerability tools require Wazuh 4.8.0+")
-        logger.warning("   Set WAZUH_INDEXER_HOST, WAZUH_INDEXER_USER, WAZUH_INDEXER_PASS to enable.")
-
-    # Initialize OAuth if enabled
-    if config.is_oauth:
-        try:
-            from wazuh_mcp_server.oauth import init_oauth_manager, create_oauth_router
-            _oauth_manager = init_oauth_manager(config)
-            oauth_router = create_oauth_router(_oauth_manager)
-            app.include_router(oauth_router)
-            logger.info("✅ OAuth 2.0 with DCR initialized")
-            logger.info(f"   OAuth endpoints: /oauth/authorize, /oauth/token, /oauth/register")
-            logger.info(f"   Discovery: /.well-known/oauth-authorization-server")
-        except Exception as e:
-            logger.error(f"❌ OAuth initialization failed: {e}")
-
-    # Log auth mode status
-    if config.is_authless:
-        logger.warning("⚠️  Running in AUTHLESS mode - no authentication required!")
-    elif config.is_bearer:
-        logger.info("🔐 Bearer token authentication enabled")
-
-    # Initialize Wazuh client
-    try:
-        await wazuh_client.initialize()
-        logger.info("✅ Wazuh client initialized successfully")
-
-        # Register Wazuh client cleanup
-        async def cleanup_wazuh():
-            if hasattr(wazuh_client, 'close'):
-                await wazuh_client.close()
-                logger.info("Wazuh client connections closed")
-
-        shutdown_manager.add_cleanup_task(cleanup_wazuh)
-
-    except Exception as e:
-        logger.warning(f"⚠️  Wazuh client initialization failed: {e}")
-
-    # Test Wazuh connectivity
-    try:
-        await wazuh_client.get_manager_info()
-        logger.info("✅ Wazuh connectivity test passed")
-    except Exception as e:
-        logger.warning(f"⚠️  Wazuh connectivity test failed: {e}")
-
-    logger.info("✅ Server startup complete with high availability features enabled")
-
-@app.on_event("shutdown")
-async def shutdown_event():
-    """Cleanup on server shutdown with graceful resource management."""
-    logger.info("🛑 Wazuh MCP Server initiating graceful shutdown...")
-
-    try:
-        # Initiate graceful shutdown (waits for active connections)
-        await shutdown_manager.initiate_shutdown()
-
-        # Clear and cleanup auth manager
-        from wazuh_mcp_server.auth import auth_manager
-        auth_manager.cleanup_expired()
-        auth_manager.tokens.clear()
-        logger.info("Authentication tokens cleared")
-
-        # Clear sessions with proper cleanup
-        await sessions.clear()
-        logger.info("Sessions cleared")
-
-        # Cleanup rate limiter
-        if hasattr(rate_limiter, 'cleanup'):
-            rate_limiter.cleanup()
-
-        # Force garbage collection
-        import gc
-        gc.collect()
-        logger.info("Garbage collection completed")
-
-    except Exception as e:
-        logger.error(f"Error during shutdown: {e}")
-    finally:
-        logger.info("✅ Graceful shutdown completed")
 
 if __name__ == "__main__":
     import uvicorn

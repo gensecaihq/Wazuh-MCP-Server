@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "wazuh-mcp-server"
-version = "4.0.3"
+version = "4.0.6"
 description = "Production-grade MCP remote server for Wazuh SIEM integration with SSE transport"
 readme = "README.md"
 license = {text = "MIT"}
@@ -25,11 +25,12 @@ classifiers = [
 ]
 requires-python = ">=3.13"
 dependencies = [
-    "fastmcp>=2.11.0",
-    "httpx>=0.28.0",
-    "pydantic>=2.10.0",
+    "fastmcp>=2.14.0",
+    "httpx>=0.28.1",
+    "pydantic>=2.12.0",
     "python-dotenv>=1.0.0",
-    "uvicorn>=0.32.0",
+    "uvicorn>=0.40.0",
+    "cryptography>=46.0.5",
 ]
 
 [project.optional-dependencies]
