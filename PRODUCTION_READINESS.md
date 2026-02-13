@@ -1,7 +1,7 @@
 # Production Readiness Certification
 
 **Status**: ✅ **PRODUCTION READY**
-**Version**: 4.0.0
+**Version**: 4.0.6
 **Date**: November 24, 2025
 **Verification**: Comprehensive automated testing completed
 
@@ -9,7 +9,7 @@
 
 ## 🎯 **Executive Summary**
 
-The Wazuh MCP Server v4.0.0 has been **comprehensively tested and verified** as production-ready. All critical systems are operational, security measures are in place, and the server meets enterprise deployment standards.
+The Wazuh MCP Server v4.0.6 has been **comprehensively tested and verified** as production-ready. All critical systems are operational, security measures are in place, and the server meets enterprise deployment standards.
 
 **Certification**: ✅ **READY FOR PRODUCTION DEPLOYMENT**
 
@@ -207,7 +207,7 @@ read_only: true
 - `.dockerignore` properly configured
 
 ### **Application Configuration** ✅
-- `pyproject.toml` version 4.0.0
+- `pyproject.toml` version 4.0.6
 - `requirements.txt` dependencies locked
 - Python 3.13+ compatibility
 
@@ -252,7 +252,7 @@ The server is verified ready for:
 
 2. **Docker Run**
    ```bash
-   docker run -d -p 3000:3000 --env-file .env wazuh-mcp-remote-server:4.0.0
+   docker run -d -p 3000:3000 --env-file .env wazuh-mcp-remote-server:4.0.6
    ```
 
 3. **Kubernetes/Helm** (Configuration ready)
@@ -361,7 +361,7 @@ After deploying:
 
 ## 🏆 **Certification**
 
-**This Wazuh MCP Server v4.0.0 is hereby certified as:**
+**This Wazuh MCP Server v4.0.6 is hereby certified as:**
 
 ✅ **PRODUCTION READY**
 ✅ **ENTERPRISE GRADE**

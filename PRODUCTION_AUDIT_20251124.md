@@ -1,6 +1,6 @@
 # Production-Grade Audit Report
 **Date**: $(date +"%Y-%m-%d %H:%M:%S")
-**Version**: 4.0.0
+**Version**: 4.0.6
 **Branch**: main
 **Commit**: $(git rev-parse --short HEAD)
 
@@ -444,7 +444,7 @@ Utilities:
 
 ### Certification Statement
 
-> This Wazuh MCP Remote Server v4.0.0 has been comprehensively audited and is **CERTIFIED PRODUCTION-READY** for enterprise deployment.
+> This Wazuh MCP Remote Server v4.0.6 has been comprehensively audited and is **CERTIFIED PRODUCTION-READY** for enterprise deployment.
 >
 > The server implements production-grade High Availability with circuit breakers, retry logic, and graceful shutdown. It supports serverless architectures with pluggable session storage (Redis/in-memory).
 >

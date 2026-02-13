@@ -1,4 +1,4 @@
-# Wazuh MCP Remote Server v4.0.5
+# Wazuh MCP Remote Server v4.0.6
 
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
