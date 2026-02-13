@@ -27,6 +27,21 @@ Claude: [Uses get_wazuh_critical_vulnerabilities tool] 3 agents affected...
 
 ---
 
+## Works With
+
+### [Wazuh OpenClaw Autopilot](https://github.com/gensecaihq/Wazuh-Openclaw-Autopilot)
+
+Transform your Wazuh deployment into an **autonomous SOC** powered by this MCP server:
+
+- **Automatic Alert Triage** - AI agents analyze high/critical alerts and create structured incident cases
+- **Incident Correlation** - Groups related alerts into timelines with blast radius assessment
+- **Response Planning** - Generates response recommendations with risk scoring
+- **Human-in-the-Loop** - Routes risky actions to Slack for approval before execution
+
+> OpenClaw uses this MCP server as its interface to Wazuh, enabling autonomous security operations while maintaining human oversight.
+
+---
+
 ## Features
 
 | Category | Capabilities |
