@@ -35,7 +35,8 @@ class WazuhIndexerClient:
         verify_ssl: bool = True,
         timeout: int = 30
     ):
-        self.host = host
+        # Normalize host (strip protocol if user included it)
+        self.host = self._normalize_host(host)
         self.port = port
         self.username = username
         self.password = password
@@ -43,6 +44,17 @@ class WazuhIndexerClient:
         self.timeout = timeout
         self.client: Optional[httpx.AsyncClient] = None
         self._initialized = False
+
+    @staticmethod
+    def _normalize_host(host: str) -> str:
+        """Strip protocol prefix from host if present."""
+        if not host:
+            return host
+        for prefix in ('https://', 'http://'):
+            if host.lower().startswith(prefix):
+                host = host[len(prefix):]
+                break
+        return host.rstrip('/')
 
     @property
     def base_url(self) -> str:

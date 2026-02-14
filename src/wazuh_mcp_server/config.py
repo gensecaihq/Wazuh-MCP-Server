@@ -37,6 +37,27 @@ def validate_positive_int(value: str, name: str, max_val: Optional[int] = None) 
         raise ConfigurationError(f"{name} must be a valid integer, got '{value}'")
 
 
+def normalize_host(host: str) -> str:
+    """
+    Normalize hostname by stripping protocol prefix if present.
+
+    Handles common user mistakes like including https:// in WAZUH_HOST.
+    Examples:
+        'https://192.168.1.100' -> '192.168.1.100'
+        'http://wazuh.local' -> 'wazuh.local'
+        '192.168.1.100' -> '192.168.1.100'
+    """
+    if not host:
+        return host
+    # Strip protocol prefixes
+    for prefix in ('https://', 'http://'):
+        if host.lower().startswith(prefix):
+            host = host[len(prefix):]
+            break
+    # Strip trailing slashes
+    return host.rstrip('/')
+
+
 @dataclass
 class WazuhConfig:
     """Wazuh configuration settings."""
@@ -104,14 +125,19 @@ class WazuhConfig:
         port = int(os.getenv("WAZUH_PORT", "55000"))
         verify_ssl = os.getenv("VERIFY_SSL", "true").lower() == "true"
         
+        # Normalize host values (strip protocol if user included it)
+        normalized_host = normalize_host(host)
+        indexer_host = os.getenv("WAZUH_INDEXER_HOST")
+        normalized_indexer_host = normalize_host(indexer_host) if indexer_host else None
+
         # Create config with defaults for most settings
         config = cls(
-            wazuh_host=host,
+            wazuh_host=normalized_host,
             wazuh_user=user,
             wazuh_pass=password,
             wazuh_port=port,
             verify_ssl=verify_ssl,
-            wazuh_indexer_host=os.getenv("WAZUH_INDEXER_HOST"),
+            wazuh_indexer_host=normalized_indexer_host,
             wazuh_indexer_port=int(os.getenv("WAZUH_INDEXER_PORT", "9200")),
             wazuh_indexer_user=os.getenv("WAZUH_INDEXER_USER"),
             wazuh_indexer_pass=os.getenv("WAZUH_INDEXER_PASS"),
@@ -213,14 +239,14 @@ class ServerConfig:
                 os.getenv("OAUTH_AUTHORIZATION_CODE_TTL", "600"), "OAUTH_AUTHORIZATION_CODE_TTL"
             ),
             ALLOWED_ORIGINS=os.getenv("ALLOWED_ORIGINS", "https://claude.ai,http://localhost:*"),
-            WAZUH_HOST=os.getenv("WAZUH_HOST", ""),
+            WAZUH_HOST=normalize_host(os.getenv("WAZUH_HOST", "")),
             WAZUH_USER=os.getenv("WAZUH_USER", ""),
             WAZUH_PASS=os.getenv("WAZUH_PASS", ""),
             WAZUH_PORT=validate_port(os.getenv("WAZUH_PORT", "55000"), "WAZUH_PORT"),
             WAZUH_VERIFY_SSL=os.getenv("WAZUH_VERIFY_SSL", "false").lower() == "true",
             WAZUH_ALLOW_SELF_SIGNED=os.getenv("WAZUH_ALLOW_SELF_SIGNED", "true").lower() == "true",
             # Wazuh Indexer settings (for vulnerability tools in Wazuh 4.8.0+)
-            WAZUH_INDEXER_HOST=os.getenv("WAZUH_INDEXER_HOST", ""),
+            WAZUH_INDEXER_HOST=normalize_host(os.getenv("WAZUH_INDEXER_HOST", "")),
             WAZUH_INDEXER_PORT=validate_port(
                 os.getenv("WAZUH_INDEXER_PORT", "9200"), "WAZUH_INDEXER_PORT"
             ),
