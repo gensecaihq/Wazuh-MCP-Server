@@ -25,15 +25,32 @@ classifiers = [
 ]
 requires-python = ">=3.13"
 dependencies = [
+    # Core Framework
     "fastmcp>=2.14.0",
+    "fastapi>=0.128.0",
+    "uvicorn[standard]>=0.40.0",
+    # HTTP & Data
     "httpx>=0.28.1",
     "pydantic>=2.12.0",
-    "python-dotenv>=1.0.0",
-    "uvicorn>=0.40.0",
+    # Security & Auth
+    "python-jose[cryptography]>=3.5.0",
+    "passlib[bcrypt]>=1.7.4",
     "cryptography>=46.0.5",
+    "python-multipart>=0.0.9",
+    # Monitoring
+    "prometheus-client>=0.24.0",
+    "psutil>=6.0.0",
+    # Resilience
+    "tenacity>=9.0.0",
+    # Utilities
+    "python-dotenv>=1.0.0",
+    "aiofiles>=24.0.0",
 ]
 
 [project.optional-dependencies]
+redis = [
+    "redis>=7.0.0",
+]
 dev = [
     "pytest>=7.0.0",
     "pytest-asyncio>=0.21.0",
