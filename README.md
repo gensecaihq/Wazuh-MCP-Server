@@ -27,18 +27,29 @@ Claude: [Uses get_wazuh_critical_vulnerabilities tool] 3 agents affected...
 
 ---
 
-## Works With
+## Take It Further: Autonomous Agentic SOC
 
-### [Wazuh OpenClaw Autopilot](https://github.com/gensecaihq/Wazuh-Openclaw-Autopilot)
+**Ready to move beyond manual security operations?**
 
-Transform your Wazuh deployment into an **autonomous SOC** powered by this MCP server:
+Combine this MCP server with [**Wazuh OpenClaw Autopilot**](https://github.com/gensecaihq/Wazuh-Openclaw-Autopilot) to build a fully autonomous Security Operations Center powered by AI agents.
 
-- **Automatic Alert Triage** - AI agents analyze high/critical alerts and create structured incident cases
-- **Incident Correlation** - Groups related alerts into timelines with blast radius assessment
-- **Response Planning** - Generates response recommendations with risk scoring
-- **Human-in-the-Loop** - Routes risky actions to Slack for approval before execution
+While this MCP server gives you conversational access to Wazuh, OpenClaw takes it to the next level—deploying AI agents that **work around the clock** to triage alerts, correlate incidents, and recommend responses without human intervention.
 
-> OpenClaw uses this MCP server as its interface to Wazuh, enabling autonomous security operations while maintaining human oversight.
+| Capability | What It Does |
+|------------|--------------|
+| **Autonomous Alert Triage** | AI agents continuously analyze incoming alerts, prioritize threats, and create structured incident cases |
+| **Intelligent Correlation** | Automatically groups related alerts into attack timelines with blast radius assessment |
+| **AI-Powered Response Planning** | Generates actionable response recommendations with risk scoring |
+| **Human-in-the-Loop Safety** | Critical actions require Slack approval—automation with guardrails |
+
+```
+Traditional SOC: Alert → Analyst reviews → Hours later → Response
+Agentic SOC:     Alert → AI triages → Seconds later → Response ready for approval
+```
+
+**This is the future of security operations.** Start with the MCP server, scale to autonomous agents.
+
+[**Explore OpenClaw Autopilot →**](https://github.com/gensecaihq/Wazuh-Openclaw-Autopilot)
 
 ---
 
