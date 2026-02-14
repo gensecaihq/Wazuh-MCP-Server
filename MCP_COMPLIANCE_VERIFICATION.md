@@ -23,7 +23,7 @@ This document verifies that the Wazuh MCP Remote Server fully complies with the 
 | **POST method support** | ✅ COMPLIANT | JSON-RPC requests via POST |
 | **GET method support (SSE only)** | ✅ COMPLIANT | Returns 405 without SSE Accept header (per spec) |
 | **DELETE method support** | ✅ COMPLIANT | Session termination via DELETE |
-| **MCP-Protocol-Version header** | ✅ COMPLIANT | Validates 2025-11-25, 2025-03-26, 2024-11-05; returns 400 for invalid |
+| **MCP-Protocol-Version header** | ✅ COMPLIANT | Validates 2025-11-25, 2025-06-18, 2025-03-26, 2024-11-05; returns 400 for invalid |
 | **Accept header handling** | ✅ COMPLIANT | Supports both `application/json` and `text/event-stream` |
 | **Dynamic response format** | ✅ COMPLIANT | JSON or SSE based on Accept header |
 | **MCP-Session-Id header** | ✅ COMPLIANT | Full session management with proper casing |
@@ -59,7 +59,7 @@ This document verifies that the Wazuh MCP Remote Server fully complies with the 
 | Requirement | Status | Implementation |
 |-------------|--------|----------------|
 | **Version header support** | ✅ COMPLIANT | `MCP-Protocol-Version` header parsed |
-| **Multiple version support** | ✅ COMPLIANT | 2025-11-25, 2025-03-26, 2024-11-05 |
+| **Multiple version support** | ✅ COMPLIANT | 2025-11-25, 2025-06-18, 2025-03-26, 2024-11-05 |
 | **Default version fallback** | ✅ COMPLIANT | Defaults to 2025-03-26 if no header (per spec) |
 | **Strict version validation** | ✅ COMPLIANT | Returns HTTP 400 for unsupported versions |
 | **Version validation** | ✅ COMPLIANT | `validate_protocol_version()` function with strict mode |
@@ -338,7 +338,7 @@ The Wazuh MCP Remote Server implementation **100% complies** with the latest MCP
 This implementation is **immediately ready** for production use and supports:
 
 - ✅ **Latest MCP Clients** (2025-11-25 protocol)
-- ✅ **Legacy MCP Clients** (backwards compatible with 2025-03-26, 2024-11-05)
+- ✅ **Legacy MCP Clients** (backwards compatible with 2025-06-18, 2025-03-26, 2024-11-05)
 - ✅ **Enterprise Security Standards**
 - ✅ **Scalable Architecture**
 - ✅ **Modern Cloud Deployments**
