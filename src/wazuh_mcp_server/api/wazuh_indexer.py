@@ -10,8 +10,10 @@ index directly.
 """
 
 import logging
-from typing import Dict, Any, Optional
+from typing import Any, Dict, Optional
+
 import httpx
+from tenacity import retry, retry_if_exception_type, stop_after_attempt, wait_exponential
 
 logger = logging.getLogger(__name__)
 
@@ -33,7 +35,7 @@ class WazuhIndexerClient:
         username: Optional[str] = None,
         password: Optional[str] = None,
         verify_ssl: bool = True,
-        timeout: int = 30
+        timeout: int = 30,
     ):
         # Normalize host (strip protocol if user included it)
         self.host = self._normalize_host(host)
@@ -50,11 +52,11 @@ class WazuhIndexerClient:
         """Strip protocol prefix from host if present."""
         if not host:
             return host
-        for prefix in ('https://', 'http://'):
+        for prefix in ("https://", "http://"):
             if host.lower().startswith(prefix):
-                host = host[len(prefix):]
+                host = host[len(prefix) :]
                 break
-        return host.rstrip('/')
+        return host.rstrip("/")
 
     @property
     def base_url(self) -> str:
@@ -67,11 +69,7 @@ class WazuhIndexerClient:
         if self.username and self.password:
             auth = (self.username, self.password)
 
-        self.client = httpx.AsyncClient(
-            verify=self.verify_ssl,
-            timeout=self.timeout,
-            auth=auth
-        )
+        self.client = httpx.AsyncClient(verify=self.verify_ssl, timeout=self.timeout, auth=auth)
         self._initialized = True
         logger.info(f"WazuhIndexerClient initialized for {self.host}:{self.port}")
 
@@ -86,6 +84,12 @@ class WazuhIndexerClient:
         if not self._initialized:
             await self.initialize()
 
+    @retry(
+        stop=stop_after_attempt(3),
+        wait=wait_exponential(multiplier=1, min=1, max=10),
+        retry=retry_if_exception_type((httpx.RequestError, httpx.HTTPStatusError)),
+        reraise=True,
+    )
     async def _search(self, index: str, query: Dict[str, Any], size: int = 100) -> Dict[str, Any]:
         """
         Execute a search query against the Wazuh Indexer.
@@ -101,17 +105,10 @@ class WazuhIndexerClient:
         await self._ensure_initialized()
 
         url = f"{self.base_url}/{index}/_search"
-        body = {
-            "query": query,
-            "size": size
-        }
+        body = {"query": query, "size": size}
 
         try:
-            response = await self.client.post(
-                url,
-                json=body,
-                headers={"Content-Type": "application/json"}
-            )
+            response = await self.client.post(url, json=body, headers={"Content-Type": "application/json"})
             response.raise_for_status()
             return response.json()
 
@@ -128,7 +125,7 @@ class WazuhIndexerClient:
         agent_id: Optional[str] = None,
         severity: Optional[str] = None,
         cve_id: Optional[str] = None,
-        limit: int = 100
+        limit: int = 100,
     ) -> Dict[str, Any]:
         """
         Get vulnerabilities from the Wazuh Indexer.
@@ -170,31 +167,33 @@ class WazuhIndexerClient:
 
         for hit in hits.get("hits", []):
             source = hit.get("_source", {})
-            vulnerabilities.append({
-                "id": source.get("vulnerability", {}).get("id"),
-                "severity": source.get("vulnerability", {}).get("severity"),
-                "description": source.get("vulnerability", {}).get("description"),
-                "reference": source.get("vulnerability", {}).get("reference"),
-                "status": source.get("vulnerability", {}).get("status"),
-                "detected_at": source.get("vulnerability", {}).get("detected_at"),
-                "published_at": source.get("vulnerability", {}).get("published_at"),
-                "agent": {
-                    "id": source.get("agent", {}).get("id"),
-                    "name": source.get("agent", {}).get("name"),
-                },
-                "package": {
-                    "name": source.get("package", {}).get("name"),
-                    "version": source.get("package", {}).get("version"),
-                    "architecture": source.get("package", {}).get("architecture"),
+            vulnerabilities.append(
+                {
+                    "id": source.get("vulnerability", {}).get("id"),
+                    "severity": source.get("vulnerability", {}).get("severity"),
+                    "description": source.get("vulnerability", {}).get("description"),
+                    "reference": source.get("vulnerability", {}).get("reference"),
+                    "status": source.get("vulnerability", {}).get("status"),
+                    "detected_at": source.get("vulnerability", {}).get("detected_at"),
+                    "published_at": source.get("vulnerability", {}).get("published_at"),
+                    "agent": {
+                        "id": source.get("agent", {}).get("id"),
+                        "name": source.get("agent", {}).get("name"),
+                    },
+                    "package": {
+                        "name": source.get("package", {}).get("name"),
+                        "version": source.get("package", {}).get("version"),
+                        "architecture": source.get("package", {}).get("architecture"),
+                    },
                 }
-            })
+            )
 
         return {
             "data": {
                 "affected_items": vulnerabilities,
                 "total_affected_items": hits.get("total", {}).get("value", len(vulnerabilities)),
                 "total_failed_items": 0,
-                "failed_items": []
+                "failed_items": [],
             }
         }
 
@@ -224,31 +223,14 @@ class WazuhIndexerClient:
         body = {
             "size": 0,
             "aggs": {
-                "by_severity": {
-                    "terms": {
-                        "field": "vulnerability.severity",
-                        "size": 10
-                    }
-                },
-                "by_agent": {
-                    "cardinality": {
-                        "field": "agent.id"
-                    }
-                },
-                "total_vulnerabilities": {
-                    "value_count": {
-                        "field": "vulnerability.id"
-                    }
-                }
-            }
+                "by_severity": {"terms": {"field": "vulnerability.severity", "size": 10}},
+                "by_agent": {"cardinality": {"field": "agent.id"}},
+                "total_vulnerabilities": {"value_count": {"field": "vulnerability.id"}},
+            },
         }
 
         try:
-            response = await self.client.post(
-                url,
-                json=body,
-                headers={"Content-Type": "application/json"}
-            )
+            response = await self.client.post(url, json=body, headers={"Content-Type": "application/json"})
             response.raise_for_status()
             result = response.json()
 
@@ -268,7 +250,7 @@ class WazuhIndexerClient:
                     "critical": severity_counts.get("Critical", 0),
                     "high": severity_counts.get("High", 0),
                     "medium": severity_counts.get("Medium", 0),
-                    "low": severity_counts.get("Low", 0)
+                    "low": severity_counts.get("Low", 0),
                 }
             }
 
@@ -296,14 +278,11 @@ class WazuhIndexerClient:
                 "status": health.get("status"),
                 "cluster_name": health.get("cluster_name"),
                 "number_of_nodes": health.get("number_of_nodes"),
-                "active_shards": health.get("active_shards")
+                "active_shards": health.get("active_shards"),
             }
 
         except Exception as e:
-            return {
-                "status": "unavailable",
-                "error": str(e)
-            }
+            return {"status": "unavailable", "error": str(e)}
 
 
 class IndexerNotConfiguredError(Exception):

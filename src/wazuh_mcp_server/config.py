@@ -1,13 +1,13 @@
 """Configuration management for Wazuh MCP Server."""
 
 import os
-import re
 from dataclasses import dataclass
 from typing import Optional
 
 
 class ConfigurationError(Exception):
     """Raised when configuration is invalid."""
+
     pass
 
 
@@ -16,9 +16,7 @@ def validate_port(value: str, name: str) -> int:
     try:
         port = int(value)
         if not (1 <= port <= 65535):
-            raise ConfigurationError(
-                f"{name} must be between 1 and 65535, got {port}"
-            )
+            raise ConfigurationError(f"{name} must be between 1 and 65535, got {port}")
         return port
     except ValueError:
         raise ConfigurationError(f"{name} must be a valid integer, got '{value}'")
@@ -50,64 +48,65 @@ def normalize_host(host: str) -> str:
     if not host:
         return host
     # Strip protocol prefixes
-    for prefix in ('https://', 'http://'):
+    for prefix in ("https://", "http://"):
         if host.lower().startswith(prefix):
-            host = host[len(prefix):]
+            host = host[len(prefix) :]
             break
     # Strip trailing slashes
-    return host.rstrip('/')
+    return host.rstrip("/")
 
 
 @dataclass
 class WazuhConfig:
     """Wazuh configuration settings."""
-    
+
     # Required settings
     wazuh_host: str
     wazuh_user: str
     wazuh_pass: str
-    
+
     # Optional settings with sensible defaults
     wazuh_port: int = 55000
     verify_ssl: bool = True
-    
+
     # Indexer settings (optional)
     wazuh_indexer_host: Optional[str] = None
     wazuh_indexer_port: int = 9200
     wazuh_indexer_user: Optional[str] = None
     wazuh_indexer_pass: Optional[str] = None
-    
+
     # Transport settings
     mcp_transport: str = "http"  # Default to HTTP/SSE mode
     mcp_host: str = "0.0.0.0"
     mcp_port: int = 3000
-    
+
     # Advanced settings (rarely need to change)
     request_timeout_seconds: int = 30
     max_alerts_per_query: int = 1000
     max_connections: int = 10
-    
+
     @classmethod
-    def from_env(cls) -> 'WazuhConfig':
+    def from_env(cls) -> "WazuhConfig":
         """Create configuration from environment variables."""
         # Load from config file if exists
         config_file = "./config/wazuh.env"
         if os.path.exists(config_file):
             from dotenv import load_dotenv
+
             load_dotenv(config_file)
-        
+
         # Required settings
         host = os.getenv("WAZUH_HOST")
         user = os.getenv("WAZUH_USER")
         password = os.getenv("WAZUH_PASS")
-        
+
         if not all([host, user, password]):
             raise ConfigurationError(
                 "Missing required Wazuh settings.\n"
                 "Please run: ./scripts/configure.sh\n"
                 "Or set: WAZUH_HOST, WAZUH_USER, WAZUH_PASS"
             )
-        
+
         # Helper function for safe integer conversion
         def safe_int_env(key: str, default: str, min_val: int = 1, max_val: int = None) -> int:
             try:
@@ -120,11 +119,11 @@ class WazuhConfig:
                 return value
             except (ValueError, TypeError) as e:
                 raise ConfigurationError(f"Invalid {key} value '{os.getenv(key)}': {e}")
-        
-        # Parse optional settings with simpler approach
-        port = int(os.getenv("WAZUH_PORT", "55000"))
+
+        # Parse optional settings with validation
+        port = safe_int_env("WAZUH_PORT", "55000", min_val=1, max_val=65535)
         verify_ssl = os.getenv("VERIFY_SSL", "true").lower() == "true"
-        
+
         # Normalize host values (strip protocol if user included it)
         normalized_host = normalize_host(host)
         indexer_host = os.getenv("WAZUH_INDEXER_HOST")
@@ -138,19 +137,19 @@ class WazuhConfig:
             wazuh_port=port,
             verify_ssl=verify_ssl,
             wazuh_indexer_host=normalized_indexer_host,
-            wazuh_indexer_port=int(os.getenv("WAZUH_INDEXER_PORT", "9200")),
+            wazuh_indexer_port=safe_int_env("WAZUH_INDEXER_PORT", "9200", min_val=1, max_val=65535),
             wazuh_indexer_user=os.getenv("WAZUH_INDEXER_USER"),
             wazuh_indexer_pass=os.getenv("WAZUH_INDEXER_PASS"),
             mcp_transport=os.getenv("MCP_TRANSPORT", "http"),  # Default to HTTP/SSE
             mcp_host=os.getenv("MCP_HOST", "0.0.0.0"),
-            mcp_port=int(os.getenv("MCP_PORT", "3000")),
-            request_timeout_seconds=int(os.getenv("REQUEST_TIMEOUT_SECONDS", "30")),
-            max_alerts_per_query=int(os.getenv("MAX_ALERTS_PER_QUERY", "1000")),
-            max_connections=int(os.getenv("MAX_CONNECTIONS", "10"))
+            mcp_port=safe_int_env("MCP_PORT", "3000", min_val=1, max_val=65535),
+            request_timeout_seconds=safe_int_env("REQUEST_TIMEOUT_SECONDS", "30", min_val=1, max_val=300),
+            max_alerts_per_query=safe_int_env("MAX_ALERTS_PER_QUERY", "1000", min_val=1, max_val=10000),
+            max_connections=safe_int_env("MAX_CONNECTIONS", "10", min_val=1, max_val=100),
         )
-        
+
         return config
-    
+
     @property
     def base_url(self) -> str:
         """Get the base URL for Wazuh API."""
@@ -160,6 +159,7 @@ class WazuhConfig:
 @dataclass
 class ServerConfig:
     """Server configuration for MCP Server."""
+
     # MCP Server settings
     MCP_HOST: str = "0.0.0.0"
     MCP_PORT: int = 3000
@@ -186,7 +186,7 @@ class ServerConfig:
     WAZUH_USER: str = ""
     WAZUH_PASS: str = ""
     WAZUH_PORT: int = 55000
-    WAZUH_VERIFY_SSL: bool = False
+    WAZUH_VERIFY_SSL: bool = True
     WAZUH_ALLOW_SELF_SIGNED: bool = True
 
     # Wazuh Indexer settings (Required for Wazuh 4.8.0+ vulnerability tools)
@@ -194,13 +194,13 @@ class ServerConfig:
     WAZUH_INDEXER_PORT: int = 9200
     WAZUH_INDEXER_USER: str = ""
     WAZUH_INDEXER_PASS: str = ""
-    WAZUH_INDEXER_VERIFY_SSL: bool = False
+    WAZUH_INDEXER_VERIFY_SSL: bool = True
 
     # Logging
     LOG_LEVEL: str = "INFO"
 
     @classmethod
-    def from_env(cls) -> 'ServerConfig':
+    def from_env(cls) -> "ServerConfig":
         """Create configuration from environment variables with validation."""
         import secrets
 
@@ -243,17 +243,15 @@ class ServerConfig:
             WAZUH_USER=os.getenv("WAZUH_USER", ""),
             WAZUH_PASS=os.getenv("WAZUH_PASS", ""),
             WAZUH_PORT=validate_port(os.getenv("WAZUH_PORT", "55000"), "WAZUH_PORT"),
-            WAZUH_VERIFY_SSL=os.getenv("WAZUH_VERIFY_SSL", "false").lower() == "true",
+            WAZUH_VERIFY_SSL=os.getenv("WAZUH_VERIFY_SSL", "true").lower() == "true",
             WAZUH_ALLOW_SELF_SIGNED=os.getenv("WAZUH_ALLOW_SELF_SIGNED", "true").lower() == "true",
             # Wazuh Indexer settings (for vulnerability tools in Wazuh 4.8.0+)
             WAZUH_INDEXER_HOST=normalize_host(os.getenv("WAZUH_INDEXER_HOST", "")),
-            WAZUH_INDEXER_PORT=validate_port(
-                os.getenv("WAZUH_INDEXER_PORT", "9200"), "WAZUH_INDEXER_PORT"
-            ),
+            WAZUH_INDEXER_PORT=validate_port(os.getenv("WAZUH_INDEXER_PORT", "9200"), "WAZUH_INDEXER_PORT"),
             WAZUH_INDEXER_USER=os.getenv("WAZUH_INDEXER_USER", ""),
             WAZUH_INDEXER_PASS=os.getenv("WAZUH_INDEXER_PASS", ""),
-            WAZUH_INDEXER_VERIFY_SSL=os.getenv("WAZUH_INDEXER_VERIFY_SSL", "false").lower() == "true",
-            LOG_LEVEL=log_level
+            WAZUH_INDEXER_VERIFY_SSL=os.getenv("WAZUH_INDEXER_VERIFY_SSL", "true").lower() == "true",
+            LOG_LEVEL=log_level,
         )
 
     @property

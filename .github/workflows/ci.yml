@@ -25,13 +25,13 @@ jobs:
         pip install ruff black isort mypy
 
     - name: Check formatting with black
-      run: black --check --diff src/ tests/ || true
+      run: black --check --diff src/ tests/
 
     - name: Check imports with isort
-      run: isort --check-only --diff src/ tests/ || true
+      run: isort --check-only --diff src/ tests/
 
     - name: Lint with ruff
-      run: ruff check src/ || true
+      run: ruff check src/
 
   test:
     name: Test
@@ -53,7 +53,7 @@ jobs:
 
     - name: Run tests
       run: |
-        pytest tests/ -v --cov=src/wazuh_mcp_server --cov-report=xml || true
+        pytest tests/ -v --cov=src/wazuh_mcp_server --cov-report=xml
 
     - name: Upload coverage
       uses: codecov/codecov-action@v4

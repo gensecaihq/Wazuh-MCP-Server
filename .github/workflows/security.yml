@@ -100,7 +100,7 @@ jobs:
   docker-security:
     name: Docker Security Scan
     runs-on: ubuntu-latest
-    if: github.ref == 'refs/heads/mcp-remote'
+    if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/mcp-remote'
     
     steps:
     - uses: actions/checkout@v4

@@ -120,7 +120,7 @@ build_and_deploy() {
     
     # Set build metadata
     export BUILD_DATE=$(date -u +'%Y-%m-%dT%H:%M:%SZ')
-    export VERSION=${VERSION:-4.0.0}
+    export VERSION=${VERSION:-4.0.6}
     export PYTHON_VERSION=${PYTHON_VERSION:-3.13}
     
     # Build with Docker Compose v2 latest features

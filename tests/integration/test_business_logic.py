@@ -5,9 +5,8 @@ Comprehensive Business Logic Test Suite
 Tests MCP server components and business logic for error-free operation.
 """
 
-import sys
 import os
-import asyncio
+import sys
 from pathlib import Path
 
 import pytest
@@ -20,8 +19,9 @@ sys.path.insert(0, str(src_path))
 @pytest.mark.asyncio
 async def test_server_imports():
     """Test that server modules can be imported."""
-    from wazuh_mcp_server.server import app
     from wazuh_mcp_server.config import get_config
+    from wazuh_mcp_server.server import app
+
     assert app is not None
     config = get_config()
     assert config is not None
@@ -30,15 +30,11 @@ async def test_server_imports():
 @pytest.mark.asyncio
 async def test_wazuh_client_initialization():
     """Test Wazuh Client initialization."""
-    from wazuh_mcp_server.config import WazuhConfig
     from wazuh_mcp_server.api.wazuh_client import WazuhClient
+    from wazuh_mcp_server.config import WazuhConfig
 
     config = WazuhConfig(
-        wazuh_host="localhost",
-        wazuh_user="test",
-        wazuh_pass="test",
-        wazuh_port=55000,
-        verify_ssl=False
+        wazuh_host="localhost", wazuh_user="test", wazuh_pass="test", wazuh_port=55000, verify_ssl=False
     )
     client = WazuhClient(config)
     assert client is not None
@@ -50,13 +46,7 @@ async def test_wazuh_indexer_client():
     """Test Wazuh Indexer Client initialization."""
     from wazuh_mcp_server.api.wazuh_indexer import WazuhIndexerClient
 
-    client = WazuhIndexerClient(
-        host="localhost",
-        port=9200,
-        username="admin",
-        password="admin",
-        verify_ssl=False
-    )
+    client = WazuhIndexerClient(host="localhost", port=9200, username="admin", password="admin", verify_ssl=False)
     assert client is not None
     assert client.host == "localhost"
     assert client.port == 9200
@@ -78,12 +68,7 @@ def test_configuration():
 
 def test_security_validation():
     """Test security validation functions."""
-    from wazuh_mcp_server.security import (
-        validate_limit,
-        validate_agent_id,
-        validate_time_range,
-        ToolValidationError
-    )
+    from wazuh_mcp_server.security import ToolValidationError, validate_agent_id, validate_limit, validate_time_range
 
     # Test validate_limit
     assert validate_limit(50) == 50
@@ -113,10 +98,7 @@ def test_auth_manager():
     assert manager is not None
 
     # Test API key creation
-    api_key = manager.create_api_key(
-        name="Test Key",
-        scopes=["wazuh:read"]
-    )
+    api_key = manager.create_api_key(name="Test Key", scopes=["wazuh:read"])
     assert api_key.startswith("wazuh_")
     assert len(api_key) == 49  # wazuh_ (6) + base64 (43)
 
@@ -159,34 +141,19 @@ def test_docker_compatibility():
 
 def test_dependencies():
     """Test all required dependencies are importable."""
-    dependencies = [
-        'httpx',
-        'pydantic',
-        'fastapi',
-        'uvicorn',
-        'jose',
-        'tenacity'
-    ]
+    dependencies = ["httpx", "pydantic", "fastapi", "uvicorn", "jose", "tenacity"]
 
     for dep in dependencies:
-        module = __import__(dep.replace('-', '_'))
+        module = __import__(dep.replace("-", "_"))
         assert module is not None
 
 
 def test_resilience_patterns():
     """Test resilience patterns."""
-    from wazuh_mcp_server.resilience import (
-        CircuitBreaker,
-        CircuitBreakerConfig,
-        CircuitBreakerState,
-        GracefulShutdown
-    )
+    from wazuh_mcp_server.resilience import CircuitBreaker, CircuitBreakerConfig, CircuitBreakerState, GracefulShutdown
 
     # Test circuit breaker config
-    config = CircuitBreakerConfig(
-        failure_threshold=3,
-        recovery_timeout=30
-    )
+    config = CircuitBreakerConfig(failure_threshold=3, recovery_timeout=30)
     assert config.failure_threshold == 3
 
     # Test circuit breaker

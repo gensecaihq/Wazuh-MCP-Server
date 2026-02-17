@@ -4,21 +4,18 @@ OAuth 2.0 implementation with Dynamic Client Registration (DCR) support.
 Implements MCP 2025-11-25 authentication specification for Claude Desktop integration.
 """
 
-import os
-import json
-import secrets
 import hashlib
 import logging
-from typing import Dict, Any, Optional, List
-from datetime import datetime, timezone, timedelta
+import secrets
 from dataclasses import dataclass, field
-from urllib.parse import urlencode, parse_qs, urlparse
+from datetime import datetime, timedelta, timezone
+from typing import Any, Dict, List, Optional
+from urllib.parse import urlencode
+
+from fastapi import APIRouter, Form, Query, Request
+from fastapi.responses import JSONResponse, RedirectResponse
 from jose import jwt
 from jose.exceptions import JWTError
-
-from fastapi import APIRouter, Request, HTTPException, Form, Query
-from fastapi.responses import JSONResponse, RedirectResponse, HTMLResponse
-from pydantic import BaseModel, Field
 
 logger = logging.getLogger(__name__)
 
@@ -40,6 +37,7 @@ OAUTH_ERRORS = {
 @dataclass
 class OAuthClient:
     """Registered OAuth client."""
+
     client_id: str
     client_secret: str
     client_name: str
@@ -68,6 +66,7 @@ class OAuthClient:
 @dataclass
 class AuthorizationCode:
     """OAuth authorization code."""
+
     code: str
     client_id: str
     redirect_uri: str
@@ -84,6 +83,7 @@ class AuthorizationCode:
 @dataclass
 class OAuthToken:
     """OAuth access/refresh token."""
+
     token: str
     token_type: str  # "access" or "refresh"
     client_id: str
@@ -201,7 +201,7 @@ class OAuthManager:
         redirect_uri: str,
         scope: str,
         code_challenge: Optional[str] = None,
-        code_challenge_method: Optional[str] = None
+        code_challenge_method: Optional[str] = None,
     ) -> str:
         """Create authorization code for OAuth flow."""
         code = secrets.token_urlsafe(32)
@@ -221,11 +221,7 @@ class OAuthManager:
         return code
 
     def exchange_code_for_tokens(
-        self,
-        code: str,
-        client_id: str,
-        redirect_uri: str,
-        code_verifier: Optional[str] = None
+        self, code: str, client_id: str, redirect_uri: str, code_verifier: Optional[str] = None
     ) -> Dict[str, Any]:
         """Exchange authorization code for access/refresh tokens."""
         auth_code = self.authorization_codes.get(code)
@@ -251,7 +247,8 @@ class OAuthManager:
             if auth_code.code_challenge_method == "S256":
                 computed = hashlib.sha256(code_verifier.encode()).digest()
                 import base64
-                computed_challenge = base64.urlsafe_b64encode(computed).rstrip(b'=').decode()
+
+                computed_challenge = base64.urlsafe_b64encode(computed).rstrip(b"=").decode()
             else:  # plain
                 computed_challenge = code_verifier
 
@@ -390,17 +387,9 @@ class OAuthManager:
 
     def cleanup_expired(self):
         """Clean up expired tokens and codes."""
-        now = datetime.now(timezone.utc)
-
-        self.authorization_codes = {
-            k: v for k, v in self.authorization_codes.items() if not v.is_expired()
-        }
-        self.access_tokens = {
-            k: v for k, v in self.access_tokens.items() if not v.is_expired()
-        }
-        self.refresh_tokens = {
-            k: v for k, v in self.refresh_tokens.items() if not v.is_expired()
-        }
+        self.authorization_codes = {k: v for k, v in self.authorization_codes.items() if not v.is_expired()}
+        self.access_tokens = {k: v for k, v in self.access_tokens.items() if not v.is_expired()}
+        self.refresh_tokens = {k: v for k, v in self.refresh_tokens.items() if not v.is_expired()}
 
 
 def create_oauth_router(oauth_manager: OAuthManager) -> APIRouter:
@@ -422,23 +411,17 @@ def create_oauth_router(oauth_manager: OAuthManager) -> APIRouter:
         # Validate client
         client = oauth_manager.validate_client(client_id)
         if not client:
-            return JSONResponse(
-                {"error": "invalid_client", "error_description": "Unknown client"},
-                status_code=401
-            )
+            return JSONResponse({"error": "invalid_client", "error_description": "Unknown client"}, status_code=401)
 
         # Validate redirect_uri
         if redirect_uri not in client.redirect_uris:
             return JSONResponse(
-                {"error": "invalid_request", "error_description": "Invalid redirect_uri"},
-                status_code=400
+                {"error": "invalid_request", "error_description": "Invalid redirect_uri"}, status_code=400
             )
 
         # Validate response_type
         if response_type != "code":
-            return RedirectResponse(
-                f"{redirect_uri}?error=unsupported_response_type&state={state or ''}"
-            )
+            return RedirectResponse(f"{redirect_uri}?error=unsupported_response_type&state={state or ''}")
 
         # For MCP servers, we auto-approve (the user already chose to connect)
         # In production, you might show a consent screen here
@@ -477,6 +460,7 @@ def create_oauth_router(oauth_manager: OAuthManager) -> APIRouter:
             auth_header = request.headers.get("Authorization", "")
             if auth_header.startswith("Basic "):
                 import base64
+
                 try:
                     decoded = base64.b64decode(auth_header[6:]).decode()
                     client_id, client_secret = decoded.split(":", 1)
@@ -485,8 +469,7 @@ def create_oauth_router(oauth_manager: OAuthManager) -> APIRouter:
 
         if not client_id:
             return JSONResponse(
-                {"error": "invalid_client", "error_description": "Client authentication required"},
-                status_code=401
+                {"error": "invalid_client", "error_description": "Client authentication required"}, status_code=401
             )
 
         # Validate client
@@ -494,8 +477,7 @@ def create_oauth_router(oauth_manager: OAuthManager) -> APIRouter:
         if not client:
             # Per MCP spec: Return 401 with invalid_client to signal client deletion
             return JSONResponse(
-                {"error": "invalid_client", "error_description": "Client authentication failed"},
-                status_code=401
+                {"error": "invalid_client", "error_description": "Client authentication failed"}, status_code=401
             )
 
         try:
@@ -503,7 +485,7 @@ def create_oauth_router(oauth_manager: OAuthManager) -> APIRouter:
                 if not code or not redirect_uri:
                     return JSONResponse(
                         {"error": "invalid_request", "error_description": "code and redirect_uri required"},
-                        status_code=400
+                        status_code=400,
                     )
 
                 tokens = oauth_manager.exchange_code_for_tokens(
@@ -517,8 +499,7 @@ def create_oauth_router(oauth_manager: OAuthManager) -> APIRouter:
             elif grant_type == "refresh_token":
                 if not refresh_token:
                     return JSONResponse(
-                        {"error": "invalid_request", "error_description": "refresh_token required"},
-                        status_code=400
+                        {"error": "invalid_request", "error_description": "refresh_token required"}, status_code=400
                     )
 
                 tokens = oauth_manager.refresh_access_token(refresh_token, client_id)
@@ -526,15 +507,17 @@ def create_oauth_router(oauth_manager: OAuthManager) -> APIRouter:
 
             else:
                 return JSONResponse(
-                    {"error": "unsupported_grant_type", "error_description": f"Grant type '{grant_type}' not supported"},
-                    status_code=400
+                    {
+                        "error": "unsupported_grant_type",
+                        "error_description": f"Grant type '{grant_type}' not supported",
+                    },
+                    status_code=400,
                 )
 
         except ValueError as e:
             error_code = str(e)
             return JSONResponse(
-                {"error": error_code, "error_description": OAUTH_ERRORS.get(error_code, str(e))},
-                status_code=400
+                {"error": error_code, "error_description": OAUTH_ERRORS.get(error_code, str(e))}, status_code=400
             )
 
     @router.post("/register")
@@ -543,7 +526,7 @@ def create_oauth_router(oauth_manager: OAuthManager) -> APIRouter:
         if not oauth_manager.config.OAUTH_ENABLE_DCR:
             return JSONResponse(
                 {"error": "invalid_request", "error_description": "Dynamic client registration is disabled"},
-                status_code=400
+                status_code=400,
             )
 
         try:
@@ -551,16 +534,10 @@ def create_oauth_router(oauth_manager: OAuthManager) -> APIRouter:
             client = oauth_manager.register_client(body)
             return JSONResponse(client.to_registration_response(), status_code=201)
         except ValueError as e:
-            return JSONResponse(
-                {"error": "invalid_request", "error_description": str(e)},
-                status_code=400
-            )
+            return JSONResponse({"error": "invalid_request", "error_description": str(e)}, status_code=400)
         except Exception as e:
             logger.error(f"Client registration error: {e}")
-            return JSONResponse(
-                {"error": "server_error", "error_description": "Registration failed"},
-                status_code=500
-            )
+            return JSONResponse({"error": "server_error", "error_description": "Registration failed"}, status_code=500)
 
     @router.post("/revoke")
     async def revoke(

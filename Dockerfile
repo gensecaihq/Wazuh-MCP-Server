@@ -13,28 +13,15 @@ FROM python:${PYTHON_VERSION}-alpine AS builder
 # Set build-time metadata
 LABEL stage=builder
 
-# Install comprehensive build dependencies for OS-agnostic deployment
+# Install build dependencies (minimal set for compiling Python C extensions)
 RUN apk update && apk upgrade && apk add --no-cache \
-    # Core build tools
     gcc \
     musl-dev \
     libffi-dev \
     openssl-dev \
     python3-dev \
     build-base \
-    # Development tools
-    git \
-    curl \
-    wget \
-    # Network and SSL libraries
     ca-certificates \
-    openssl \
-    # Additional Python build dependencies
-    libxml2-dev \
-    libxslt-dev \
-    libc-dev \
-    linux-headers \
-    # Cleanup
     && rm -rf /var/cache/apk/* /tmp/* /var/tmp/*
 
 # Create build directory
@@ -69,29 +56,15 @@ FROM python:${PYTHON_VERSION}-alpine AS production
 
 LABEL stage=production
 
-# Install comprehensive runtime dependencies for OS-agnostic operation
+# Install minimal runtime dependencies
 RUN apk update && apk upgrade && apk add --no-cache \
-    # Process management
     tini \
-    su-exec \
-    shadow \
-    # Network tools
     curl \
-    wget \
-    netcat-openbsd \
-    # SSL/TLS support
     ca-certificates \
     openssl \
-    # System utilities
     tzdata \
-    bash \
-    # JSON processing for health checks
     jq \
-    # Monitoring tools
-    procps \
-    # Cleanup
     && rm -rf /var/cache/apk/* /tmp/* /var/tmp/* \
-    # Update CA certificates
     && update-ca-certificates
 
 # Security: Create non-root user with proper shell

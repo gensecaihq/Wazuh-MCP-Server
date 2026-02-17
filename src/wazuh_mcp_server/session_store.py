@@ -4,12 +4,12 @@ Session storage backends for serverless-ready architecture
 Provides pluggable session storage with in-memory and Redis implementations
 """
 
-import os
 import json
 import logging
+import os
 from abc import ABC, abstractmethod
-from typing import Dict, Optional, Any, List
 from datetime import datetime, timezone
+from typing import Any, Dict, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -114,10 +114,10 @@ class InMemorySessionStore(SessionStore):
 
         expired_ids = []
         for session_id, session_data in self._sessions.items():
-            last_activity_str = session_data.get('last_activity')
+            last_activity_str = session_data.get("last_activity")
             if last_activity_str:
                 try:
-                    last_activity = datetime.fromisoformat(last_activity_str.replace('Z', '+00:00'))
+                    last_activity = datetime.fromisoformat(last_activity_str.replace("Z", "+00:00"))
                     if now - last_activity > timedelta(minutes=timeout_minutes):
                         expired_ids.append(session_id)
                 except Exception as e:
@@ -162,11 +162,7 @@ class RedisSessionStore(SessionStore):
         try:
             import redis.asyncio as aioredis
 
-            self._redis = await aioredis.from_url(
-                self.redis_url,
-                encoding="utf-8",
-                decode_responses=True
-            )
+            self._redis = await aioredis.from_url(self.redis_url, encoding="utf-8", decode_responses=True)
 
             # Test connection
             await self._redis.ping()
@@ -291,11 +287,11 @@ def create_session_store() -> SessionStore:
     Returns:
         SessionStore: InMemorySessionStore or RedisSessionStore based on REDIS_URL env var
     """
-    redis_url = os.getenv('REDIS_URL')
+    redis_url = os.getenv("REDIS_URL")
 
     if redis_url:
         try:
-            ttl_seconds = int(os.getenv('SESSION_TTL_SECONDS', '1800'))
+            ttl_seconds = int(os.getenv("SESSION_TTL_SECONDS", "1800"))
             logger.info(f"Creating RedisSessionStore with URL: {redis_url}")
             return RedisSessionStore(redis_url, ttl_seconds)
         except Exception as e:

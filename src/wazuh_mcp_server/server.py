@@ -5,6 +5,49 @@ Full compliance with Model Context Protocol 2025-11-25 specification
 Production-ready with Streamable HTTP and legacy SSE transport, authentication, and monitoring
 """
 
+import asyncio
+import json
+import logging
+import os
+import threading
+import uuid
+from contextlib import asynccontextmanager
+from datetime import datetime, timedelta, timezone
+from typing import Any, Dict, List, Optional, Union
+from urllib.parse import urlparse
+
+from fastapi import FastAPI, Header, HTTPException, Request, Response
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse, StreamingResponse
+from pydantic import BaseModel, Field, ValidationError
+
+from wazuh_mcp_server import __version__
+from wazuh_mcp_server.api.wazuh_client import WazuhClient
+from wazuh_mcp_server.api.wazuh_indexer import IndexerNotConfiguredError
+from wazuh_mcp_server.auth import create_access_token
+from wazuh_mcp_server.config import WazuhConfig, get_config
+from wazuh_mcp_server.monitoring import ACTIVE_CONNECTIONS, REQUEST_COUNT
+from wazuh_mcp_server.resilience import GracefulShutdown
+from wazuh_mcp_server.security import (
+    RateLimiter,
+    ToolValidationError,
+    validate_agent_id,
+    validate_agent_status,
+    validate_boolean,
+    validate_compliance_framework,
+    validate_indicator,
+    validate_indicator_type,
+    validate_input,
+    validate_limit,
+    validate_query,
+    validate_report_type,
+    validate_rule_id,
+    validate_severity,
+    validate_time_range,
+    validate_timestamp,
+)
+from wazuh_mcp_server.session_store import SessionStore, create_session_store
+
 # MCP Protocol Version Support
 # Latest: 2025-11-25, also supports backwards compatibility with older versions
 MCP_PROTOCOL_VERSION = "2025-11-25"
@@ -17,39 +60,6 @@ RATE_LIMIT_WINDOW_SECONDS = 60
 CORS_MAX_AGE_SECONDS = 600
 DEFAULT_QUERY_LIMIT = 100
 MAX_QUERY_LIMIT = 1000
-
-import os
-import json
-import asyncio
-import secrets
-import logging
-import threading
-from typing import Dict, Any, Optional, List, Union
-from datetime import datetime, timezone, timedelta
-from urllib.parse import urlparse
-from contextlib import asynccontextmanager
-import uuid
-
-from fastapi import FastAPI, Request, Response, HTTPException, Header
-from fastapi.responses import StreamingResponse, JSONResponse
-from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel, Field, ValidationError
-import httpx
-
-from wazuh_mcp_server.config import get_config, WazuhConfig
-from wazuh_mcp_server.api.wazuh_client import WazuhClient
-from wazuh_mcp_server.api.wazuh_indexer import IndexerNotConfiguredError
-from wazuh_mcp_server.auth import create_access_token, verify_token
-from wazuh_mcp_server.security import (
-    RateLimiter, validate_input, ToolValidationError,
-    validate_limit, validate_agent_id, validate_rule_id, validate_time_range,
-    validate_severity, validate_agent_status, validate_timestamp,
-    validate_indicator, validate_indicator_type, validate_report_type,
-    validate_compliance_framework, validate_query, validate_boolean
-)
-from wazuh_mcp_server.monitoring import REQUEST_COUNT, REQUEST_DURATION, ACTIVE_CONNECTIONS
-from wazuh_mcp_server.resilience import GracefulShutdown
-from wazuh_mcp_server.session_store import create_session_store, SessionStore
 
 logger = logging.getLogger(__name__)
 
@@ -71,9 +81,7 @@ async def verify_authentication(authorization: Optional[str], config) -> bool:
     # Authentication required
     if not authorization:
         raise HTTPException(
-            status_code=401,
-            detail="Authorization header required",
-            headers={"WWW-Authenticate": "Bearer"}
+            status_code=401, detail="Authorization header required", headers={"WWW-Authenticate": "Bearer"}
         )
 
     # OAuth mode
@@ -85,30 +93,28 @@ async def verify_authentication(authorization: Optional[str], config) -> bool:
             if token_obj:
                 return True
         raise HTTPException(
-            status_code=401,
-            detail="Invalid or expired OAuth token",
-            headers={"WWW-Authenticate": "Bearer"}
+            status_code=401, detail="Invalid or expired OAuth token", headers={"WWW-Authenticate": "Bearer"}
         )
 
     # Bearer token mode (default)
     try:
         from wazuh_mcp_server.auth import verify_bearer_token
+
         await verify_bearer_token(authorization)
         return True
     except ValueError as e:
-        raise HTTPException(
-            status_code=401,
-            detail=str(e),
-            headers={"WWW-Authenticate": "Bearer"}
-        )
+        raise HTTPException(status_code=401, detail=str(e), headers={"WWW-Authenticate": "Bearer"})
+
 
 # MCP Protocol Models
 class MCPRequest(BaseModel):
     """MCP JSON-RPC 2.0 Request."""
+
     jsonrpc: str = Field(default="2.0", description="JSON-RPC version")
     id: Optional[Union[str, int]] = Field(default=None, description="Request ID")
     method: str = Field(description="Method name")
     params: Optional[Dict[str, Any]] = Field(default=None, description="Method parameters")
+
 
 class MCPResponse(BaseModel):
     """
@@ -118,6 +124,7 @@ class MCPResponse(BaseModel):
     - On success: includes 'result', excludes 'error'
     - On error: includes 'error', excludes 'result'
     """
+
     jsonrpc: str = Field(default="2.0", description="JSON-RPC version")
     id: Optional[Union[str, int]] = Field(default=None, description="Request ID")
     result: Optional[Any] = Field(default=None, description="Result data")
@@ -144,15 +151,18 @@ class MCPResponse(BaseModel):
 
         return d
 
+
 class MCPError(BaseModel):
     """MCP JSON-RPC 2.0 Error object."""
+
     code: int = Field(description="Error code")
     message: str = Field(description="Error message")
     data: Optional[Any] = Field(default=None, description="Additional error data")
 
+
 class MCPSession:
     """MCP Session Management for Remote MCP Server."""
-    
+
     def __init__(self, session_id: str, origin: Optional[str] = None):
         self.session_id = session_id
         self.origin = origin
@@ -161,16 +171,16 @@ class MCPSession:
         self.capabilities = {}
         self.client_info = {}
         self.authenticated = False
-        
+
     def update_activity(self) -> None:
         """Update last activity timestamp."""
         self.last_activity = datetime.now(timezone.utc)
-        
+
     def is_expired(self, timeout_minutes: int = SESSION_TIMEOUT_MINUTES) -> bool:
         """Check if session is expired."""
         timeout = timedelta(minutes=timeout_minutes)
         return datetime.now(timezone.utc) - self.last_activity > timeout
-        
+
     def to_dict(self) -> Dict[str, Any]:
         """Convert session to dictionary."""
         return {
@@ -180,8 +190,9 @@ class MCPSession:
             "last_activity": self.last_activity.isoformat(),
             "capabilities": self.capabilities,
             "client_info": self.client_info,
-            "authenticated": self.authenticated
+            "authenticated": self.authenticated,
         }
+
 
 # Session management with pluggable backend (serverless-ready)
 class SessionManager:
@@ -197,12 +208,12 @@ class SessionManager:
 
     def _session_from_dict(self, data: Dict[str, Any]) -> MCPSession:
         """Reconstruct MCPSession from dictionary."""
-        session = MCPSession(data['session_id'], data.get('origin'))
-        session.created_at = datetime.fromisoformat(data['created_at'].replace('Z', '+00:00'))
-        session.last_activity = datetime.fromisoformat(data['last_activity'].replace('Z', '+00:00'))
-        session.capabilities = data.get('capabilities', {})
-        session.client_info = data.get('client_info', {})
-        session.authenticated = data.get('authenticated', False)
+        session = MCPSession(data["session_id"], data.get("origin"))
+        session.created_at = datetime.fromisoformat(data["created_at"].replace("Z", "+00:00"))
+        session.last_activity = datetime.fromisoformat(data["last_activity"].replace("Z", "+00:00"))
+        session.capabilities = data.get("capabilities", {})
+        session.client_info = data.get("client_info", {})
+        session.authenticated = data.get("authenticated", False)
         return session
 
     async def get(self, session_id: str) -> Optional[MCPSession]:
@@ -259,12 +270,14 @@ class SessionManager:
 
     def pop(self, session_id: str, default=None) -> Optional[MCPSession]:
         """Remove and return session (synchronous, blocks). Not for use in async context."""
+
         async def _pop():
             session = await self.get(session_id)
             if session:
                 await self.remove(session_id)
                 return session
             return default
+
         return self._run_sync(_pop())
 
     async def clear(self) -> bool:
@@ -290,10 +303,12 @@ class SessionManager:
         """Remove expired sessions and return count."""
         return await self._store.cleanup_expired()
 
+
 # Initialize session manager with pluggable backend
 # Will use Redis if REDIS_URL is set, otherwise in-memory
 _session_store = create_session_store()
 sessions = SessionManager(_session_store)
+
 
 async def get_or_create_session(session_id: Optional[str], origin: Optional[str]) -> MCPSession:
     """Get existing session or create new one."""
@@ -314,10 +329,16 @@ async def get_or_create_session(session_id: Optional[str], origin: Optional[str]
         expired_count = await sessions.cleanup_expired()
         if expired_count > 0:
             logger.debug(f"Cleaned up {expired_count} expired sessions")
+            # Sync _initialized_sessions with active sessions
+            active = await sessions.get_all()
+            stale_keys = [k for k in _initialized_sessions if k not in active]
+            for k in stale_keys:
+                _initialized_sessions.pop(k, None)
     except Exception as e:
         logger.error(f"Session cleanup error: {e}")
-    
+
     return session
+
 
 # Lifespan context manager for startup/shutdown events (modern FastAPI pattern)
 @asynccontextmanager
@@ -326,7 +347,12 @@ async def lifespan(app: FastAPI):
     global _oauth_manager
 
     # === STARTUP ===
-    logger.info("🚀 Wazuh MCP Server v4.0.6 starting up...")
+    # Attach log sanitization filter to prevent credential leakage
+    from wazuh_mcp_server.security import SanitizingLogFilter
+
+    logging.getLogger().addFilter(SanitizingLogFilter())
+
+    logger.info(f"Wazuh MCP Server v{__version__} starting up...")
     logger.info(f"📡 MCP Protocol: {MCP_PROTOCOL_VERSION}")
     logger.info(f"🔗 Wazuh Host: {get_config().WAZUH_HOST}")
     logger.info(f"🌐 CORS Origins: {get_config().ALLOWED_ORIGINS}")
@@ -343,7 +369,8 @@ async def lifespan(app: FastAPI):
     # Initialize OAuth if enabled
     if cfg.is_oauth:
         try:
-            from wazuh_mcp_server.oauth import init_oauth_manager, create_oauth_router
+            from wazuh_mcp_server.oauth import create_oauth_router, init_oauth_manager
+
             _oauth_manager = init_oauth_manager(cfg)
             oauth_router = create_oauth_router(_oauth_manager)
             app.include_router(oauth_router)
@@ -361,6 +388,7 @@ async def lifespan(app: FastAPI):
         # Display auto-generated API key if not configured via environment
         if not os.getenv("MCP_API_KEY"):
             from wazuh_mcp_server.auth import auth_manager
+
             default_key = auth_manager.get_default_api_key()
             if default_key:
                 logger.info("=" * 60)
@@ -383,30 +411,36 @@ async def lifespan(app: FastAPI):
 
         # Clear and cleanup auth manager
         from wazuh_mcp_server.auth import auth_manager
+
         auth_manager.cleanup_expired()
         auth_manager.tokens.clear()
         logger.info("Authentication tokens cleared")
 
         # Clear sessions with proper cleanup
         await sessions.clear()
+        # Close session store backend (e.g., Redis connection)
+        if hasattr(sessions._store, "close"):
+            await sessions._store.close()
         logger.info("Sessions cleared")
 
         # Close Wazuh client to release HTTP connections
-        if wazuh_client and hasattr(wazuh_client, 'close'):
+        if wazuh_client and hasattr(wazuh_client, "close"):
             await wazuh_client.close()
             logger.info("Wazuh client closed")
 
         # Cleanup rate limiter
-        if hasattr(rate_limiter, 'cleanup'):
+        if hasattr(rate_limiter, "cleanup"):
             rate_limiter.cleanup()
 
         # Close connection pools
         from wazuh_mcp_server.security import connection_pool_manager
+
         await connection_pool_manager.close_all()
         logger.info("Connection pools closed")
 
         # Force garbage collection
         import gc
+
         gc.collect()
         logger.info("Garbage collection completed")
 
@@ -420,10 +454,10 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title="Wazuh MCP Server",
     description="MCP-compliant remote server for Wazuh SIEM integration. Supports Streamable HTTP, SSE, OAuth, and authless modes.",
-    version="4.0.6",
+    version=__version__,
     docs_url="/docs",
     openapi_url="/openapi.json",
-    lifespan=lifespan
+    lifespan=lifespan,
 )
 
 # Get configuration
@@ -462,6 +496,7 @@ rate_limiter = RateLimiter(max_requests=RATE_LIMIT_REQUESTS, window_seconds=RATE
 shutdown_manager = GracefulShutdown()
 logger.info("Graceful shutdown manager initialized")
 
+
 # CORS middleware for remote access with security
 def validate_cors_origins(origins_config: str) -> List[str]:
     """Validate and parse CORS origins configuration."""
@@ -472,7 +507,7 @@ def validate_cors_origins(origins_config: str) -> List[str]:
         else:
             # In production, default to common Claude origins
             return ["https://claude.ai", "https://claude.anthropic.com"]
-    
+
     origins = []
     for origin in origins_config.split(","):
         origin = origin.strip()
@@ -489,7 +524,7 @@ def validate_cors_origins(origins_config: str) -> List[str]:
                     continue
             else:
                 origins.append(origin)
-    
+
     return origins if origins else ["https://claude.ai"]
 
 
@@ -531,10 +566,7 @@ def validate_origin_header(origin: Optional[str], allowed_origins_config: str) -
             return  # Localhost match (for development)
 
     # Origin present but not in allowed list - per spec MUST return 403
-    raise HTTPException(
-        status_code=403,
-        detail=f"Origin not allowed: {origin}"
-    )
+    raise HTTPException(status_code=403, detail=f"Origin not allowed: {origin}")
 
 
 allowed_origins = validate_cors_origins(config.ALLOWED_ORIGINS)
@@ -553,10 +585,10 @@ app.add_middleware(
         "X-Requested-With",
         "MCP-Protocol-Version",  # MCP protocol version header
         "MCP-Session-Id",  # Session ID header
-        "Last-Event-ID"  # SSE reconnection header
+        "Last-Event-ID",  # SSE reconnection header
     ],  # Specific headers only, no wildcard
     expose_headers=["MCP-Session-Id", "MCP-Protocol-Version", "Content-Type"],
-    max_age=CORS_MAX_AGE_SECONDS
+    max_age=CORS_MAX_AGE_SECONDS,
 )
 
 # MCP Protocol Error Codes
@@ -568,12 +600,16 @@ MCP_ERRORS = {
     "INTERNAL_ERROR": -32603,
     "TIMEOUT": -32001,
     "CANCELLED": -32002,
-    "RESOURCE_NOT_FOUND": -32003
+    "RESOURCE_NOT_FOUND": -32003,
 }
 
-def create_error_response(request_id: Optional[Union[str, int]], code: int, message: str, data: Any = None) -> MCPResponse:
+
+def create_error_response(
+    request_id: Optional[Union[str, int]], code: int, message: str, data: Any = None
+) -> MCPResponse:
     """Create MCP error response with correlation ID for tracing."""
     from wazuh_mcp_server.monitoring import get_correlation_id
+
     # Include correlation ID in error data for request tracing
     error_data = data if data else {}
     if isinstance(error_data, dict):
@@ -583,9 +619,11 @@ def create_error_response(request_id: Optional[Union[str, int]], code: int, mess
     error = MCPError(code=code, message=message, data=error_data)
     return MCPResponse(id=request_id, error=error.dict())
 
+
 def create_success_response(request_id: Optional[Union[str, int]], result: Any) -> MCPResponse:
     """Create MCP success response."""
     return MCPResponse(id=request_id, result=result)
+
 
 def validate_protocol_version(version: Optional[str], strict: bool = False) -> str:
     """
@@ -614,12 +652,13 @@ def validate_protocol_version(version: Optional[str], strict: bool = False) -> s
     if strict:
         raise HTTPException(
             status_code=400,
-            detail=f"Unsupported protocol version: {version}. Supported versions: {', '.join(SUPPORTED_PROTOCOL_VERSIONS)}"
+            detail=f"Unsupported protocol version: {version}. Supported versions: {', '.join(SUPPORTED_PROTOCOL_VERSIONS)}",
         )
 
     # For backwards compatibility (non-strict mode), try to handle gracefully
     logger.warning(f"Unsupported protocol version {version}, falling back to 2025-03-26")
     return "2025-03-26"
+
 
 # Track initialized sessions (for notifications/initialized handling)
 _initialized_sessions: Dict[str, bool] = {}
@@ -629,6 +668,7 @@ _current_log_level: str = "info"
 
 
 # MCP Protocol Handlers
+
 
 def _compact_alert(alert: dict) -> dict:
     """Strip a raw Wazuh alert to essential fields for MCP output."""
@@ -720,24 +760,17 @@ async def handle_initialize(params: Dict[str, Any], session: MCPSession) -> Dict
     # Server capabilities - only declare what we actually implement
     server_capabilities = {
         "logging": {},
-        "prompts": {
-            "listChanged": True
-        },
-        "resources": {
-            "subscribe": False,  # Not fully implemented yet
-            "listChanged": True
-        },
-        "tools": {
-            "listChanged": True
-        }
+        "prompts": {"listChanged": True},
+        "resources": {"subscribe": False, "listChanged": True},  # Not fully implemented yet
+        "tools": {"listChanged": True},
     }
 
     # Server information
     server_info = {
         "name": "Wazuh MCP Server",
-        "version": "4.0.6",
+        "version": __version__,
         "vendor": "GenSec AI",
-        "description": "MCP-compliant remote server for Wazuh SIEM integration"
+        "description": "MCP-compliant remote server for Wazuh SIEM integration",
     }
 
     # Mark session as awaiting initialized notification
@@ -747,7 +780,7 @@ async def handle_initialize(params: Dict[str, Any], session: MCPSession) -> Dict
         "protocolVersion": negotiated_version,
         "capabilities": server_capabilities,
         "serverInfo": server_info,
-        "instructions": "Connected to Wazuh MCP Server. Use available tools for security operations."
+        "instructions": "Connected to Wazuh MCP Server. Use available tools for security operations.",
     }
 
 
@@ -763,6 +796,7 @@ async def handle_ping(params: Dict[str, Any], session: MCPSession) -> Dict[str, 
     MUST respond immediately with empty result.
     """
     return {}
+
 
 async def handle_logging_set_level(params: Dict[str, Any], session: MCPSession) -> Dict[str, Any]:
     """
@@ -787,7 +821,7 @@ async def handle_prompts_list(params: Dict[str, Any], session: MCPSession) -> Di
     Handle prompts/list method per MCP specification.
     Returns list of available prompts with pagination support.
     """
-    cursor = params.get("cursor")
+    _cursor = params.get("cursor")  # Reserved for future pagination
 
     # Wazuh security prompts
     prompts = [
@@ -798,30 +832,26 @@ async def handle_prompts_list(params: Dict[str, Any], session: MCPSession) -> Di
                 {
                     "name": "incident_type",
                     "description": "Type of incident to investigate (e.g., malware, intrusion, data_breach)",
-                    "required": True
+                    "required": True,
                 },
                 {
                     "name": "time_range",
                     "description": "Time range for investigation (e.g., 1h, 24h, 7d)",
-                    "required": False
-                }
-            ]
+                    "required": False,
+                },
+            ],
         },
         {
             "name": "threat_hunt",
             "description": "Perform proactive threat hunting across Wazuh agents",
             "arguments": [
-                {
-                    "name": "hunt_hypothesis",
-                    "description": "The threat hypothesis to investigate",
-                    "required": True
-                },
+                {"name": "hunt_hypothesis", "description": "The threat hypothesis to investigate", "required": True},
                 {
                     "name": "agent_scope",
                     "description": "Scope of agents to hunt (all, critical, specific)",
-                    "required": False
-                }
-            ]
+                    "required": False,
+                },
+            ],
         },
         {
             "name": "compliance_audit",
@@ -830,14 +860,14 @@ async def handle_prompts_list(params: Dict[str, Any], session: MCPSession) -> Di
                 {
                     "name": "framework",
                     "description": "Compliance framework (PCI-DSS, HIPAA, SOX, GDPR, NIST)",
-                    "required": True
+                    "required": True,
                 },
                 {
                     "name": "include_remediation",
                     "description": "Include remediation recommendations",
-                    "required": False
-                }
-            ]
+                    "required": False,
+                },
+            ],
         },
         {
             "name": "vulnerability_assessment",
@@ -846,23 +876,16 @@ async def handle_prompts_list(params: Dict[str, Any], session: MCPSession) -> Di
                 {
                     "name": "severity_threshold",
                     "description": "Minimum severity to include (low, medium, high, critical)",
-                    "required": False
+                    "required": False,
                 },
-                {
-                    "name": "agent_id",
-                    "description": "Specific agent to assess (optional)",
-                    "required": False
-                }
-            ]
-        }
+                {"name": "agent_id", "description": "Specific agent to assess (optional)", "required": False},
+            ],
+        },
     ]
 
     # Simple pagination (no cursor means start from beginning)
     # In production, implement proper cursor-based pagination
-    return {
-        "prompts": prompts,
-        "nextCursor": None  # No more results
-    }
+    return {"prompts": prompts, "nextCursor": None}  # No more results
 
 
 async def handle_prompts_get(params: Dict[str, Any], session: MCPSession) -> Dict[str, Any]:
@@ -886,16 +909,16 @@ async def handle_prompts_get(params: Dict[str, Any], session: MCPSession) -> Dic
                     "content": {
                         "type": "text",
                         "text": f"Investigate a {arguments.get('incident_type', 'security')} incident. "
-                               f"Time range: {arguments.get('time_range', '24h')}. "
-                               f"Steps:\n"
-                               f"1. Use get_wazuh_alerts to retrieve relevant alerts\n"
-                               f"2. Use analyze_alert_patterns to identify patterns\n"
-                               f"3. Use search_security_events to find related events\n"
-                               f"4. Use check_agent_health for affected agents\n"
-                               f"5. Use perform_risk_assessment to evaluate impact"
-                    }
+                        f"Time range: {arguments.get('time_range', '24h')}. "
+                        f"Steps:\n"
+                        f"1. Use get_wazuh_alerts to retrieve relevant alerts\n"
+                        f"2. Use analyze_alert_patterns to identify patterns\n"
+                        f"3. Use search_security_events to find related events\n"
+                        f"4. Use check_agent_health for affected agents\n"
+                        f"5. Use perform_risk_assessment to evaluate impact",
+                    },
                 }
-            ]
+            ],
         },
         "threat_hunt": {
             "description": "Proactive threat hunting workflow",
@@ -905,16 +928,16 @@ async def handle_prompts_get(params: Dict[str, Any], session: MCPSession) -> Dic
                     "content": {
                         "type": "text",
                         "text": f"Hunt for threats based on hypothesis: {arguments.get('hunt_hypothesis', 'suspicious activity')}. "
-                               f"Agent scope: {arguments.get('agent_scope', 'all')}. "
-                               f"Workflow:\n"
-                               f"1. Use get_wazuh_agents to identify target agents\n"
-                               f"2. Use search_security_events with relevant patterns\n"
-                               f"3. Use analyze_security_threat for any indicators found\n"
-                               f"4. Use check_ioc_reputation for suspicious IPs/domains\n"
-                               f"5. Use generate_security_report to document findings"
-                    }
+                        f"Agent scope: {arguments.get('agent_scope', 'all')}. "
+                        f"Workflow:\n"
+                        f"1. Use get_wazuh_agents to identify target agents\n"
+                        f"2. Use search_security_events with relevant patterns\n"
+                        f"3. Use analyze_security_threat for any indicators found\n"
+                        f"4. Use check_ioc_reputation for suspicious IPs/domains\n"
+                        f"5. Use generate_security_report to document findings",
+                    },
                 }
-            ]
+            ],
         },
         "compliance_audit": {
             "description": "Compliance audit workflow",
@@ -924,15 +947,15 @@ async def handle_prompts_get(params: Dict[str, Any], session: MCPSession) -> Dic
                     "content": {
                         "type": "text",
                         "text": f"Perform {arguments.get('framework', 'PCI-DSS')} compliance audit. "
-                               f"Include remediation: {arguments.get('include_remediation', 'true')}. "
-                               f"Steps:\n"
-                               f"1. Use run_compliance_check with the specified framework\n"
-                               f"2. Use get_wazuh_agents to assess agent coverage\n"
-                               f"3. Use get_wazuh_vulnerabilities to identify security gaps\n"
-                               f"4. Use generate_security_report for compliance documentation"
-                    }
+                        f"Include remediation: {arguments.get('include_remediation', 'true')}. "
+                        f"Steps:\n"
+                        f"1. Use run_compliance_check with the specified framework\n"
+                        f"2. Use get_wazuh_agents to assess agent coverage\n"
+                        f"3. Use get_wazuh_vulnerabilities to identify security gaps\n"
+                        f"4. Use generate_security_report for compliance documentation",
+                    },
                 }
-            ]
+            ],
         },
         "vulnerability_assessment": {
             "description": "Vulnerability assessment workflow",
@@ -942,16 +965,16 @@ async def handle_prompts_get(params: Dict[str, Any], session: MCPSession) -> Dic
                     "content": {
                         "type": "text",
                         "text": f"Assess vulnerabilities with severity >= {arguments.get('severity_threshold', 'medium')}. "
-                               f"Agent: {arguments.get('agent_id', 'all')}. "
-                               f"Workflow:\n"
-                               f"1. Use get_wazuh_vulnerabilities to retrieve vulnerability data\n"
-                               f"2. Use get_wazuh_critical_vulnerabilities for highest priority items\n"
-                               f"3. Use get_wazuh_vulnerability_summary for statistics\n"
-                               f"4. Use perform_risk_assessment to evaluate overall risk"
-                    }
+                        f"Agent: {arguments.get('agent_id', 'all')}. "
+                        f"Workflow:\n"
+                        f"1. Use get_wazuh_vulnerabilities to retrieve vulnerability data\n"
+                        f"2. Use get_wazuh_critical_vulnerabilities for highest priority items\n"
+                        f"3. Use get_wazuh_vulnerability_summary for statistics\n"
+                        f"4. Use perform_risk_assessment to evaluate overall risk",
+                    },
                 }
-            ]
-        }
+            ],
+        },
     }
 
     if name not in prompt_templates:
@@ -965,7 +988,7 @@ async def handle_resources_list(params: Dict[str, Any], session: MCPSession) -> 
     Handle resources/list method per MCP specification.
     Returns list of available resources with pagination support.
     """
-    cursor = params.get("cursor")
+    _cursor = params.get("cursor")  # Reserved for future pagination
 
     # Wazuh resources
     resources = [
@@ -973,44 +996,41 @@ async def handle_resources_list(params: Dict[str, Any], session: MCPSession) -> 
             "uri": "wazuh://manager/info",
             "name": "Wazuh Manager Information",
             "description": "Current Wazuh manager status and configuration",
-            "mimeType": "application/json"
+            "mimeType": "application/json",
         },
         {
             "uri": "wazuh://agents/summary",
             "name": "Agents Summary",
             "description": "Summary of all Wazuh agents and their status",
-            "mimeType": "application/json"
+            "mimeType": "application/json",
         },
         {
             "uri": "wazuh://alerts/recent",
             "name": "Recent Alerts",
             "description": "Most recent security alerts from Wazuh",
-            "mimeType": "application/json"
+            "mimeType": "application/json",
         },
         {
             "uri": "wazuh://cluster/status",
             "name": "Cluster Status",
             "description": "Wazuh cluster health and node information",
-            "mimeType": "application/json"
+            "mimeType": "application/json",
         },
         {
             "uri": "wazuh://rules/summary",
             "name": "Rules Summary",
             "description": "Summary of active Wazuh detection rules",
-            "mimeType": "application/json"
+            "mimeType": "application/json",
         },
         {
             "uri": "wazuh://vulnerabilities/critical",
             "name": "Critical Vulnerabilities",
             "description": "Critical vulnerabilities from Wazuh Indexer (requires 4.8.0+)",
-            "mimeType": "application/json"
-        }
+            "mimeType": "application/json",
+        },
     ]
 
-    return {
-        "resources": resources,
-        "nextCursor": None
-    }
+    return {"resources": resources, "nextCursor": None}
 
 
 async def handle_resources_read(params: Dict[str, Any], session: MCPSession) -> Dict[str, Any]:
@@ -1045,15 +1065,7 @@ async def handle_resources_read(params: Dict[str, Any], session: MCPSession) -> 
         else:
             raise ValueError(f"Resource not found: {uri}")
 
-        return {
-            "contents": [
-                {
-                    "uri": uri,
-                    "mimeType": "application/json",
-                    "text": json.dumps(data, indent=2)
-                }
-            ]
-        }
+        return {"contents": [{"uri": uri, "mimeType": "application/json", "text": json.dumps(data, indent=2)}]}
 
     except Exception as e:
         logger.error(f"Error reading resource {uri}: {e}")
@@ -1070,26 +1082,23 @@ async def handle_resources_templates_list(params: Dict[str, Any], session: MCPSe
             "uriTemplate": "wazuh://agents/{agent_id}/info",
             "name": "Agent Information",
             "description": "Detailed information for a specific agent",
-            "mimeType": "application/json"
+            "mimeType": "application/json",
         },
         {
             "uriTemplate": "wazuh://agents/{agent_id}/alerts",
             "name": "Agent Alerts",
             "description": "Recent alerts for a specific agent",
-            "mimeType": "application/json"
+            "mimeType": "application/json",
         },
         {
             "uriTemplate": "wazuh://agents/{agent_id}/vulnerabilities",
             "name": "Agent Vulnerabilities",
             "description": "Vulnerabilities for a specific agent",
-            "mimeType": "application/json"
-        }
+            "mimeType": "application/json",
+        },
     ]
 
-    return {
-        "resourceTemplates": templates,
-        "nextCursor": None
-    }
+    return {"resourceTemplates": templates, "nextCursor": None}
 
 
 async def handle_completion_complete(params: Dict[str, Any], session: MCPSession) -> Dict[str, Any]:
@@ -1133,14 +1142,14 @@ async def handle_completion_complete(params: Dict[str, Any], session: MCPSession
         "completion": {
             "values": completions[:100],  # Max 100 per spec
             "total": len(completions),
-            "hasMore": len(completions) > 100
+            "hasMore": len(completions) > 100,
         }
     }
 
 
 async def handle_tools_list(params: Dict[str, Any], session: MCPSession) -> Dict[str, Any]:
     """Handle tools/list method - All 29 Wazuh Security Tools with pagination."""
-    cursor = params.get("cursor")
+    _cursor = params.get("cursor")  # Reserved for future pagination
     tools = [
         # Alert Management Tools (4 tools)
         {
@@ -1155,10 +1164,14 @@ async def handle_tools_list(params: Dict[str, Any], session: MCPSession) -> Dict
                     "agent_id": {"type": "string", "description": "Filter by agent ID"},
                     "timestamp_start": {"type": "string", "description": "Start timestamp (ISO format)"},
                     "timestamp_end": {"type": "string", "description": "End timestamp (ISO format)"},
-                    "compact": {"type": "boolean", "default": True, "description": "Return compact alerts with essential fields only (recommended to avoid token limits)"}
+                    "compact": {
+                        "type": "boolean",
+                        "default": True,
+                        "description": "Return compact alerts with essential fields only (recommended to avoid token limits)",
+                    },
                 },
-                "required": []
-            }
+                "required": [],
+            },
         },
         {
             "name": "get_wazuh_alert_summary",
@@ -1167,10 +1180,10 @@ async def handle_tools_list(params: Dict[str, Any], session: MCPSession) -> Dict
                 "type": "object",
                 "properties": {
                     "time_range": {"type": "string", "enum": ["1h", "6h", "24h", "7d"], "default": "24h"},
-                    "group_by": {"type": "string", "default": "rule.level"}
+                    "group_by": {"type": "string", "default": "rule.level"},
                 },
-                "required": []
-            }
+                "required": [],
+            },
         },
         {
             "name": "analyze_alert_patterns",
@@ -1179,10 +1192,10 @@ async def handle_tools_list(params: Dict[str, Any], session: MCPSession) -> Dict
                 "type": "object",
                 "properties": {
                     "time_range": {"type": "string", "enum": ["1h", "6h", "24h", "7d"], "default": "24h"},
-                    "min_frequency": {"type": "integer", "minimum": 1, "default": 5}
+                    "min_frequency": {"type": "integer", "minimum": 1, "default": 5},
                 },
-                "required": []
-            }
+                "required": [],
+            },
         },
         {
             "name": "search_security_events",
@@ -1193,12 +1206,15 @@ async def handle_tools_list(params: Dict[str, Any], session: MCPSession) -> Dict
                     "query": {"type": "string", "description": "Search query or pattern"},
                     "time_range": {"type": "string", "enum": ["1h", "6h", "24h", "7d"], "default": "24h"},
                     "limit": {"type": "integer", "minimum": 1, "maximum": 1000, "default": 100},
-                    "compact": {"type": "boolean", "default": True, "description": "Return compact events with essential fields only (recommended to avoid token limits)"}
+                    "compact": {
+                        "type": "boolean",
+                        "default": True,
+                        "description": "Return compact events with essential fields only (recommended to avoid token limits)",
+                    },
                 },
-                "required": ["query"]
-            }
+                "required": ["query"],
+            },
         },
-
         # Agent Management Tools (6 tools)
         {
             "name": "get_wazuh_agents",
@@ -1207,31 +1223,29 @@ async def handle_tools_list(params: Dict[str, Any], session: MCPSession) -> Dict
                 "type": "object",
                 "properties": {
                     "agent_id": {"type": "string", "description": "Specific agent ID to query"},
-                    "status": {"type": "string", "enum": ["active", "disconnected", "never_connected"], "description": "Filter by agent status"},
-                    "limit": {"type": "integer", "minimum": 1, "maximum": 1000, "default": 100}
+                    "status": {
+                        "type": "string",
+                        "enum": ["active", "disconnected", "never_connected"],
+                        "description": "Filter by agent status",
+                    },
+                    "limit": {"type": "integer", "minimum": 1, "maximum": 1000, "default": 100},
                 },
-                "required": []
-            }
+                "required": [],
+            },
         },
         {
             "name": "get_wazuh_running_agents",
             "description": "Get list of currently running/active Wazuh agents",
-            "inputSchema": {
-                "type": "object",
-                "properties": {},
-                "required": []
-            }
+            "inputSchema": {"type": "object", "properties": {}, "required": []},
         },
         {
             "name": "check_agent_health",
             "description": "Check the health status of a specific Wazuh agent",
             "inputSchema": {
                 "type": "object",
-                "properties": {
-                    "agent_id": {"type": "string", "description": "ID of the agent to check"}
-                },
-                "required": ["agent_id"]
-            }
+                "properties": {"agent_id": {"type": "string", "description": "ID of the agent to check"}},
+                "required": ["agent_id"],
+            },
         },
         {
             "name": "get_agent_processes",
@@ -1240,10 +1254,10 @@ async def handle_tools_list(params: Dict[str, Any], session: MCPSession) -> Dict
                 "type": "object",
                 "properties": {
                     "agent_id": {"type": "string", "description": "ID of the agent"},
-                    "limit": {"type": "integer", "minimum": 1, "maximum": 1000, "default": 100}
+                    "limit": {"type": "integer", "minimum": 1, "maximum": 1000, "default": 100},
                 },
-                "required": ["agent_id"]
-            }
+                "required": ["agent_id"],
+            },
         },
         {
             "name": "get_agent_ports",
@@ -1252,23 +1266,20 @@ async def handle_tools_list(params: Dict[str, Any], session: MCPSession) -> Dict
                 "type": "object",
                 "properties": {
                     "agent_id": {"type": "string", "description": "ID of the agent"},
-                    "limit": {"type": "integer", "minimum": 1, "maximum": 1000, "default": 100}
+                    "limit": {"type": "integer", "minimum": 1, "maximum": 1000, "default": 100},
                 },
-                "required": ["agent_id"]
-            }
+                "required": ["agent_id"],
+            },
         },
         {
             "name": "get_agent_configuration",
             "description": "Get configuration details for a specific Wazuh agent",
             "inputSchema": {
                 "type": "object",
-                "properties": {
-                    "agent_id": {"type": "string", "description": "ID of the agent"}
-                },
-                "required": ["agent_id"]
-            }
+                "properties": {"agent_id": {"type": "string", "description": "ID of the agent"}},
+                "required": ["agent_id"],
+            },
         },
-
         # Vulnerability Management Tools (3 tools) - Requires Wazuh Indexer (4.8.0+)
         {
             "name": "get_wazuh_vulnerabilities",
@@ -1277,12 +1288,20 @@ async def handle_tools_list(params: Dict[str, Any], session: MCPSession) -> Dict
                 "type": "object",
                 "properties": {
                     "agent_id": {"type": "string", "description": "Filter by specific agent ID"},
-                    "severity": {"type": "string", "enum": ["low", "medium", "high", "critical"], "description": "Filter by severity level"},
+                    "severity": {
+                        "type": "string",
+                        "enum": ["low", "medium", "high", "critical"],
+                        "description": "Filter by severity level",
+                    },
                     "limit": {"type": "integer", "minimum": 1, "maximum": 500, "default": 100},
-                    "compact": {"type": "boolean", "default": True, "description": "Return compact vulnerabilities with essential fields only (recommended to avoid token limits)"}
+                    "compact": {
+                        "type": "boolean",
+                        "default": True,
+                        "description": "Return compact vulnerabilities with essential fields only (recommended to avoid token limits)",
+                    },
                 },
-                "required": []
-            }
+                "required": [],
+            },
         },
         {
             "name": "get_wazuh_critical_vulnerabilities",
@@ -1291,23 +1310,24 @@ async def handle_tools_list(params: Dict[str, Any], session: MCPSession) -> Dict
                 "type": "object",
                 "properties": {
                     "limit": {"type": "integer", "minimum": 1, "maximum": 500, "default": 50},
-                    "compact": {"type": "boolean", "default": True, "description": "Return compact vulnerabilities with essential fields only (recommended to avoid token limits)"}
+                    "compact": {
+                        "type": "boolean",
+                        "default": True,
+                        "description": "Return compact vulnerabilities with essential fields only (recommended to avoid token limits)",
+                    },
                 },
-                "required": []
-            }
+                "required": [],
+            },
         },
         {
             "name": "get_wazuh_vulnerability_summary",
             "description": "Get vulnerability summary statistics from Wazuh Indexer (requires WAZUH_INDEXER_HOST configuration)",
             "inputSchema": {
                 "type": "object",
-                "properties": {
-                    "time_range": {"type": "string", "enum": ["1d", "7d", "30d"], "default": "7d"}
-                },
-                "required": []
-            }
+                "properties": {"time_range": {"type": "string", "enum": ["1d", "7d", "30d"], "default": "7d"}},
+                "required": [],
+            },
         },
-
         # Security Analysis Tools (6 tools)
         {
             "name": "analyze_security_threat",
@@ -1315,11 +1335,14 @@ async def handle_tools_list(params: Dict[str, Any], session: MCPSession) -> Dict
             "inputSchema": {
                 "type": "object",
                 "properties": {
-                    "indicator": {"type": "string", "description": "The threat indicator to analyze (IP, hash, domain)"},
-                    "indicator_type": {"type": "string", "enum": ["ip", "hash", "domain", "url"], "default": "ip"}
+                    "indicator": {
+                        "type": "string",
+                        "description": "The threat indicator to analyze (IP, hash, domain)",
+                    },
+                    "indicator_type": {"type": "string", "enum": ["ip", "hash", "domain", "url"], "default": "ip"},
                 },
-                "required": ["indicator"]
-            }
+                "required": ["indicator"],
+            },
         },
         {
             "name": "check_ioc_reputation",
@@ -1328,10 +1351,10 @@ async def handle_tools_list(params: Dict[str, Any], session: MCPSession) -> Dict
                 "type": "object",
                 "properties": {
                     "indicator": {"type": "string", "description": "The IoC to check (IP, domain, hash, etc.)"},
-                    "indicator_type": {"type": "string", "enum": ["ip", "domain", "hash", "url"], "default": "ip"}
+                    "indicator_type": {"type": "string", "enum": ["ip", "domain", "hash", "url"], "default": "ip"},
                 },
-                "required": ["indicator"]
-            }
+                "required": ["indicator"],
+            },
         },
         {
             "name": "perform_risk_assessment",
@@ -1339,10 +1362,13 @@ async def handle_tools_list(params: Dict[str, Any], session: MCPSession) -> Dict
             "inputSchema": {
                 "type": "object",
                 "properties": {
-                    "agent_id": {"type": "string", "description": "Specific agent ID to assess (if None, assess entire environment)"}
+                    "agent_id": {
+                        "type": "string",
+                        "description": "Specific agent ID to assess (if None, assess entire environment)",
+                    }
                 },
-                "required": []
-            }
+                "required": [],
+            },
         },
         {
             "name": "get_top_security_threats",
@@ -1351,10 +1377,10 @@ async def handle_tools_list(params: Dict[str, Any], session: MCPSession) -> Dict
                 "type": "object",
                 "properties": {
                     "limit": {"type": "integer", "minimum": 1, "maximum": 50, "default": 10},
-                    "time_range": {"type": "string", "enum": ["1h", "6h", "24h", "7d"], "default": "24h"}
+                    "time_range": {"type": "string", "enum": ["1h", "6h", "24h", "7d"], "default": "24h"},
                 },
-                "required": []
-            }
+                "required": [],
+            },
         },
         {
             "name": "generate_security_report",
@@ -1362,11 +1388,15 @@ async def handle_tools_list(params: Dict[str, Any], session: MCPSession) -> Dict
             "inputSchema": {
                 "type": "object",
                 "properties": {
-                    "report_type": {"type": "string", "enum": ["daily", "weekly", "monthly", "incident"], "default": "daily"},
-                    "include_recommendations": {"type": "boolean", "default": True}
+                    "report_type": {
+                        "type": "string",
+                        "enum": ["daily", "weekly", "monthly", "incident"],
+                        "default": "daily",
+                    },
+                    "include_recommendations": {"type": "boolean", "default": True},
                 },
-                "required": []
-            }
+                "required": [],
+            },
         },
         {
             "name": "run_compliance_check",
@@ -1374,76 +1404,54 @@ async def handle_tools_list(params: Dict[str, Any], session: MCPSession) -> Dict
             "inputSchema": {
                 "type": "object",
                 "properties": {
-                    "framework": {"type": "string", "enum": ["PCI-DSS", "HIPAA", "SOX", "GDPR", "NIST"], "default": "PCI-DSS"},
-                    "agent_id": {"type": "string", "description": "Specific agent ID to check (if None, check entire environment)"}
+                    "framework": {
+                        "type": "string",
+                        "enum": ["PCI-DSS", "HIPAA", "SOX", "GDPR", "NIST"],
+                        "default": "PCI-DSS",
+                    },
+                    "agent_id": {
+                        "type": "string",
+                        "description": "Specific agent ID to check (if None, check entire environment)",
+                    },
                 },
-                "required": []
-            }
+                "required": [],
+            },
         },
-
         # System Monitoring Tools (10 tools)
         {
             "name": "get_wazuh_statistics",
             "description": "Get comprehensive Wazuh statistics and metrics",
-            "inputSchema": {
-                "type": "object",
-                "properties": {},
-                "required": []
-            }
+            "inputSchema": {"type": "object", "properties": {}, "required": []},
         },
         {
             "name": "get_wazuh_weekly_stats",
             "description": "Get weekly statistics from Wazuh including alerts, agents, and trends",
-            "inputSchema": {
-                "type": "object",
-                "properties": {},
-                "required": []
-            }
+            "inputSchema": {"type": "object", "properties": {}, "required": []},
         },
         {
             "name": "get_wazuh_cluster_health",
             "description": "Get Wazuh cluster health information",
-            "inputSchema": {
-                "type": "object",
-                "properties": {},
-                "required": []
-            }
+            "inputSchema": {"type": "object", "properties": {}, "required": []},
         },
         {
             "name": "get_wazuh_cluster_nodes",
             "description": "Get information about Wazuh cluster nodes",
-            "inputSchema": {
-                "type": "object",
-                "properties": {},
-                "required": []
-            }
+            "inputSchema": {"type": "object", "properties": {}, "required": []},
         },
         {
             "name": "get_wazuh_rules_summary",
             "description": "Get summary of Wazuh rules and their effectiveness",
-            "inputSchema": {
-                "type": "object",
-                "properties": {},
-                "required": []
-            }
+            "inputSchema": {"type": "object", "properties": {}, "required": []},
         },
         {
             "name": "get_wazuh_remoted_stats",
             "description": "Get Wazuh remoted (agent communication) statistics",
-            "inputSchema": {
-                "type": "object",
-                "properties": {},
-                "required": []
-            }
+            "inputSchema": {"type": "object", "properties": {}, "required": []},
         },
         {
             "name": "get_wazuh_log_collector_stats",
             "description": "Get Wazuh log collector statistics",
-            "inputSchema": {
-                "type": "object",
-                "properties": {},
-                "required": []
-            }
+            "inputSchema": {"type": "object", "properties": {}, "required": []},
         },
         {
             "name": "search_wazuh_manager_logs",
@@ -1452,38 +1460,30 @@ async def handle_tools_list(params: Dict[str, Any], session: MCPSession) -> Dict
                 "type": "object",
                 "properties": {
                     "query": {"type": "string", "description": "Search query/pattern"},
-                    "limit": {"type": "integer", "minimum": 1, "maximum": 1000, "default": 100}
+                    "limit": {"type": "integer", "minimum": 1, "maximum": 1000, "default": 100},
                 },
-                "required": ["query"]
-            }
+                "required": ["query"],
+            },
         },
         {
             "name": "get_wazuh_manager_error_logs",
             "description": "Get recent error logs from Wazuh manager",
             "inputSchema": {
                 "type": "object",
-                "properties": {
-                    "limit": {"type": "integer", "minimum": 1, "maximum": 1000, "default": 100}
-                },
-                "required": []
-            }
+                "properties": {"limit": {"type": "integer", "minimum": 1, "maximum": 1000, "default": 100}},
+                "required": [],
+            },
         },
         {
             "name": "validate_wazuh_connection",
             "description": "Validate connection to Wazuh server and return status",
-            "inputSchema": {
-                "type": "object", 
-                "properties": {},
-                "required": []
-            }
-        }
+            "inputSchema": {"type": "object", "properties": {}, "required": []},
+        },
     ]
-    
+
     # Pagination support per MCP spec
-    return {
-        "tools": tools,
-        "nextCursor": None  # No more tools
-    }
+    return {"tools": tools, "nextCursor": None}  # No more tools
+
 
 async def handle_tools_call(params: Dict[str, Any], session: MCPSession) -> Dict[str, Any]:
     """Handle tools/call method - All 29 Wazuh Security Tools with comprehensive validation."""
@@ -1497,8 +1497,10 @@ async def handle_tools_call(params: Dict[str, Any], session: MCPSession) -> Dict
     validate_input(tool_name, max_length=100)
 
     # Track tool execution for metrics
-    from wazuh_mcp_server.monitoring import record_tool_execution
     import time as _time
+
+    from wazuh_mcp_server.monitoring import record_tool_execution
+
     _start_time = _time.time()
     _success = False
 
@@ -1515,14 +1517,21 @@ async def handle_tools_call(params: Dict[str, Any], session: MCPSession) -> Dict
             compact = validate_boolean(arguments.get("compact"), default=True, param_name="compact")
 
             result = await wazuh_client.get_alerts(
-                limit=limit, rule_id=rule_id, level=level,
-                agent_id=agent_id, timestamp_start=timestamp_start,
-                timestamp_end=timestamp_end
+                limit=limit,
+                rule_id=rule_id,
+                level=level,
+                agent_id=agent_id,
+                timestamp_start=timestamp_start,
+                timestamp_end=timestamp_end,
             )
             if compact:
                 result = _compact_alerts_result(result)
             _success = True
-            return {"content": [{"type": "text", "text": f"Wazuh Alerts:\n{json.dumps(result, indent=2 if not compact else None)}"}]}
+            return {
+                "content": [
+                    {"type": "text", "text": f"Wazuh Alerts:\n{json.dumps(result, indent=2 if not compact else None)}"}
+                ]
+            }
 
         elif tool_name == "get_wazuh_alert_summary":
             time_range = validate_time_range(arguments.get("time_range"))
@@ -1533,7 +1542,9 @@ async def handle_tools_call(params: Dict[str, Any], session: MCPSession) -> Dict
 
         elif tool_name == "analyze_alert_patterns":
             time_range = validate_time_range(arguments.get("time_range"))
-            min_frequency = validate_limit(arguments.get("min_frequency"), min_val=1, max_val=1000, param_name="min_frequency")
+            min_frequency = validate_limit(
+                arguments.get("min_frequency"), min_val=1, max_val=1000, param_name="min_frequency"
+            )
             result = await wazuh_client.analyze_alert_patterns(time_range, min_frequency)
             _success = True
             return {"content": [{"type": "text", "text": f"Alert Patterns:\n{json.dumps(result, indent=2)}"}]}
@@ -1548,7 +1559,14 @@ async def handle_tools_call(params: Dict[str, Any], session: MCPSession) -> Dict
             if compact:
                 result = _compact_alerts_result(result)
             _success = True
-            return {"content": [{"type": "text", "text": f"Security Events:\n{json.dumps(result, indent=2 if not compact else None)}"}]}
+            return {
+                "content": [
+                    {
+                        "type": "text",
+                        "text": f"Security Events:\n{json.dumps(result, indent=2 if not compact else None)}",
+                    }
+                ]
+            }
 
         # Agent Management Tools
         elif tool_name == "get_wazuh_agents":
@@ -1559,7 +1577,7 @@ async def handle_tools_call(params: Dict[str, Any], session: MCPSession) -> Dict
             result = await wazuh_client.get_agents(agent_id=agent_id, status=status, limit=limit)
             _success = True
             return {"content": [{"type": "text", "text": f"Wazuh Agents:\n{json.dumps(result, indent=2)}"}]}
-            
+
         elif tool_name == "get_wazuh_running_agents":
             result = await wazuh_client.get_running_agents()
             _success = True
@@ -1602,7 +1620,14 @@ async def handle_tools_call(params: Dict[str, Any], session: MCPSession) -> Dict
             if compact:
                 result = _compact_vulns_result(result)
             _success = True
-            return {"content": [{"type": "text", "text": f"Vulnerabilities:\n{json.dumps(result, indent=2 if not compact else None)}"}]}
+            return {
+                "content": [
+                    {
+                        "type": "text",
+                        "text": f"Vulnerabilities:\n{json.dumps(result, indent=2 if not compact else None)}",
+                    }
+                ]
+            }
 
         elif tool_name == "get_wazuh_critical_vulnerabilities":
             limit = validate_limit(arguments.get("limit"), max_val=500, param_name="limit")
@@ -1612,7 +1637,14 @@ async def handle_tools_call(params: Dict[str, Any], session: MCPSession) -> Dict
             if compact:
                 result = _compact_vulns_result(result)
             _success = True
-            return {"content": [{"type": "text", "text": f"Critical Vulnerabilities:\n{json.dumps(result, indent=2 if not compact else None)}"}]}
+            return {
+                "content": [
+                    {
+                        "type": "text",
+                        "text": f"Critical Vulnerabilities:\n{json.dumps(result, indent=2 if not compact else None)}",
+                    }
+                ]
+            }
 
         elif tool_name == "get_wazuh_vulnerability_summary":
             time_range = validate_time_range(arguments.get("time_range"))
@@ -1653,7 +1685,9 @@ async def handle_tools_call(params: Dict[str, Any], session: MCPSession) -> Dict
 
         elif tool_name == "generate_security_report":
             report_type = validate_report_type(arguments.get("report_type"))
-            include_recommendations = validate_boolean(arguments.get("include_recommendations"), default=True, param_name="include_recommendations")
+            include_recommendations = validate_boolean(
+                arguments.get("include_recommendations"), default=True, param_name="include_recommendations"
+            )
 
             result = await wazuh_client.generate_security_report(report_type, include_recommendations)
             _success = True
@@ -1749,31 +1783,28 @@ async def handle_tools_call(params: Dict[str, Any], session: MCPSession) -> Dict
         _duration = _time.time() - _start_time
         record_tool_execution(tool_name, _duration, _success)
 
+
 # MCP Method Registry - Full MCP 2025-03-26 Compliance
 MCP_METHODS = {
     # Lifecycle methods
     "initialize": handle_initialize,
     "ping": handle_ping,
-
     # Tools methods
     "tools/list": handle_tools_list,
     "tools/call": handle_tools_call,
-
     # Prompts methods
     "prompts/list": handle_prompts_list,
     "prompts/get": handle_prompts_get,
-
     # Resources methods
     "resources/list": handle_resources_list,
     "resources/read": handle_resources_read,
     "resources/templates/list": handle_resources_templates_list,
-
     # Logging methods
     "logging/setLevel": handle_logging_set_level,
-
     # Completion methods
     "completion/complete": handle_completion_complete,
 }
+
 
 # Notification handlers (don't return responses)
 async def handle_cancelled_notification(params: Dict[str, Any], session: MCPSession) -> None:
@@ -1787,6 +1818,7 @@ MCP_NOTIFICATIONS = {
     "notifications/initialized": handle_initialized_notification,
     "notifications/cancelled": handle_cancelled_notification,
 }
+
 
 async def process_mcp_notification(method: str, params: Dict[str, Any], session: MCPSession) -> None:
     """
@@ -1814,12 +1846,10 @@ async def process_mcp_request(request: MCPRequest, session: MCPSession) -> MCPRe
                 return create_error_response(
                     request.id,
                     MCP_ERRORS["INVALID_REQUEST"],
-                    f"'{request.method}' is a notification, not a request method"
+                    f"'{request.method}' is a notification, not a request method",
                 )
             return create_error_response(
-                request.id,
-                MCP_ERRORS["METHOD_NOT_FOUND"],
-                f"Method '{request.method}' not found"
+                request.id, MCP_ERRORS["METHOD_NOT_FOUND"], f"Method '{request.method}' not found"
             )
 
         # Execute method handler
@@ -1829,26 +1859,20 @@ async def process_mcp_request(request: MCPRequest, session: MCPSession) -> MCPRe
         return create_success_response(request.id, result)
 
     except ValueError as e:
-        return create_error_response(
-            request.id,
-            MCP_ERRORS["INVALID_PARAMS"],
-            str(e)
-        )
+        return create_error_response(request.id, MCP_ERRORS["INVALID_PARAMS"], str(e))
     except Exception as e:
-        from wazuh_mcp_server.monitoring import get_correlation_id, structured_logger
+        from wazuh_mcp_server.monitoring import structured_logger
+
         structured_logger.error(
             f"Internal error processing {request.method}",
             exc_info=True,
             method=request.method,
             request_id=str(request.id) if request.id else None,
             error_type=type(e).__name__,
-            error_message=str(e)
+            error_message=str(e),
         )
-        return create_error_response(
-            request.id,
-            MCP_ERRORS["INTERNAL_ERROR"],
-            "Internal server error"
-        )
+        return create_error_response(request.id, MCP_ERRORS["INTERNAL_ERROR"], "Internal server error")
+
 
 async def generate_sse_events(session: MCPSession, event_id_counter: int = 0):
     """
@@ -1869,11 +1893,7 @@ async def generate_sse_events(session: MCPSession, event_id_counter: int = 0):
 
     # Send session info as a JSON-RPC notification
     event_id += 1
-    session_notification = {
-        "jsonrpc": "2.0",
-        "method": "notifications/session",
-        "params": session.to_dict()
-    }
+    session_notification = {"jsonrpc": "2.0", "method": "notifications/session", "params": session.to_dict()}
     yield f"id: {event_id}\nevent: message\ndata: {json.dumps(session_notification)}\n\n"
 
     # Send capabilities notification
@@ -1881,7 +1901,7 @@ async def generate_sse_events(session: MCPSession, event_id_counter: int = 0):
     capabilities_notification = {
         "jsonrpc": "2.0",
         "method": "notifications/capabilities",
-        "params": {"tools": True, "resources": True, "prompts": True, "logging": True}
+        "params": {"tools": True, "resources": True, "prompts": True, "logging": True},
     }
     yield f"id: {event_id}\nevent: message\ndata: {json.dumps(capabilities_notification)}\n\n"
 
@@ -1891,7 +1911,7 @@ async def generate_sse_events(session: MCPSession, event_id_counter: int = 0):
         ping_notification = {
             "jsonrpc": "2.0",
             "method": "notifications/ping",
-            "params": {"timestamp": datetime.now(timezone.utc).isoformat()}
+            "params": {"timestamp": datetime.now(timezone.utc).isoformat()},
         }
         yield f"id: {event_id}\nevent: message\ndata: {json.dumps(ping_notification)}\n\n"
         await asyncio.sleep(30)
@@ -1911,6 +1931,7 @@ def is_json_rpc_request(message: Dict[str, Any]) -> bool:
     """Check if a JSON-RPC message is a request (has 'method' and 'id')."""
     return "method" in message and "id" in message
 
+
 @app.get("/")
 @app.post("/")
 async def mcp_endpoint(
@@ -1918,7 +1939,7 @@ async def mcp_endpoint(
     origin: Optional[str] = Header(None),
     accept: Optional[str] = Header(None),
     mcp_session_id: Optional[str] = Header(None, alias="MCP-Session-Id"),
-    last_event_id: Optional[str] = Header(None, alias="Last-Event-ID")
+    last_event_id: Optional[str] = Header(None, alias="Last-Event-ID"),
 ):
     """
     Main MCP protocol endpoint supporting both GET and POST.
@@ -1926,14 +1947,10 @@ async def mcp_endpoint(
     POST: Handles JSON-RPC requests
     """
     # Track metrics
-    REQUEST_COUNT.labels(
-        method=request.method,
-        endpoint="/",
-        status_code=200
-    ).inc()
-    
+    REQUEST_COUNT.labels(method=request.method, endpoint="/", status_code=200).inc()
+
     ACTIVE_CONNECTIONS.inc()
-    
+
     try:
         # Origin validation per MCP 2025-11-25 spec
         validate_origin_header(origin, config.ALLOWED_ORIGINS)
@@ -1950,8 +1967,7 @@ async def mcp_endpoint(
             existing_session = await sessions.get(mcp_session_id)
             if not existing_session:
                 raise HTTPException(
-                    status_code=404,
-                    detail="Session not found. Please start a new session with InitializeRequest."
+                    status_code=404, detail="Session not found. Please start a new session with InitializeRequest."
                 )
             session = existing_session
             session.update_activity()
@@ -1969,8 +1985,8 @@ async def mcp_endpoint(
                         "Cache-Control": "no-cache",
                         "Connection": "keep-alive",
                         "MCP-Session-Id": session.session_id,
-                        "Access-Control-Expose-Headers": "MCP-Session-Id"
-                    }
+                        "Access-Control-Expose-Headers": "MCP-Session-Id",
+                    },
                 )
                 return response
             else:
@@ -1981,51 +1997,36 @@ async def mcp_endpoint(
                         "id": None,
                         "result": {
                             "protocolVersion": "2025-03-26",
-                            "serverInfo": {
-                                "name": "Wazuh MCP Server",
-                                "version": "4.0.6"
-                            },
-                            "session": session.to_dict()
-                        }
+                            "serverInfo": {"name": "Wazuh MCP Server", "version": __version__},
+                            "session": session.to_dict(),
+                        },
                     },
-                    headers={
-                        "MCP-Session-Id": session.session_id,
-                        "Access-Control-Expose-Headers": "MCP-Session-Id"
-                    }
+                    headers={"MCP-Session-Id": session.session_id, "Access-Control-Expose-Headers": "MCP-Session-Id"},
                 )
-        
+
         # Handle POST request (JSON-RPC)
         elif request.method == "POST":
             try:
                 body = await request.json()
             except json.JSONDecodeError:
                 return JSONResponse(
-                    content=create_error_response(
-                        None,
-                        MCP_ERRORS["PARSE_ERROR"],
-                        "Invalid JSON"
-                    ).dict(),
-                    status_code=400
+                    content=create_error_response(None, MCP_ERRORS["PARSE_ERROR"], "Invalid JSON").dict(),
+                    status_code=400,
                 )
-            
+
             # Handle batch requests
             if isinstance(body, list):
                 if not body:
                     return JSONResponse(
                         content=create_error_response(
-                            None,
-                            MCP_ERRORS["INVALID_REQUEST"],
-                            "Empty batch request"
+                            None, MCP_ERRORS["INVALID_REQUEST"], "Empty batch request"
                         ).dict(),
-                        status_code=400
+                        status_code=400,
                     )
 
                 # Per MCP Streamable HTTP spec: If the input consists solely of
                 # notifications or responses, return HTTP 202 Accepted with no body
-                has_requests = any(
-                    is_json_rpc_request(item) if isinstance(item, dict) else False
-                    for item in body
-                )
+                has_requests = any(is_json_rpc_request(item) if isinstance(item, dict) else False for item in body)
 
                 if not has_requests:
                     # Process all notifications before returning 202
@@ -2039,8 +2040,8 @@ async def mcp_endpoint(
                         status_code=202,
                         headers={
                             "MCP-Session-Id": session.session_id,
-                            "Access-Control-Expose-Headers": "MCP-Session-Id"
-                        }
+                            "Access-Control-Expose-Headers": "MCP-Session-Id",
+                        },
                     )
 
                 # Process batch containing requests
@@ -2060,20 +2061,19 @@ async def mcp_endpoint(
                         response = await process_mcp_request(mcp_request, session)
                         responses.append(response.dict())
                     except ValidationError as e:
-                        responses.append(create_error_response(
-                            item.get("id") if isinstance(item, dict) else None,
-                            MCP_ERRORS["INVALID_REQUEST"],
-                            f"Invalid request format: {e}"
-                        ).dict())
+                        responses.append(
+                            create_error_response(
+                                item.get("id") if isinstance(item, dict) else None,
+                                MCP_ERRORS["INVALID_REQUEST"],
+                                f"Invalid request format: {e}",
+                            ).dict()
+                        )
 
                 return JSONResponse(
                     content=responses,
-                    headers={
-                        "MCP-Session-Id": session.session_id,
-                        "Access-Control-Expose-Headers": "MCP-Session-Id"
-                    }
+                    headers={"MCP-Session-Id": session.session_id, "Access-Control-Expose-Headers": "MCP-Session-Id"},
                 )
-            
+
             # Handle single message
             else:
                 # Per MCP spec: notifications and responses return HTTP 202 Accepted
@@ -2088,18 +2088,18 @@ async def mcp_endpoint(
                             status_code=202,
                             headers={
                                 "MCP-Session-Id": session.session_id,
-                                "Access-Control-Expose-Headers": "MCP-Session-Id"
-                            }
+                                "Access-Control-Expose-Headers": "MCP-Session-Id",
+                            },
                         )
                     elif is_json_rpc_response(body):
                         # Client sending a response - just acknowledge
-                        logger.debug(f"Received client response")
+                        logger.debug("Received client response")
                         return Response(
                             status_code=202,
                             headers={
                                 "MCP-Session-Id": session.session_id,
-                                "Access-Control-Expose-Headers": "MCP-Session-Id"
-                            }
+                                "Access-Control-Expose-Headers": "MCP-Session-Id",
+                            },
                         )
 
                 # Handle request
@@ -2110,24 +2110,25 @@ async def mcp_endpoint(
                         content=response.dict(),
                         headers={
                             "MCP-Session-Id": session.session_id,
-                            "Access-Control-Expose-Headers": "MCP-Session-Id"
-                        }
+                            "Access-Control-Expose-Headers": "MCP-Session-Id",
+                        },
                     )
                 except ValidationError as e:
                     return JSONResponse(
                         content=create_error_response(
                             body.get("id") if isinstance(body, dict) else None,
                             MCP_ERRORS["INVALID_REQUEST"],
-                            f"Invalid request format: {e}"
+                            f"Invalid request format: {e}",
                         ).dict(),
-                        status_code=400
+                        status_code=400,
                     )
-        
+
         else:
             raise HTTPException(status_code=405, detail="Method not allowed")
-    
+
     finally:
         ACTIVE_CONNECTIONS.dec()
+
 
 # Official MCP Remote Server SSE endpoint - as per Anthropic standards
 @app.get("/sse")
@@ -2136,7 +2137,7 @@ async def mcp_sse_endpoint(
     authorization: str = Header(None),
     origin: Optional[str] = Header(None),
     mcp_session_id: Optional[str] = Header(None, alias="MCP-Session-Id"),
-    last_event_id: Optional[str] = Header(None, alias="Last-Event-ID")
+    last_event_id: Optional[str] = Header(None, alias="Last-Event-ID"),
 ):
     """
     Official MCP SSE endpoint following Anthropic standards.
@@ -2161,7 +2162,7 @@ async def mcp_sse_endpoint(
     # Track metrics
     REQUEST_COUNT.labels(method="GET", endpoint="/sse", status_code=200).inc()
     ACTIVE_CONNECTIONS.inc()
-    
+
     try:
         # Get or create session
         session = await get_or_create_session(mcp_session_id, origin)
@@ -2175,17 +2176,18 @@ async def mcp_sse_endpoint(
                 "Cache-Control": "no-cache",
                 "Connection": "keep-alive",
                 "MCP-Session-Id": session.session_id,
-                "Access-Control-Expose-Headers": "MCP-Session-Id"
-            }
+                "Access-Control-Expose-Headers": "MCP-Session-Id",
+            },
         )
         return response
-        
+
     except Exception as e:
         logger.error(f"SSE endpoint error: {e}")
         raise HTTPException(status_code=500, detail="SSE stream error")
-    
+
     finally:
         ACTIVE_CONNECTIONS.dec()
+
 
 # Standard MCP Endpoint - Streamable HTTP Transport (2025-11-25 Specification)
 @app.post("/mcp")
@@ -2197,7 +2199,7 @@ async def mcp_streamable_http_endpoint(
     mcp_protocol_version: Optional[str] = Header(None, alias="MCP-Protocol-Version"),
     mcp_session_id: Optional[str] = Header(None, alias="MCP-Session-Id"),
     accept: Optional[str] = Header("application/json"),
-    last_event_id: Optional[str] = Header(None, alias="Last-Event-ID")
+    last_event_id: Optional[str] = Header(None, alias="Last-Event-ID"),
 ):
     """
     Standard MCP endpoint using Streamable HTTP transport (2025-11-25 spec).
@@ -2238,8 +2240,7 @@ async def mcp_streamable_http_endpoint(
             existing_session = await sessions.get(mcp_session_id)
             if not existing_session:
                 raise HTTPException(
-                    status_code=404,
-                    detail="Session not found. Please start a new session with InitializeRequest."
+                    status_code=404, detail="Session not found. Please start a new session with InitializeRequest."
                 )
             session = existing_session
             session.update_activity()
@@ -2254,7 +2255,7 @@ async def mcp_streamable_http_endpoint(
         response_headers = {
             "MCP-Session-Id": session.session_id,
             "MCP-Protocol-Version": protocol_version,
-            "Access-Control-Expose-Headers": "MCP-Session-Id, MCP-Protocol-Version"
+            "Access-Control-Expose-Headers": "MCP-Session-Id, MCP-Protocol-Version",
         }
 
         # Handle GET request per MCP Streamable HTTP spec
@@ -2265,18 +2266,13 @@ async def mcp_streamable_http_endpoint(
                 response = StreamingResponse(
                     generate_sse_events(session),
                     media_type="text/event-stream",
-                    headers={
-                        **response_headers,
-                        "Cache-Control": "no-cache",
-                        "Connection": "keep-alive"
-                    }
+                    headers={**response_headers, "Cache-Control": "no-cache", "Connection": "keep-alive"},
                 )
                 return response
             else:
                 # Per MCP spec: GET without Accept: text/event-stream MUST return 405
                 raise HTTPException(
-                    status_code=405,
-                    detail="GET requires Accept: text/event-stream header for SSE stream"
+                    status_code=405, detail="GET requires Accept: text/event-stream header for SSE stream"
                 )
 
         # Handle POST request (JSON-RPC)
@@ -2285,13 +2281,9 @@ async def mcp_streamable_http_endpoint(
                 body = await request.json()
             except json.JSONDecodeError:
                 return JSONResponse(
-                    content=create_error_response(
-                        None,
-                        MCP_ERRORS["PARSE_ERROR"],
-                        "Invalid JSON"
-                    ).dict(),
+                    content=create_error_response(None, MCP_ERRORS["PARSE_ERROR"], "Invalid JSON").dict(),
                     status_code=400,
-                    headers=response_headers
+                    headers=response_headers,
                 )
 
             # Handle batch messages per MCP Streamable HTTP spec
@@ -2299,19 +2291,14 @@ async def mcp_streamable_http_endpoint(
                 if not body:
                     return JSONResponse(
                         content=create_error_response(
-                            None,
-                            MCP_ERRORS["INVALID_REQUEST"],
-                            "Empty batch request"
+                            None, MCP_ERRORS["INVALID_REQUEST"], "Empty batch request"
                         ).dict(),
                         status_code=400,
-                        headers=response_headers
+                        headers=response_headers,
                     )
 
                 # Check if batch contains any requests
-                has_requests = any(
-                    is_json_rpc_request(item) if isinstance(item, dict) else False
-                    for item in body
-                )
+                has_requests = any(is_json_rpc_request(item) if isinstance(item, dict) else False for item in body)
 
                 if not has_requests:
                     # Process all notifications before returning 202
@@ -2339,11 +2326,13 @@ async def mcp_streamable_http_endpoint(
                         resp = await process_mcp_request(mcp_request, session)
                         responses.append(resp.dict())
                     except ValidationError as e:
-                        responses.append(create_error_response(
-                            item.get("id") if isinstance(item, dict) else None,
-                            MCP_ERRORS["INVALID_REQUEST"],
-                            f"Invalid request format: {e}"
-                        ).dict())
+                        responses.append(
+                            create_error_response(
+                                item.get("id") if isinstance(item, dict) else None,
+                                MCP_ERRORS["INVALID_REQUEST"],
+                                f"Invalid request format: {e}",
+                            ).dict()
+                        )
 
                 return JSONResponse(content=responses, headers=response_headers)
 
@@ -2367,12 +2356,10 @@ async def mcp_streamable_http_endpoint(
             except ValidationError as e:
                 return JSONResponse(
                     content=create_error_response(
-                        None,
-                        MCP_ERRORS["INVALID_REQUEST"],
-                        f"Invalid MCP request: {str(e)}"
+                        None, MCP_ERRORS["INVALID_REQUEST"], f"Invalid MCP request: {str(e)}"
                     ).dict(),
                     status_code=400,
-                    headers=response_headers
+                    headers=response_headers,
                 )
 
             # Process the request
@@ -2384,25 +2371,15 @@ async def mcp_streamable_http_endpoint(
                 if accept and "text/event-stream" in accept:
                     # Optional: Stream the response via SSE for long operations
                     # For now, return JSON response
-                    return JSONResponse(
-                        content=mcp_response.dict(),
-                        headers=response_headers
-                    )
+                    return JSONResponse(content=mcp_response.dict(), headers=response_headers)
                 else:
                     # Standard JSON response
-                    return JSONResponse(
-                        content=mcp_response.dict(),
-                        headers=response_headers
-                    )
+                    return JSONResponse(content=mcp_response.dict(), headers=response_headers)
             else:
                 return JSONResponse(
-                    content=create_error_response(
-                        None,
-                        MCP_ERRORS["INVALID_REQUEST"],
-                        "Invalid request format"
-                    ).dict(),
+                    content=create_error_response(None, MCP_ERRORS["INVALID_REQUEST"], "Invalid request format").dict(),
                     status_code=400,
-                    headers=response_headers
+                    headers=response_headers,
                 )
 
         else:
@@ -2417,40 +2394,27 @@ async def mcp_streamable_http_endpoint(
     finally:
         ACTIVE_CONNECTIONS.dec()
 
+
 @app.delete("/mcp")
 async def close_mcp_session(
-    mcp_session_id: str = Header(..., alias="MCP-Session-Id"),
-    authorization: str = Header(None)
+    mcp_session_id: str = Header(..., alias="MCP-Session-Id"), authorization: str = Header(None)
 ):
     """
     Close MCP session explicitly (2025-11-25 spec).
     Allows clients to cleanly terminate sessions.
     """
-    # Authentication required
-    if not authorization:
-        raise HTTPException(
-            status_code=401,
-            detail="Authorization required",
-            headers={"WWW-Authenticate": "Bearer"}
-        )
-
-    try:
-        from wazuh_mcp_server.auth import verify_bearer_token
-        await verify_bearer_token(authorization)
-    except ValueError as e:
-        raise HTTPException(
-            status_code=401,
-            detail=str(e),
-            headers={"WWW-Authenticate": "Bearer"}
-        )
+    # Use the same auth logic as other endpoints (respects authless mode)
+    await verify_authentication(authorization, config)
 
     # Remove session
     try:
         await sessions.remove(mcp_session_id)
+        _initialized_sessions.pop(mcp_session_id, None)
         logger.info(f"Session {mcp_session_id} closed via DELETE")
         return Response(status_code=204)  # No content
     except KeyError:
         raise HTTPException(status_code=404, detail="Session not found")
+
 
 @app.get("/health")
 async def health_check():
@@ -2493,55 +2457,61 @@ async def health_check():
             auth_info["oauth_endpoints"] = ["/oauth/authorize", "/oauth/token", "/oauth/register"]
             auth_info["oauth_discovery"] = "/.well-known/oauth-authorization-server"
 
-        return {
-            "status": "healthy",
-            "timestamp": datetime.now(timezone.utc).isoformat(),
-            "version": "4.0.6",
-            "mcp_protocol_version": MCP_PROTOCOL_VERSION,
-            "supported_protocol_versions": SUPPORTED_PROTOCOL_VERSIONS,
-            "transport": {
-                "streamable_http": "enabled",  # New standard
-                "legacy_sse": "enabled"  # Backwards compatibility
-            },
-            "authentication": auth_info,
-            "services": {
-                "wazuh_manager": wazuh_status,
-                "wazuh_indexer": indexer_status,
-                "mcp": "healthy"
-            },
-            "vulnerability_tools": {
-                "available": wazuh_client._indexer_client is not None,
-                "note": "Vulnerability tools require Wazuh Indexer (4.8.0+). Set WAZUH_INDEXER_HOST to enable." if not wazuh_client._indexer_client else "Wazuh Indexer configured"
-            },
-            "metrics": {
-                "active_sessions": active_sessions,
-                "total_sessions": len(all_sessions)
-            },
-            "endpoints": {
-                "recommended": "/mcp (Streamable HTTP - 2025-11-25)",
-                "legacy": "/sse (SSE only)",
-                "authentication": "/auth/token" if config.is_bearer else ("/oauth/token" if config.is_oauth else None),
-                "monitoring": ["/health", "/metrics"]
-            }
-        }
-    except Exception as e:
+        # Determine overall status from component health
+        if wazuh_status != "healthy":
+            overall_status = "degraded"
+        elif isinstance(indexer_status, str) and indexer_status.startswith("unhealthy"):
+            overall_status = "degraded"
+        else:
+            overall_status = "healthy"
+
+        status_code = 200 if overall_status == "healthy" else 503
         return JSONResponse(
             content={
-                "status": "unhealthy",
+                "status": overall_status,
                 "timestamp": datetime.now(timezone.utc).isoformat(),
-                "error": str(e)
+                "version": __version__,
+                "mcp_protocol_version": MCP_PROTOCOL_VERSION,
+                "supported_protocol_versions": SUPPORTED_PROTOCOL_VERSIONS,
+                "transport": {
+                    "streamable_http": "enabled",
+                    "legacy_sse": "enabled",
+                },
+                "authentication": auth_info,
+                "services": {"wazuh_manager": wazuh_status, "wazuh_indexer": indexer_status, "mcp": "healthy"},
+                "vulnerability_tools": {
+                    "available": wazuh_client._indexer_client is not None,
+                    "note": (
+                        "Vulnerability tools require Wazuh Indexer (4.8.0+). Set WAZUH_INDEXER_HOST to enable."
+                        if not wazuh_client._indexer_client
+                        else "Wazuh Indexer configured"
+                    ),
+                },
+                "metrics": {"active_sessions": active_sessions, "total_sessions": len(all_sessions)},
+                "endpoints": {
+                    "recommended": "/mcp (Streamable HTTP - 2025-11-25)",
+                    "legacy": "/sse (SSE only)",
+                    "authentication": (
+                        "/auth/token" if config.is_bearer else ("/oauth/token" if config.is_oauth else None)
+                    ),
+                    "monitoring": ["/health", "/metrics"],
+                },
             },
-            status_code=503
+            status_code=status_code,
         )
+    except Exception as e:
+        return JSONResponse(
+            content={"status": "unhealthy", "timestamp": datetime.now(timezone.utc).isoformat(), "error": str(e)},
+            status_code=503,
+        )
+
 
 @app.get("/metrics")
 async def metrics():
     """Prometheus metrics endpoint."""
-    from prometheus_client import generate_latest, CONTENT_TYPE_LATEST
-    return Response(
-        content=generate_latest(),
-        media_type=CONTENT_TYPE_LATEST
-    )
+    from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
+
+    return Response(content=generate_latest(), media_type=CONTENT_TYPE_LATEST)
 
 
 # OAuth 2.0 Discovery Endpoint (RFC 8414)
@@ -2553,10 +2523,7 @@ async def oauth_metadata(request: Request):
     """
     global _oauth_manager
     if not config.is_oauth or not _oauth_manager:
-        raise HTTPException(
-            status_code=404,
-            detail="OAuth not enabled. Set AUTH_MODE=oauth to enable."
-        )
+        raise HTTPException(status_code=404, detail="OAuth not enabled. Set AUTH_MODE=oauth to enable.")
 
     return JSONResponse(_oauth_manager.get_metadata(request))
 
@@ -2587,11 +2554,13 @@ async def get_auth_token(request: Request):
         if configured_key:
             # Use constant-time comparison to prevent timing attacks
             import hmac
+
             if not hmac.compare_digest(api_key, configured_key):
                 raise HTTPException(status_code=401, detail="Invalid API key")
         else:
             # Fall back to auth_manager validation
             from wazuh_mcp_server.auth import auth_manager
+
             if not auth_manager.validate_api_key(api_key):
                 raise HTTPException(status_code=401, detail="Invalid API key")
 
@@ -2600,16 +2569,12 @@ async def get_auth_token(request: Request):
             data={
                 "sub": "wazuh_mcp_user",
                 "iat": datetime.now(timezone.utc).timestamp(),
-                "scope": "wazuh:read wazuh:write"
+                "scope": "wazuh:read wazuh:write",
             },
-            secret_key=config.AUTH_SECRET_KEY
+            secret_key=config.AUTH_SECRET_KEY,
         )
 
-        return {
-            "access_token": token,
-            "token_type": "bearer",
-            "expires_in": 86400  # 24 hours
-        }
+        return {"access_token": token, "token_type": "bearer", "expires_in": 86400}  # 24 hours
 
     except json.JSONDecodeError:
         raise HTTPException(status_code=400, detail="Invalid JSON")
@@ -2619,15 +2584,10 @@ async def get_auth_token(request: Request):
         logger.error(f"Token generation error: {e}")
         raise HTTPException(status_code=500, detail="Internal server error")
 
+
 if __name__ == "__main__":
     import uvicorn
-    
+
     config = get_config()
-    
-    uvicorn.run(
-        app,
-        host=config.MCP_HOST,
-        port=config.MCP_PORT,
-        log_level=config.LOG_LEVEL.lower(),
-        access_log=True
-    )
+
+    uvicorn.run(app, host=config.MCP_HOST, port=config.MCP_PORT, log_level=config.LOG_LEVEL.lower(), access_log=True)

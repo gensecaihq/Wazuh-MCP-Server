@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-OS-Agnostic Deployment Script for Wazuh MCP Server v4.0.0
+OS-Agnostic Deployment Script for Wazuh MCP Server v4.0.6
 Works on Windows, macOS, and Linux with Docker installed.
 """
 
@@ -39,7 +39,7 @@ def print_header():
     """Print deployment header"""
     print(f"{Colors.CYAN}{'=' * 70}{Colors.NC}")
     print(f"{Colors.CYAN}   WAZUH MCP REMOTE SERVER - PRODUCTION DEPLOYMENT{Colors.NC}")
-    print(f"{Colors.CYAN}   Version: 4.0.0 | OS-Agnostic Docker Deployment{Colors.NC}")
+    print(f"{Colors.CYAN}   Version: 4.0.6 | OS-Agnostic Docker Deployment{Colors.NC}")
     print(f"{Colors.CYAN}{'=' * 70}{Colors.NC}\n")
 
 
@@ -182,7 +182,7 @@ def build_and_deploy():
 
     # Set build metadata
     os.environ['BUILD_DATE'] = datetime.utcnow().strftime('%Y-%m-%dT%H:%M:%SZ')
-    os.environ['VERSION'] = os.environ.get('VERSION', '4.0.0')
+    os.environ['VERSION'] = os.environ.get('VERSION', '4.0.6')
     os.environ['PYTHON_VERSION'] = os.environ.get('PYTHON_VERSION', '3.13')
 
     # Build with Docker Compose

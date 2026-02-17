@@ -55,6 +55,10 @@ tmp/
 *.crt
 *.p12
 secrets/
+.api_key
+
+# Package managers
+uv.lock
 
 # OS
 Thumbs.db
