@@ -101,8 +101,34 @@ class WazuhClient:
                 raise ValueError(f"Wazuh API error: {e.response.status_code} - {e.response.text}")
 
     async def get_alerts(self, **params) -> Dict[str, Any]:
-        """Get alerts from Wazuh."""
-        return await self._request("GET", "/alerts", params=params)
+        """
+        Get alerts from the Wazuh Indexer (wazuh-alerts-* index).
+
+        Alerts are stored in the Wazuh Indexer, not the Manager API.
+        The Manager API does not have a /alerts endpoint.
+
+        Raises:
+            IndexerNotConfiguredError: If Wazuh Indexer is not configured
+        """
+        if not self._indexer_client:
+            raise IndexerNotConfiguredError(
+                "Wazuh Indexer not configured. "
+                "Alerts are stored in the Wazuh Indexer and require WAZUH_INDEXER_HOST to be set.\n\n"
+                "Please set the following environment variables:\n"
+                "  WAZUH_INDEXER_HOST=<indexer_hostname>\n"
+                "  WAZUH_INDEXER_USER=<indexer_username>\n"
+                "  WAZUH_INDEXER_PASS=<indexer_password>\n"
+                "  WAZUH_INDEXER_PORT=9200 (optional, default: 9200)"
+            )
+
+        return await self._indexer_client.get_alerts(
+            limit=params.get("limit", 100),
+            rule_id=params.get("rule_id"),
+            level=params.get("level"),
+            agent_id=params.get("agent_id"),
+            timestamp_start=params.get("timestamp_start"),
+            timestamp_end=params.get("timestamp_end"),
+        )
 
     async def get_agents(self, **params) -> Dict[str, Any]:
         """Get agents from Wazuh."""

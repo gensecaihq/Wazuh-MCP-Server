@@ -1,12 +1,10 @@
 """
-Wazuh Indexer client for vulnerability queries (Wazuh 4.8.0+).
+Wazuh Indexer client for alert and vulnerability queries.
 
-Since Wazuh 4.8.0, vulnerability data is stored in the Wazuh Indexer
-(Elasticsearch/OpenSearch) instead of being available via the Wazuh Manager API.
-
-The vulnerability API endpoint (/vulnerability/*) was deprecated in 4.7.0
-and removed in 4.8.0. This client queries the wazuh-states-vulnerabilities-*
-index directly.
+Wazuh stores alerts and vulnerability data in the Wazuh Indexer
+(Elasticsearch/OpenSearch), not the Manager API. This client queries:
+  - wazuh-alerts-* — alert data (alerts have never had a Manager API endpoint)
+  - wazuh-states-vulnerabilities-* — vulnerability data (removed from Manager API in 4.8.0)
 """
 
 import logging
@@ -17,7 +15,8 @@ from tenacity import retry, retry_if_exception_type, stop_after_attempt, wait_ex
 
 logger = logging.getLogger(__name__)
 
-# Vulnerability index pattern for Wazuh 4.8+
+# Index patterns for Wazuh 4.x
+ALERTS_INDEX = "wazuh-alerts-*"
 VULNERABILITY_INDEX = "wazuh-states-vulnerabilities-*"
 
 
@@ -119,6 +118,94 @@ class WazuhIndexerClient:
             raise ConnectionError(f"Cannot connect to Wazuh Indexer at {self.host}:{self.port}")
         except httpx.TimeoutException:
             raise ConnectionError(f"Timeout connecting to Wazuh Indexer at {self.host}:{self.port}")
+
+    async def get_alerts(
+        self,
+        limit: int = 100,
+        rule_id: Optional[str] = None,
+        level: Optional[str] = None,
+        agent_id: Optional[str] = None,
+        timestamp_start: Optional[str] = None,
+        timestamp_end: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """
+        Get alerts from the Wazuh Indexer (wazuh-alerts-* index).
+
+        Args:
+            limit: Maximum number of results
+            rule_id: Filter by rule ID
+            level: Minimum rule level (severity)
+            agent_id: Filter by agent ID
+            timestamp_start: Start of time range (ISO 8601)
+            timestamp_end: End of time range (ISO 8601)
+
+        Returns:
+            Alert data in standard Wazuh format
+        """
+        await self._ensure_initialized()
+
+        # Build bool query with must clauses for each non-empty filter
+        must_clauses: list = []
+
+        if rule_id:
+            must_clauses.append({"match": {"rule.id": rule_id}})
+
+        if agent_id:
+            must_clauses.append({"match": {"agent.id": agent_id}})
+
+        if level:
+            # level is a minimum severity threshold (e.g. "10" means level >= 10)
+            try:
+                min_level = int(level.rstrip("+"))
+                must_clauses.append({"range": {"rule.level": {"gte": min_level}}})
+            except (ValueError, AttributeError):
+                pass
+
+        if timestamp_start or timestamp_end:
+            time_range: Dict[str, str] = {}
+            if timestamp_start:
+                time_range["gte"] = timestamp_start
+            if timestamp_end:
+                time_range["lte"] = timestamp_end
+            must_clauses.append({"range": {"timestamp": time_range}})
+
+        if must_clauses:
+            query = {"bool": {"must": must_clauses}}
+        else:
+            query = {"match_all": {}}
+
+        # Build the full search body with sort by timestamp desc
+        url = f"{self.base_url}/{ALERTS_INDEX}/_search"
+        body = {
+            "query": query,
+            "size": limit,
+            "sort": [{"timestamp": {"order": "desc"}}],
+        }
+
+        try:
+            response = await self.client.post(url, json=body, headers={"Content-Type": "application/json"})
+            response.raise_for_status()
+            result = response.json()
+        except httpx.HTTPStatusError as e:
+            logger.error(f"Alerts query failed: {e.response.status_code} - {e.response.text}")
+            raise ValueError(f"Alerts query failed: {e.response.status_code}")
+        except httpx.ConnectError:
+            raise ConnectionError(f"Cannot connect to Wazuh Indexer at {self.host}:{self.port}")
+        except httpx.TimeoutException:
+            raise ConnectionError(f"Timeout connecting to Wazuh Indexer at {self.host}:{self.port}")
+
+        # Transform to standard Wazuh format
+        hits = result.get("hits", {})
+        alerts = [hit.get("_source", {}) for hit in hits.get("hits", [])]
+
+        return {
+            "data": {
+                "affected_items": alerts,
+                "total_affected_items": hits.get("total", {}).get("value", len(alerts)),
+                "total_failed_items": 0,
+                "failed_items": [],
+            }
+        }
 
     async def get_vulnerabilities(
         self,
@@ -291,7 +378,7 @@ class IndexerNotConfiguredError(Exception):
     def __init__(self, message: str = None):
         default_message = (
             "Wazuh Indexer not configured. "
-            "Vulnerability tools require the Wazuh Indexer for Wazuh 4.8.0+.\n\n"
+            "Alert and vulnerability tools require the Wazuh Indexer.\n\n"
             "Please set the following environment variables:\n"
             "  WAZUH_INDEXER_HOST=<indexer_hostname>\n"
             "  WAZUH_INDEXER_USER=<indexer_username>\n"
