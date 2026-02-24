@@ -762,9 +762,33 @@ class WazuhClient:
         return await self._get_cached(cache_key, "/cluster/nodes")
 
     async def get_rules_summary(self) -> Dict[str, Any]:
-        """Get rules summary (cached for 5 minutes)."""
+        """Get rules summary aggregated from /rules endpoint."""
         cache_key = "rules_summary"
-        return await self._get_cached(cache_key, "/rules/summary")
+        current_time = time.time()
+        if cache_key in self._cache:
+            cached_time, cached_data = self._cache[cache_key]
+            if current_time - cached_time < self._cache_ttl:
+                return cached_data
+
+        result = await self._request("GET", "/rules", params={"limit": 500})
+        rules = result.get("data", {}).get("affected_items", [])
+        level_counts: Dict[int, int] = {}
+        group_counts: Dict[str, int] = {}
+        for rule in rules:
+            level = rule.get("level", 0)
+            level_counts[level] = level_counts.get(level, 0) + 1
+            for group in rule.get("groups", []):
+                group_counts[group] = group_counts.get(group, 0) + 1
+
+        summary = {
+            "data": {
+                "total_rules": len(rules),
+                "by_level": dict(sorted(level_counts.items())),
+                "top_groups": dict(sorted(group_counts.items(), key=lambda x: x[1], reverse=True)[:20]),
+            }
+        }
+        self._cache[cache_key] = (current_time, summary)
+        return summary
 
     async def get_remoted_stats(self) -> Dict[str, Any]:
         """Get remoted statistics."""
@@ -791,6 +815,171 @@ class WazuhClient:
             return {"status": "connected", "details": result}
         except Exception as e:
             return {"status": "failed", "error": str(e)}
+
+    # =========================================================================
+    # Active Response / Action Tools
+    # =========================================================================
+
+    async def block_ip(self, ip_address: str, duration: int = 0, agent_id: str = None) -> Dict[str, Any]:
+        """Block IP via firewall-drop active response."""
+        data = {
+            "command": "firewall-drop0",
+            "agent_list": [agent_id] if agent_id else ["all"],
+            "arguments": [f"-srcip {ip_address}"],
+            "alert": {"data": {"srcip": ip_address}},
+        }
+        return await self.execute_active_response(data)
+
+    async def isolate_host(self, agent_id: str) -> Dict[str, Any]:
+        """Isolate host from network via active response."""
+        data = {"command": "host-isolation0", "agent_list": [agent_id], "arguments": []}
+        return await self.execute_active_response(data)
+
+    async def kill_process(self, agent_id: str, process_id: int) -> Dict[str, Any]:
+        """Kill process on agent via active response."""
+        data = {"command": "kill-process0", "agent_list": [agent_id], "arguments": [str(process_id)]}
+        return await self.execute_active_response(data)
+
+    async def disable_user(self, agent_id: str, username: str) -> Dict[str, Any]:
+        """Disable user account on agent via active response."""
+        data = {"command": "disable-account0", "agent_list": [agent_id], "arguments": [username]}
+        return await self.execute_active_response(data)
+
+    async def quarantine_file(self, agent_id: str, file_path: str) -> Dict[str, Any]:
+        """Quarantine file on agent via active response."""
+        data = {"command": "quarantine0", "agent_list": [agent_id], "arguments": [file_path]}
+        return await self.execute_active_response(data)
+
+    async def run_active_response(self, agent_id: str, command: str, parameters: dict = None) -> Dict[str, Any]:
+        """Execute generic active response command."""
+        args = []
+        if parameters:
+            args = [f"{k}={v}" for k, v in parameters.items()]
+        data = {"command": command, "agent_list": [agent_id], "arguments": args}
+        return await self.execute_active_response(data)
+
+    async def firewall_drop(self, agent_id: str, src_ip: str, duration: int = 0) -> Dict[str, Any]:
+        """Add firewall drop rule via active response."""
+        data = {
+            "command": "firewall-drop0",
+            "agent_list": [agent_id],
+            "arguments": [f"-srcip {src_ip}"],
+            "alert": {"data": {"srcip": src_ip}},
+        }
+        return await self.execute_active_response(data)
+
+    async def host_deny(self, agent_id: str, src_ip: str) -> Dict[str, Any]:
+        """Add hosts.deny entry via active response."""
+        data = {
+            "command": "host-deny0",
+            "agent_list": [agent_id],
+            "arguments": [f"-srcip {src_ip}"],
+            "alert": {"data": {"srcip": src_ip}},
+        }
+        return await self.execute_active_response(data)
+
+    async def restart_service(self, target: str) -> Dict[str, Any]:
+        """Restart Wazuh agent or manager."""
+        if target == "manager":
+            return await self._request("PUT", "/manager/restart")
+        return await self._request("PUT", f"/agents/{target}/restart")
+
+    # =========================================================================
+    # Verification Tools
+    # =========================================================================
+
+    async def check_blocked_ip(self, ip_address: str, agent_id: str = None) -> Dict[str, Any]:
+        """Check if IP is blocked by searching active response alerts."""
+        if not self._indexer_client:
+            raise IndexerNotConfiguredError()
+        result = await self._indexer_client.get_alerts(limit=50)
+        alerts = result.get("data", {}).get("affected_items", [])
+        matches = [a for a in alerts if ip_address in json.dumps(a) and "firewall-drop" in json.dumps(a)]
+        return {"data": {"ip_address": ip_address, "blocked": len(matches) > 0, "matching_alerts": len(matches)}}
+
+    async def check_agent_isolation(self, agent_id: str) -> Dict[str, Any]:
+        """Check agent isolation status."""
+        result = await self._request(
+            "GET", "/agents", params={"agents_list": agent_id, "select": "id,name,status"}
+        )
+        agents = result.get("data", {}).get("affected_items", [])
+        if not agents:
+            raise ValueError(f"Agent {agent_id} not found")
+        agent = agents[0]
+        return {
+            "data": {
+                "agent_id": agent_id,
+                "isolated": agent.get("status") == "disconnected",
+                "status": agent.get("status"),
+                "name": agent.get("name"),
+            }
+        }
+
+    async def check_process(self, agent_id: str, process_id: int) -> Dict[str, Any]:
+        """Check if a process is still running on an agent."""
+        result = await self._request(
+            "GET", f"/syscollector/{agent_id}/processes", params={"limit": 500}
+        )
+        processes = result.get("data", {}).get("affected_items", [])
+        running = any(str(p.get("pid")) == str(process_id) for p in processes)
+        return {"data": {"agent_id": agent_id, "process_id": process_id, "running": running}}
+
+    async def check_user_status(self, agent_id: str, username: str) -> Dict[str, Any]:
+        """Check if a user account is disabled."""
+        return {
+            "data": {
+                "agent_id": agent_id,
+                "username": username,
+                "disabled": False,
+                "note": "Check agent logs for disable-account confirmation",
+            }
+        }
+
+    async def check_file_quarantine(self, agent_id: str, file_path: str) -> Dict[str, Any]:
+        """Check if a file has been quarantined via FIM events."""
+        result = await self._request(
+            "GET", "/syscheck", params={"agents_list": agent_id, "q": f"file={file_path}"}
+        )
+        events = result.get("data", {}).get("affected_items", [])
+        quarantined = any(e.get("type") == "deleted" or "quarantine" in str(e) for e in events)
+        return {"data": {"agent_id": agent_id, "file_path": file_path, "quarantined": quarantined}}
+
+    # =========================================================================
+    # Rollback Tools
+    # =========================================================================
+
+    async def unisolate_host(self, agent_id: str) -> Dict[str, Any]:
+        """Remove host isolation via active response."""
+        data = {"command": "host-isolation0", "agent_list": [agent_id], "arguments": ["undo"]}
+        return await self.execute_active_response(data)
+
+    async def enable_user(self, agent_id: str, username: str) -> Dict[str, Any]:
+        """Re-enable user account via active response."""
+        data = {"command": "enable-account0", "agent_list": [agent_id], "arguments": [username]}
+        return await self.execute_active_response(data)
+
+    async def restore_file(self, agent_id: str, file_path: str) -> Dict[str, Any]:
+        """Restore a quarantined file via active response."""
+        data = {"command": "quarantine0", "agent_list": [agent_id], "arguments": ["restore", file_path]}
+        return await self.execute_active_response(data)
+
+    async def firewall_allow(self, agent_id: str, src_ip: str) -> Dict[str, Any]:
+        """Remove firewall drop rule via active response."""
+        data = {
+            "command": "firewall-drop0",
+            "agent_list": [agent_id],
+            "arguments": [f"-srcip {src_ip}", "delete"],
+        }
+        return await self.execute_active_response(data)
+
+    async def host_allow(self, agent_id: str, src_ip: str) -> Dict[str, Any]:
+        """Remove hosts.deny entry via active response."""
+        data = {
+            "command": "host-deny0",
+            "agent_list": [agent_id],
+            "arguments": [f"-srcip {src_ip}", "delete"],
+        }
+        return await self.execute_active_response(data)
 
     async def close(self):
         """Close the HTTP client and indexer client."""

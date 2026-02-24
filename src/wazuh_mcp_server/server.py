@@ -31,13 +31,16 @@ from wazuh_mcp_server.resilience import GracefulShutdown
 from wazuh_mcp_server.security import (
     RateLimiter,
     ToolValidationError,
+    validate_active_response_command,
     validate_agent_id,
     validate_agent_status,
     validate_boolean,
     validate_compliance_framework,
+    validate_file_path,
     validate_indicator,
     validate_indicator_type,
     validate_input,
+    validate_ip_address,
     validate_limit,
     validate_query,
     validate_report_type,
@@ -45,6 +48,7 @@ from wazuh_mcp_server.security import (
     validate_severity,
     validate_time_range,
     validate_timestamp,
+    validate_username,
 )
 from wazuh_mcp_server.session_store import SessionStore, create_session_store
 
@@ -716,9 +720,13 @@ def _compact_vulnerability(vuln: dict) -> dict:
     for key in ("id", "severity"):
         if key in vuln:
             compact[key] = vuln[key]
+    if "id" in vuln:
+        compact["cve"] = vuln["id"]
     if "description" in vuln:
         desc = vuln["description"]
         compact["description"] = (desc[:120] + "...") if len(desc) > 120 else desc
+    if "reference" in vuln:
+        compact["reference"] = vuln["reference"]
     if "published_at" in vuln:
         compact["published_at"] = vuln["published_at"]
     pkg = vuln.get("package", {})
@@ -1148,7 +1156,7 @@ async def handle_completion_complete(params: Dict[str, Any], session: MCPSession
 
 
 async def handle_tools_list(params: Dict[str, Any], session: MCPSession) -> Dict[str, Any]:
-    """Handle tools/list method - All 29 Wazuh Security Tools with pagination."""
+    """Handle tools/list method - All 48 Wazuh Security Tools with pagination."""
     _cursor = params.get("cursor")  # Reserved for future pagination
     tools = [
         # Alert Management Tools (4 tools)
@@ -1479,6 +1487,243 @@ async def handle_tools_list(params: Dict[str, Any], session: MCPSession) -> Dict
             "description": "Validate connection to Wazuh server and return status",
             "inputSchema": {"type": "object", "properties": {}, "required": []},
         },
+        # Active Response / Action Tools (9 tools)
+        {
+            "name": "wazuh_block_ip",
+            "description": "[ACTION] Block an IP address via Wazuh active response firewall-drop. Risk: LOW, Reversible.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "ip_address": {"type": "string", "description": "IP address to block"},
+                    "duration": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "default": 0,
+                        "description": "Block duration in seconds (0 = permanent)",
+                    },
+                    "agent_id": {"type": "string", "description": "Target agent ID (empty = all agents)"},
+                },
+                "required": ["ip_address"],
+            },
+        },
+        {
+            "name": "wazuh_isolate_host",
+            "description": "[ACTION] Isolate a host from the network via active response. Risk: MEDIUM, Reversible.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {"agent_id": {"type": "string", "description": "ID of the agent to isolate"}},
+                "required": ["agent_id"],
+            },
+        },
+        {
+            "name": "wazuh_kill_process",
+            "description": "[ACTION] Terminate a process on an agent via active response. Risk: MEDIUM, Not reversible.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "agent_id": {"type": "string", "description": "ID of the agent"},
+                    "process_id": {"type": "integer", "description": "PID of the process to kill"},
+                },
+                "required": ["agent_id", "process_id"],
+            },
+        },
+        {
+            "name": "wazuh_disable_user",
+            "description": "[ACTION] Disable a user account on an agent via active response. Risk: HIGH, Reversible.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "agent_id": {"type": "string", "description": "ID of the agent"},
+                    "username": {"type": "string", "description": "Username to disable"},
+                },
+                "required": ["agent_id", "username"],
+            },
+        },
+        {
+            "name": "wazuh_quarantine_file",
+            "description": "[ACTION] Quarantine a file on an agent via active response. Risk: LOW, Reversible.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "agent_id": {"type": "string", "description": "ID of the agent"},
+                    "file_path": {"type": "string", "description": "Path of the file to quarantine"},
+                },
+                "required": ["agent_id", "file_path"],
+            },
+        },
+        {
+            "name": "wazuh_active_response",
+            "description": "[ACTION] Execute a generic Wazuh active response command. Risk: HIGH, Not reversible.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "agent_id": {"type": "string", "description": "ID of the agent"},
+                    "command": {"type": "string", "description": "Active response command name"},
+                    "parameters": {"type": "object", "description": "Optional command parameters"},
+                },
+                "required": ["agent_id", "command"],
+            },
+        },
+        {
+            "name": "wazuh_firewall_drop",
+            "description": "[ACTION] Add a firewall drop rule on an agent via active response. Risk: MEDIUM, Reversible.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "agent_id": {"type": "string", "description": "ID of the agent"},
+                    "src_ip": {"type": "string", "description": "Source IP address to drop"},
+                    "duration": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "default": 0,
+                        "description": "Duration in seconds (0 = permanent)",
+                    },
+                },
+                "required": ["agent_id", "src_ip"],
+            },
+        },
+        {
+            "name": "wazuh_host_deny",
+            "description": "[ACTION] Add an entry to hosts.deny on an agent via active response. Risk: MEDIUM, Reversible.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "agent_id": {"type": "string", "description": "ID of the agent"},
+                    "src_ip": {"type": "string", "description": "Source IP address to deny"},
+                },
+                "required": ["agent_id", "src_ip"],
+            },
+        },
+        {
+            "name": "wazuh_restart",
+            "description": "[ACTION] Restart Wazuh agent or manager service. Risk: CRITICAL, Not reversible.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "target": {
+                        "type": "string",
+                        "description": "Agent ID or 'manager' to restart",
+                    }
+                },
+                "required": ["target"],
+            },
+        },
+        # Verification Tools (5 tools)
+        {
+            "name": "wazuh_check_blocked_ip",
+            "description": "Check if an IP address is currently blocked via firewall-drop",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "ip_address": {"type": "string", "description": "IP address to check"},
+                    "agent_id": {"type": "string", "description": "Filter by agent ID (optional)"},
+                },
+                "required": ["ip_address"],
+            },
+        },
+        {
+            "name": "wazuh_check_agent_isolation",
+            "description": "Check if an agent is currently isolated from the network",
+            "inputSchema": {
+                "type": "object",
+                "properties": {"agent_id": {"type": "string", "description": "ID of the agent to check"}},
+                "required": ["agent_id"],
+            },
+        },
+        {
+            "name": "wazuh_check_process",
+            "description": "Check if a specific process is running on an agent",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "agent_id": {"type": "string", "description": "ID of the agent"},
+                    "process_id": {"type": "integer", "description": "PID to check"},
+                },
+                "required": ["agent_id", "process_id"],
+            },
+        },
+        {
+            "name": "wazuh_check_user_status",
+            "description": "Check if a user account is disabled on an agent",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "agent_id": {"type": "string", "description": "ID of the agent"},
+                    "username": {"type": "string", "description": "Username to check"},
+                },
+                "required": ["agent_id", "username"],
+            },
+        },
+        {
+            "name": "wazuh_check_file_quarantine",
+            "description": "Check if a file has been quarantined on an agent",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "agent_id": {"type": "string", "description": "ID of the agent"},
+                    "file_path": {"type": "string", "description": "Path of the file to check"},
+                },
+                "required": ["agent_id", "file_path"],
+            },
+        },
+        # Rollback Tools (5 tools)
+        {
+            "name": "wazuh_unisolate_host",
+            "description": "[ACTION] Remove host network isolation. Risk: MEDIUM, Reversal of isolate_host.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {"agent_id": {"type": "string", "description": "ID of the agent to unisolate"}},
+                "required": ["agent_id"],
+            },
+        },
+        {
+            "name": "wazuh_enable_user",
+            "description": "[ACTION] Re-enable a disabled user account. Risk: HIGH, Reversal of disable_user.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "agent_id": {"type": "string", "description": "ID of the agent"},
+                    "username": {"type": "string", "description": "Username to re-enable"},
+                },
+                "required": ["agent_id", "username"],
+            },
+        },
+        {
+            "name": "wazuh_restore_file",
+            "description": "[ACTION] Restore a quarantined file. Risk: LOW, Reversal of quarantine_file.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "agent_id": {"type": "string", "description": "ID of the agent"},
+                    "file_path": {"type": "string", "description": "Path of the file to restore"},
+                },
+                "required": ["agent_id", "file_path"],
+            },
+        },
+        {
+            "name": "wazuh_firewall_allow",
+            "description": "[ACTION] Remove a firewall drop rule. Risk: MEDIUM, Reversal of firewall_drop.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "agent_id": {"type": "string", "description": "ID of the agent"},
+                    "src_ip": {"type": "string", "description": "Source IP to unblock"},
+                },
+                "required": ["agent_id", "src_ip"],
+            },
+        },
+        {
+            "name": "wazuh_host_allow",
+            "description": "[ACTION] Remove a hosts.deny entry. Risk: MEDIUM, Reversal of host_deny.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "agent_id": {"type": "string", "description": "ID of the agent"},
+                    "src_ip": {"type": "string", "description": "Source IP to allow"},
+                },
+                "required": ["agent_id", "src_ip"],
+            },
+        },
     ]
 
     # Pagination support per MCP spec
@@ -1486,7 +1731,7 @@ async def handle_tools_list(params: Dict[str, Any], session: MCPSession) -> Dict
 
 
 async def handle_tools_call(params: Dict[str, Any], session: MCPSession) -> Dict[str, Any]:
-    """Handle tools/call method - All 29 Wazuh Security Tools with comprehensive validation."""
+    """Handle tools/call method - All 48 Wazuh Security Tools with comprehensive validation."""
     tool_name = params.get("name")
     arguments = params.get("arguments", {})
 
@@ -1755,6 +2000,169 @@ async def handle_tools_call(params: Dict[str, Any], session: MCPSession) -> Dict
             result = await wazuh_client.validate_connection()
             _success = True
             return {"content": [{"type": "text", "text": f"Connection Validation:\n{json.dumps(result, indent=2)}"}]}
+
+        # Active Response / Action Tools
+        elif tool_name == "wazuh_block_ip":
+            ip_address = validate_ip_address(arguments.get("ip_address"), required=True)
+            duration = validate_limit(
+                arguments.get("duration"), min_val=0, max_val=86400, param_name="duration"
+            ) if arguments.get("duration") is not None else 0
+            agent_id = validate_agent_id(arguments.get("agent_id"))
+            result = await wazuh_client.block_ip(ip_address, duration, agent_id)
+            _success = True
+            return {"content": [{"type": "text", "text": f"Block IP Result:\n{json.dumps(result, indent=2)}"}]}
+
+        elif tool_name == "wazuh_isolate_host":
+            agent_id = validate_agent_id(arguments.get("agent_id"), required=True)
+            result = await wazuh_client.isolate_host(agent_id)
+            _success = True
+            return {"content": [{"type": "text", "text": f"Isolate Host Result:\n{json.dumps(result, indent=2)}"}]}
+
+        elif tool_name == "wazuh_kill_process":
+            agent_id = validate_agent_id(arguments.get("agent_id"), required=True)
+            process_id = validate_limit(
+                arguments.get("process_id"), min_val=1, max_val=999999, param_name="process_id"
+            )
+            result = await wazuh_client.kill_process(agent_id, process_id)
+            _success = True
+            return {"content": [{"type": "text", "text": f"Kill Process Result:\n{json.dumps(result, indent=2)}"}]}
+
+        elif tool_name == "wazuh_disable_user":
+            agent_id = validate_agent_id(arguments.get("agent_id"), required=True)
+            username = validate_username(arguments.get("username"), required=True)
+            result = await wazuh_client.disable_user(agent_id, username)
+            _success = True
+            return {"content": [{"type": "text", "text": f"Disable User Result:\n{json.dumps(result, indent=2)}"}]}
+
+        elif tool_name == "wazuh_quarantine_file":
+            agent_id = validate_agent_id(arguments.get("agent_id"), required=True)
+            file_path = validate_file_path(arguments.get("file_path"), required=True)
+            result = await wazuh_client.quarantine_file(agent_id, file_path)
+            _success = True
+            return {
+                "content": [{"type": "text", "text": f"Quarantine File Result:\n{json.dumps(result, indent=2)}"}]
+            }
+
+        elif tool_name == "wazuh_active_response":
+            agent_id = validate_agent_id(arguments.get("agent_id"), required=True)
+            command = validate_active_response_command(arguments.get("command"), required=True)
+            parameters = arguments.get("parameters")
+            result = await wazuh_client.run_active_response(agent_id, command, parameters)
+            _success = True
+            return {
+                "content": [{"type": "text", "text": f"Active Response Result:\n{json.dumps(result, indent=2)}"}]
+            }
+
+        elif tool_name == "wazuh_firewall_drop":
+            agent_id = validate_agent_id(arguments.get("agent_id"), required=True)
+            src_ip = validate_ip_address(arguments.get("src_ip"), required=True, param_name="src_ip")
+            duration = validate_limit(
+                arguments.get("duration"), min_val=0, max_val=86400, param_name="duration"
+            ) if arguments.get("duration") is not None else 0
+            result = await wazuh_client.firewall_drop(agent_id, src_ip, duration)
+            _success = True
+            return {
+                "content": [{"type": "text", "text": f"Firewall Drop Result:\n{json.dumps(result, indent=2)}"}]
+            }
+
+        elif tool_name == "wazuh_host_deny":
+            agent_id = validate_agent_id(arguments.get("agent_id"), required=True)
+            src_ip = validate_ip_address(arguments.get("src_ip"), required=True, param_name="src_ip")
+            result = await wazuh_client.host_deny(agent_id, src_ip)
+            _success = True
+            return {"content": [{"type": "text", "text": f"Host Deny Result:\n{json.dumps(result, indent=2)}"}]}
+
+        elif tool_name == "wazuh_restart":
+            target = arguments.get("target", "").strip()
+            if not target:
+                raise ValueError("Parameter 'target' is required. Use an agent ID or 'manager'.")
+            if target != "manager":
+                validate_agent_id(target, required=True, param_name="target")
+            result = await wazuh_client.restart_service(target)
+            _success = True
+            return {"content": [{"type": "text", "text": f"Restart Result:\n{json.dumps(result, indent=2)}"}]}
+
+        # Verification Tools
+        elif tool_name == "wazuh_check_blocked_ip":
+            ip_address = validate_ip_address(arguments.get("ip_address"), required=True)
+            agent_id = validate_agent_id(arguments.get("agent_id"))
+            result = await wazuh_client.check_blocked_ip(ip_address, agent_id)
+            _success = True
+            return {
+                "content": [{"type": "text", "text": f"Blocked IP Check:\n{json.dumps(result, indent=2)}"}]
+            }
+
+        elif tool_name == "wazuh_check_agent_isolation":
+            agent_id = validate_agent_id(arguments.get("agent_id"), required=True)
+            result = await wazuh_client.check_agent_isolation(agent_id)
+            _success = True
+            return {
+                "content": [{"type": "text", "text": f"Agent Isolation Check:\n{json.dumps(result, indent=2)}"}]
+            }
+
+        elif tool_name == "wazuh_check_process":
+            agent_id = validate_agent_id(arguments.get("agent_id"), required=True)
+            process_id = validate_limit(
+                arguments.get("process_id"), min_val=1, max_val=999999, param_name="process_id"
+            )
+            result = await wazuh_client.check_process(agent_id, process_id)
+            _success = True
+            return {"content": [{"type": "text", "text": f"Process Check:\n{json.dumps(result, indent=2)}"}]}
+
+        elif tool_name == "wazuh_check_user_status":
+            agent_id = validate_agent_id(arguments.get("agent_id"), required=True)
+            username = validate_username(arguments.get("username"), required=True)
+            result = await wazuh_client.check_user_status(agent_id, username)
+            _success = True
+            return {"content": [{"type": "text", "text": f"User Status Check:\n{json.dumps(result, indent=2)}"}]}
+
+        elif tool_name == "wazuh_check_file_quarantine":
+            agent_id = validate_agent_id(arguments.get("agent_id"), required=True)
+            file_path = validate_file_path(arguments.get("file_path"), required=True)
+            result = await wazuh_client.check_file_quarantine(agent_id, file_path)
+            _success = True
+            return {
+                "content": [{"type": "text", "text": f"File Quarantine Check:\n{json.dumps(result, indent=2)}"}]
+            }
+
+        # Rollback Tools
+        elif tool_name == "wazuh_unisolate_host":
+            agent_id = validate_agent_id(arguments.get("agent_id"), required=True)
+            result = await wazuh_client.unisolate_host(agent_id)
+            _success = True
+            return {
+                "content": [{"type": "text", "text": f"Unisolate Host Result:\n{json.dumps(result, indent=2)}"}]
+            }
+
+        elif tool_name == "wazuh_enable_user":
+            agent_id = validate_agent_id(arguments.get("agent_id"), required=True)
+            username = validate_username(arguments.get("username"), required=True)
+            result = await wazuh_client.enable_user(agent_id, username)
+            _success = True
+            return {"content": [{"type": "text", "text": f"Enable User Result:\n{json.dumps(result, indent=2)}"}]}
+
+        elif tool_name == "wazuh_restore_file":
+            agent_id = validate_agent_id(arguments.get("agent_id"), required=True)
+            file_path = validate_file_path(arguments.get("file_path"), required=True)
+            result = await wazuh_client.restore_file(agent_id, file_path)
+            _success = True
+            return {"content": [{"type": "text", "text": f"Restore File Result:\n{json.dumps(result, indent=2)}"}]}
+
+        elif tool_name == "wazuh_firewall_allow":
+            agent_id = validate_agent_id(arguments.get("agent_id"), required=True)
+            src_ip = validate_ip_address(arguments.get("src_ip"), required=True, param_name="src_ip")
+            result = await wazuh_client.firewall_allow(agent_id, src_ip)
+            _success = True
+            return {
+                "content": [{"type": "text", "text": f"Firewall Allow Result:\n{json.dumps(result, indent=2)}"}]
+            }
+
+        elif tool_name == "wazuh_host_allow":
+            agent_id = validate_agent_id(arguments.get("agent_id"), required=True)
+            src_ip = validate_ip_address(arguments.get("src_ip"), required=True, param_name="src_ip")
+            result = await wazuh_client.host_allow(agent_id, src_ip)
+            _success = True
+            return {"content": [{"type": "text", "text": f"Host Allow Result:\n{json.dumps(result, indent=2)}"}]}
 
         else:
             raise ValueError(f"Unknown tool: {tool_name}. Use 'tools/list' to see available tools.")

@@ -257,6 +257,7 @@ class WazuhIndexerClient:
             vulnerabilities.append(
                 {
                     "id": source.get("vulnerability", {}).get("id"),
+                    "cve": source.get("vulnerability", {}).get("id"),
                     "severity": source.get("vulnerability", {}).get("severity"),
                     "description": source.get("vulnerability", {}).get("description"),
                     "reference": source.get("vulnerability", {}).get("reference"),

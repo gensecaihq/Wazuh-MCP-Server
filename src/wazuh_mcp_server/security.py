@@ -4,6 +4,7 @@ Production security hardening and edge case handling for Wazuh MCP Server
 Implements comprehensive security measures and error handling
 """
 
+import ipaddress
 import logging
 import os
 import re
@@ -311,6 +312,89 @@ def validate_boolean(value: Any, default: bool = True, param_name: str = "flag")
             return False
 
     raise ToolValidationError(param_name, f"must be a boolean, got '{value}'", "Use true/false")
+
+
+# Regex patterns for action tool parameter validation
+USERNAME_PATTERN = re.compile(r"^[a-zA-Z0-9._@-]{1,128}$")
+AR_COMMAND_PATTERN = re.compile(r"^[a-zA-Z0-9_-]{1,64}$")
+
+
+def validate_ip_address(value: Any, required: bool = False, param_name: str = "ip_address") -> Optional[str]:
+    """Validate IPv4 or IPv6 address."""
+    if value is None or str(value).strip() == "":
+        if required:
+            raise ToolValidationError(param_name, "is required", "Provide a valid IP address (e.g., '192.168.1.1')")
+        return None
+
+    ip_str = str(value).strip()
+
+    try:
+        ipaddress.ip_address(ip_str)
+    except ValueError:
+        raise ToolValidationError(
+            param_name, f"invalid IP address '{ip_str}'", "Use valid IPv4 (e.g., '192.168.1.1') or IPv6 address"
+        )
+
+    return ip_str
+
+
+def validate_file_path(value: Any, required: bool = False, param_name: str = "file_path") -> Optional[str]:
+    """Validate file path — no null bytes, no traversal, max 500 chars."""
+    if value is None or str(value).strip() == "":
+        if required:
+            raise ToolValidationError(param_name, "is required", "Provide a valid file path")
+        return None
+
+    file_path = str(value).strip()
+
+    if "\x00" in file_path:
+        raise ToolValidationError(param_name, "contains null byte", "Remove null bytes from file path")
+
+    if ".." in file_path:
+        raise ToolValidationError(param_name, "contains path traversal", "Path must not contain '..'")
+
+    if len(file_path) > 500:
+        raise ToolValidationError(param_name, f"too long ({len(file_path)} chars)", "Path must be 500 characters or less")
+
+    return file_path
+
+
+def validate_username(value: Any, required: bool = False, param_name: str = "username") -> Optional[str]:
+    """Validate username — alphanumeric + ._-@, 1-128 chars."""
+    if value is None or str(value).strip() == "":
+        if required:
+            raise ToolValidationError(param_name, "is required", "Provide a valid username")
+        return None
+
+    username = str(value).strip()
+
+    if not USERNAME_PATTERN.match(username):
+        raise ToolValidationError(
+            param_name,
+            f"invalid username '{username}'",
+            "Username must be 1-128 alphanumeric characters (plus . _ - @)",
+        )
+
+    return username
+
+
+def validate_active_response_command(value: Any, required: bool = False, param_name: str = "command") -> Optional[str]:
+    """Validate active response command name — alphanumeric + -_, 1-64 chars, no shell metacharacters."""
+    if value is None or str(value).strip() == "":
+        if required:
+            raise ToolValidationError(param_name, "is required", "Provide a valid active response command name")
+        return None
+
+    command = str(value).strip()
+
+    if not AR_COMMAND_PATTERN.match(command):
+        raise ToolValidationError(
+            param_name,
+            f"invalid command '{command}'",
+            "Command must be 1-64 alphanumeric characters (plus - _)",
+        )
+
+    return command
 
 
 def validate_input(value: str, max_length: int = 1000, allowed_chars: Optional[str] = None) -> bool:
