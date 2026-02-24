@@ -185,18 +185,6 @@ class WazuhClient:
         """Search logs with advanced filtering capabilities."""
         return await self._request("GET", "/manager/logs", params=params)
 
-    async def get_incidents(self, **params) -> Dict[str, Any]:
-        """Get security incidents."""
-        return await self._request("GET", "/security/incidents", params=params)
-
-    async def create_incident(self, data: Dict[str, Any]) -> Dict[str, Any]:
-        """Create a new security incident."""
-        return await self._request("POST", "/security/incidents", json=data)
-
-    async def update_incident(self, incident_id: str, data: Dict[str, Any]) -> Dict[str, Any]:
-        """Update an existing security incident."""
-        return await self._request("PUT", f"/security/incidents/{incident_id}", json=data)
-
     async def _get_cached(self, cache_key: str, endpoint: str, **kwargs) -> Dict[str, Any]:
         """
         Get data from cache or fetch from API.
@@ -280,10 +268,6 @@ class WazuhClient:
     async def get_manager_stats(self, **params) -> Dict[str, Any]:
         """Get manager statistics."""
         return await self._request("GET", "/manager/stats", params=params)
-
-    async def get_manager_version_check(self) -> Dict[str, Any]:
-        """Check for new Wazuh releases (4.8+ feature)."""
-        return await self._request("GET", "/manager/version/check")
 
     async def get_cti_data(self, cve_id: str) -> Dict[str, Any]:
         """
@@ -746,7 +730,7 @@ class WazuhClient:
 
     async def get_wazuh_statistics(self) -> Dict[str, Any]:
         """Get Wazuh statistics."""
-        return await self._request("GET", "/manager/stats/all")
+        return await self._request("GET", "/manager/stats")
 
     async def get_weekly_stats(self) -> Dict[str, Any]:
         """Get weekly statistics."""
@@ -754,7 +738,7 @@ class WazuhClient:
 
     async def get_cluster_health(self) -> Dict[str, Any]:
         """Get cluster health."""
-        return await self._request("GET", "/cluster/health")
+        return await self._request("GET", "/cluster/healthcheck")
 
     async def get_cluster_nodes(self) -> Dict[str, Any]:
         """Get cluster nodes (cached for 2 minutes)."""
@@ -795,8 +779,8 @@ class WazuhClient:
         return await self._request("GET", "/manager/stats/remoted")
 
     async def get_log_collector_stats(self) -> Dict[str, Any]:
-        """Get log collector statistics."""
-        return await self._request("GET", "/manager/stats/logcollector")
+        """Get analysis daemon statistics."""
+        return await self._request("GET", "/manager/stats/analysisd")
 
     async def search_manager_logs(self, query: str, limit: int) -> Dict[str, Any]:
         """Search manager logs."""
