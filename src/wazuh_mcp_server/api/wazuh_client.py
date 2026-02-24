@@ -1,9 +1,11 @@
 """Wazuh API client optimized for Wazuh 4.8.0 to 4.14.1 compatibility with latest features."""
 
 import asyncio
+import json
 import logging
 import time
 from collections import deque
+from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, Optional, Tuple
 
 import httpx
@@ -13,6 +15,9 @@ from wazuh_mcp_server.config import WazuhConfig
 from wazuh_mcp_server.resilience import CircuitBreaker, CircuitBreakerConfig, RetryConfig
 
 logger = logging.getLogger(__name__)
+
+# Time range to hours mapping for indexer-based queries
+_TIME_RANGE_HOURS = {"1h": 1, "6h": 6, "12h": 12, "24h": 24, "7d": 168, "30d": 720}
 
 
 class WazuhClient:
@@ -130,9 +135,19 @@ class WazuhClient:
             timestamp_end=params.get("timestamp_end"),
         )
 
-    async def get_agents(self, **params) -> Dict[str, Any]:
+    async def get_agents(self, agent_id=None, status=None, limit=100, **params) -> Dict[str, Any]:
         """Get agents from Wazuh."""
-        return await self._request("GET", "/agents", params=params)
+        clean_params: Dict[str, Any] = {}
+        if agent_id:
+            clean_params["agents_list"] = agent_id
+        if status:
+            clean_params["status"] = status
+        if limit:
+            clean_params["limit"] = limit
+        for k, v in params.items():
+            if v is not None:
+                clean_params[k] = v
+        return await self._request("GET", "/agents", params=clean_params)
 
     async def get_vulnerabilities(self, **params) -> Dict[str, Any]:
         """
@@ -408,28 +423,106 @@ class WazuhClient:
         cache_key = "manager_info"
         return await self._get_cached(cache_key, "/")
 
+    def _time_range_to_start(self, time_range: str) -> str:
+        """Convert a time_range string like '24h' or '7d' to an ISO 8601 start timestamp."""
+        hours = _TIME_RANGE_HOURS.get(time_range, 24)
+        return (datetime.now(timezone.utc) - timedelta(hours=hours)).isoformat()
+
     async def get_alert_summary(self, time_range: str, group_by: str) -> Dict[str, Any]:
-        """Get alert summary grouped by field."""
-        params = {"time_range": time_range, "group_by": group_by}
-        return await self._request("GET", "/alerts/summary", params=params)
+        """Get alert summary — aggregated from Wazuh Indexer."""
+        if not self._indexer_client:
+            raise IndexerNotConfiguredError()
+        start = self._time_range_to_start(time_range)
+        result = await self._indexer_client.get_alerts(limit=1000, timestamp_start=start)
+        alerts = result.get("data", {}).get("affected_items", [])
+        groups: Dict[str, int] = {}
+        for alert in alerts:
+            value: Any = alert
+            for part in group_by.split("."):
+                value = value.get(part, {}) if isinstance(value, dict) else "unknown"
+            key = str(value) if not isinstance(value, dict) else "unknown"
+            groups[key] = groups.get(key, 0) + 1
+        return {
+            "data": {
+                "time_range": time_range,
+                "group_by": group_by,
+                "total_alerts": len(alerts),
+                "groups": groups,
+            }
+        }
 
     async def analyze_alert_patterns(self, time_range: str, min_frequency: int) -> Dict[str, Any]:
-        """Analyze alert patterns."""
-        params = {"time_range": time_range, "min_frequency": min_frequency}
-        return await self._request("GET", "/alerts/patterns", params=params)
+        """Analyze alert patterns — aggregated from Wazuh Indexer."""
+        if not self._indexer_client:
+            raise IndexerNotConfiguredError()
+        start = self._time_range_to_start(time_range)
+        result = await self._indexer_client.get_alerts(limit=1000, timestamp_start=start)
+        alerts = result.get("data", {}).get("affected_items", [])
+        rule_counts: Dict[str, Dict[str, Any]] = {}
+        for alert in alerts:
+            rule = alert.get("rule", {})
+            rule_id = rule.get("id", "unknown")
+            if rule_id not in rule_counts:
+                rule_counts[rule_id] = {
+                    "count": 0,
+                    "description": rule.get("description", ""),
+                    "level": rule.get("level", 0),
+                }
+            rule_counts[rule_id]["count"] += 1
+        patterns = [
+            {"rule_id": k, **v} for k, v in rule_counts.items() if v["count"] >= min_frequency
+        ]
+        patterns.sort(key=lambda x: x["count"], reverse=True)
+        return {
+            "data": {
+                "time_range": time_range,
+                "min_frequency": min_frequency,
+                "patterns": patterns,
+                "total_patterns": len(patterns),
+            }
+        }
 
     async def search_security_events(self, query: str, time_range: str, limit: int) -> Dict[str, Any]:
-        """Search security events."""
-        params = {"q": query, "time_range": time_range, "limit": limit}
-        return await self._request("GET", "/security/events", params=params)
+        """Search security events via the Wazuh Indexer."""
+        if not self._indexer_client:
+            raise IndexerNotConfiguredError()
+        start = self._time_range_to_start(time_range)
+        return await self._indexer_client.get_alerts(limit=limit, timestamp_start=start)
 
     async def get_running_agents(self) -> Dict[str, Any]:
         """Get running agents."""
         return await self._request("GET", "/agents", params={"status": "active"})
 
     async def check_agent_health(self, agent_id: str) -> Dict[str, Any]:
-        """Check agent health."""
-        return await self._request("GET", f"/agents/{agent_id}/health")
+        """Check agent health by fetching agent info and extracting status."""
+        result = await self._request(
+            "GET",
+            "/agents",
+            params={
+                "agents_list": agent_id,
+                "select": "id,name,status,ip,os.name,os.version,version,lastKeepAlive,dateAdd,group,node_name",
+            },
+        )
+        agents = result.get("data", {}).get("affected_items", [])
+        if not agents:
+            raise ValueError(f"Agent {agent_id} not found")
+        agent = agents[0]
+        status = agent.get("status", "unknown")
+        return {
+            "data": {
+                "agent_id": agent.get("id"),
+                "name": agent.get("name"),
+                "status": status,
+                "health": "healthy" if status == "active" else "unhealthy",
+                "ip": agent.get("ip"),
+                "os": agent.get("os", {}),
+                "version": agent.get("version"),
+                "last_keep_alive": agent.get("lastKeepAlive"),
+                "date_add": agent.get("dateAdd"),
+                "group": agent.get("group"),
+                "node_name": agent.get("node_name"),
+            }
+        }
 
     async def get_agent_processes(self, agent_id: str, limit: int) -> Dict[str, Any]:
         """Get agent processes."""
@@ -440,8 +533,26 @@ class WazuhClient:
         return await self._request("GET", f"/syscollector/{agent_id}/ports", params={"limit": limit})
 
     async def get_agent_configuration(self, agent_id: str) -> Dict[str, Any]:
-        """Get agent configuration."""
-        return await self._request("GET", f"/agents/{agent_id}/config")
+        """Get agent configuration by fetching agent info and its group config."""
+        agent_result = await self._request(
+            "GET",
+            "/agents",
+            params={"agents_list": agent_id, "select": "id,name,group,configSum,mergedSum,status,version"},
+        )
+        agents = agent_result.get("data", {}).get("affected_items", [])
+        if not agents:
+            raise ValueError(f"Agent {agent_id} not found")
+        agent = agents[0]
+        config_data: Dict[str, Any] = {"agent": agent, "group_configuration": []}
+        groups = agent.get("group", [])
+        if groups:
+            group_name = groups[0] if isinstance(groups, list) else groups
+            try:
+                group_config = await self._request("GET", f"/groups/{group_name}/configuration")
+                config_data["group_configuration"] = group_config.get("data", {}).get("affected_items", [])
+            except Exception:
+                config_data["group_configuration"] = []
+        return {"data": config_data}
 
     async def get_critical_vulnerabilities(self, limit: int) -> Dict[str, Any]:
         """
@@ -480,36 +591,158 @@ class WazuhClient:
         return await self._indexer_client.get_vulnerability_summary()
 
     async def analyze_security_threat(self, indicator: str, indicator_type: str) -> Dict[str, Any]:
-        """Analyze security threat."""
-        data = {"indicator": indicator, "type": indicator_type}
-        return await self._request("POST", "/security/threat/analyze", json=data)
+        """Analyze security threat by searching alerts for the indicator."""
+        if not self._indexer_client:
+            raise IndexerNotConfiguredError()
+        result = await self._indexer_client.get_alerts(limit=100)
+        alerts = result.get("data", {}).get("affected_items", [])
+        matches = []
+        for alert in alerts:
+            alert_str = json.dumps(alert)
+            if indicator.lower() in alert_str.lower():
+                matches.append(alert)
+        return {
+            "data": {
+                "indicator": indicator,
+                "type": indicator_type,
+                "matching_alerts": len(matches),
+                "alerts": matches[:20],
+            }
+        }
 
     async def check_ioc_reputation(self, indicator: str, indicator_type: str) -> Dict[str, Any]:
-        """Check IoC reputation."""
-        params = {"indicator": indicator, "type": indicator_type}
-        return await self._request("GET", "/security/ioc/reputation", params=params)
+        """Check IoC reputation by searching alert history."""
+        if not self._indexer_client:
+            raise IndexerNotConfiguredError()
+        result = await self._indexer_client.get_alerts(limit=500)
+        alerts = result.get("data", {}).get("affected_items", [])
+        occurrences = 0
+        max_level = 0
+        for alert in alerts:
+            alert_str = json.dumps(alert)
+            if indicator.lower() in alert_str.lower():
+                occurrences += 1
+                level = alert.get("rule", {}).get("level", 0)
+                if isinstance(level, int) and level > max_level:
+                    max_level = level
+        risk = "high" if max_level >= 10 else "medium" if max_level >= 5 else "low"
+        return {
+            "data": {
+                "indicator": indicator,
+                "type": indicator_type,
+                "occurrences": occurrences,
+                "max_alert_level": max_level,
+                "risk": risk,
+            }
+        }
 
     async def perform_risk_assessment(self, agent_id: str = None) -> Dict[str, Any]:
-        """Perform risk assessment."""
-        endpoint = f"/security/risk/{agent_id}" if agent_id else "/security/risk"
-        return await self._request("GET", endpoint)
+        """Perform risk assessment from real agent and vulnerability data."""
+        risk_factors: list = []
+        params: Dict[str, Any] = {"select": "id,name,status,os.name,version"}
+        if agent_id:
+            params["agents_list"] = agent_id
+        agents = await self._request("GET", "/agents", params=params)
+        items = agents.get("data", {}).get("affected_items", [])
+        disconnected = [a for a in items if a.get("status") != "active"]
+        if disconnected:
+            risk_factors.append({"factor": "disconnected_agents", "count": len(disconnected), "severity": "high"})
+        if self._indexer_client:
+            try:
+                vuln_summary = await self._indexer_client.get_vulnerability_summary()
+                critical = vuln_summary.get("data", {}).get("critical", 0)
+                if critical > 0:
+                    risk_factors.append(
+                        {"factor": "critical_vulnerabilities", "count": critical, "severity": "critical"}
+                    )
+            except Exception:
+                pass
+        if any(f["severity"] == "critical" for f in risk_factors):
+            risk_level = "critical"
+        elif any(f["severity"] == "high" for f in risk_factors):
+            risk_level = "high"
+        else:
+            risk_level = "medium"
+        return {
+            "data": {
+                "total_agents": len(items),
+                "risk_factors": risk_factors,
+                "risk_level": risk_level,
+            }
+        }
 
     async def get_top_security_threats(self, limit: int, time_range: str) -> Dict[str, Any]:
-        """Get top security threats."""
-        params = {"limit": limit, "time_range": time_range}
-        return await self._request("GET", "/security/threats/top", params=params)
+        """Get top threats by alert rule frequency from Indexer."""
+        if not self._indexer_client:
+            raise IndexerNotConfiguredError()
+        start = self._time_range_to_start(time_range)
+        result = await self._indexer_client.get_alerts(limit=1000, timestamp_start=start)
+        alerts = result.get("data", {}).get("affected_items", [])
+        rule_counts: Dict[str, Dict[str, Any]] = {}
+        for alert in alerts:
+            rule = alert.get("rule", {})
+            rule_id = rule.get("id", "unknown")
+            if rule_id not in rule_counts:
+                rule_counts[rule_id] = {
+                    "rule_id": rule_id,
+                    "description": rule.get("description", ""),
+                    "level": rule.get("level", 0),
+                    "count": 0,
+                    "groups": rule.get("groups", []),
+                }
+            rule_counts[rule_id]["count"] += 1
+        threats = sorted(rule_counts.values(), key=lambda x: (-x.get("level", 0), -x["count"]))[:limit]
+        return {"data": {"time_range": time_range, "threats": threats, "total_unique_rules": len(rule_counts)}}
 
     async def generate_security_report(self, report_type: str, include_recommendations: bool) -> Dict[str, Any]:
-        """Generate security report."""
-        data = {"type": report_type, "include_recommendations": include_recommendations}
-        return await self._request("POST", "/security/reports/generate", json=data)
+        """Generate security report by aggregating data from multiple real endpoints."""
+        report: Dict[str, Any] = {
+            "report_type": report_type,
+            "generated_at": datetime.now(timezone.utc).isoformat(),
+            "sections": {},
+        }
+        try:
+            agents = await self._request("GET", "/agents", params={"limit": 500})
+            items = agents.get("data", {}).get("affected_items", [])
+            active = sum(1 for a in items if a.get("status") == "active")
+            report["sections"]["agents"] = {"total": len(items), "active": active, "disconnected": len(items) - active}
+        except Exception as e:
+            report["sections"]["agents"] = {"error": str(e)}
+        try:
+            info = await self._request("GET", "/")
+            report["sections"]["manager"] = info.get("data", {})
+        except Exception as e:
+            report["sections"]["manager"] = {"error": str(e)}
+        if self._indexer_client:
+            try:
+                vuln_summary = await self._indexer_client.get_vulnerability_summary()
+                report["sections"]["vulnerabilities"] = vuln_summary.get("data", {})
+            except Exception as e:
+                report["sections"]["vulnerabilities"] = {"error": str(e)}
+        return {"data": report}
 
     async def run_compliance_check(self, framework: str, agent_id: str = None) -> Dict[str, Any]:
-        """Run compliance check."""
-        data = {"framework": framework}
+        """Run compliance check using Wazuh SCA data."""
         if agent_id:
-            data["agent_id"] = agent_id
-        return await self._request("POST", "/security/compliance/check", json=data)
+            try:
+                return await self._request("GET", f"/sca/{agent_id}")
+            except Exception:
+                return await self._request(
+                    "GET", "/agents", params={"agents_list": agent_id, "select": "id,name,status,group,configSum"}
+                )
+        agents_result = await self._request(
+            "GET", "/agents", params={"status": "active", "limit": 10, "select": "id,name"}
+        )
+        agents = agents_result.get("data", {}).get("affected_items", [])
+        sca_results = []
+        for agent in agents[:5]:
+            aid = agent.get("id")
+            try:
+                sca = await self._request("GET", f"/sca/{aid}")
+                sca_results.append({"agent_id": aid, "agent_name": agent.get("name"), "sca": sca.get("data", {})})
+            except Exception:
+                sca_results.append({"agent_id": aid, "agent_name": agent.get("name"), "sca": {"error": "unavailable"}})
+        return {"data": {"framework": framework, "agents_checked": len(sca_results), "results": sca_results}}
 
     async def get_wazuh_statistics(self) -> Dict[str, Any]:
         """Get Wazuh statistics."""
