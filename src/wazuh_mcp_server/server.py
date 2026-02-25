@@ -10,6 +10,7 @@ import json
 import logging
 import os
 import threading
+import time
 import uuid
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone
@@ -313,9 +314,14 @@ class SessionManager:
 _session_store = create_session_store()
 sessions = SessionManager(_session_store)
 
+# Track last session cleanup time (run at most every 60 seconds, not every request)
+_last_session_cleanup: float = 0.0
+
 
 async def get_or_create_session(session_id: Optional[str], origin: Optional[str]) -> MCPSession:
     """Get existing session or create new one."""
+    global _last_session_cleanup
+
     if session_id:
         existing_session = await sessions.get(session_id)
         if existing_session:
@@ -328,18 +334,21 @@ async def get_or_create_session(session_id: Optional[str], origin: Optional[str]
     session = MCPSession(new_session_id, origin)
     await sessions.set(new_session_id, session)
 
-    # Cleanup expired sessions periodically
-    try:
-        expired_count = await sessions.cleanup_expired()
-        if expired_count > 0:
-            logger.debug(f"Cleaned up {expired_count} expired sessions")
-            # Sync _initialized_sessions with active sessions
-            active = await sessions.get_all()
-            stale_keys = [k for k in _initialized_sessions if k not in active]
-            for k in stale_keys:
-                _initialized_sessions.pop(k, None)
-    except Exception as e:
-        logger.error(f"Session cleanup error: {e}")
+    # Cleanup expired sessions periodically (at most every 60 seconds)
+    now = time.time()
+    if now - _last_session_cleanup > 60:
+        _last_session_cleanup = now
+        try:
+            expired_count = await sessions.cleanup_expired()
+            if expired_count > 0:
+                logger.debug(f"Cleaned up {expired_count} expired sessions")
+                # Sync _initialized_sessions with active sessions
+                active = await sessions.get_all()
+                stale_keys = [k for k in _initialized_sessions if k not in active]
+                for k in stale_keys:
+                    _initialized_sessions.pop(k, None)
+        except Exception as e:
+            logger.error(f"Session cleanup error: {e}")
 
     return session
 
@@ -670,6 +679,9 @@ _initialized_sessions: Dict[str, bool] = {}
 # Current log level for logging/setLevel
 _current_log_level: str = "info"
 
+
+# Batch request size limit to prevent resource exhaustion
+MAX_BATCH_SIZE = 100
 
 # MCP Protocol Handlers
 
@@ -2314,15 +2326,18 @@ async def generate_sse_events(session: MCPSession, event_id_counter: int = 0):
     yield f"id: {event_id}\nevent: message\ndata: {json.dumps(capabilities_notification)}\n\n"
 
     # Send periodic keepalive (ping) to maintain connection
-    while True:
-        event_id += 1
-        ping_notification = {
-            "jsonrpc": "2.0",
-            "method": "notifications/ping",
-            "params": {"timestamp": datetime.now(timezone.utc).isoformat()},
-        }
-        yield f"id: {event_id}\nevent: message\ndata: {json.dumps(ping_notification)}\n\n"
-        await asyncio.sleep(30)
+    try:
+        while True:
+            event_id += 1
+            ping_notification = {
+                "jsonrpc": "2.0",
+                "method": "notifications/ping",
+                "params": {"timestamp": datetime.now(timezone.utc).isoformat()},
+            }
+            yield f"id: {event_id}\nevent: message\ndata: {json.dumps(ping_notification)}\n\n"
+            await asyncio.sleep(30)
+    except (asyncio.CancelledError, GeneratorExit):
+        logger.debug(f"SSE connection closed for session {session.session_id}")
 
 
 def is_json_rpc_notification(message: Dict[str, Any]) -> bool:
@@ -2354,9 +2369,7 @@ async def mcp_endpoint(
     GET: Returns SSE stream for real-time communication
     POST: Handles JSON-RPC requests
     """
-    # Track metrics
-    REQUEST_COUNT.labels(method=request.method, endpoint="/", status_code=200).inc()
-
+    # Track active connections (request counting handled by monitoring middleware)
     ACTIVE_CONNECTIONS.inc()
 
     try:
@@ -2428,6 +2441,13 @@ async def mcp_endpoint(
                     return JSONResponse(
                         content=create_error_response(
                             None, MCP_ERRORS["INVALID_REQUEST"], "Empty batch request"
+                        ).dict(),
+                        status_code=400,
+                    )
+                if len(body) > MAX_BATCH_SIZE:
+                    return JSONResponse(
+                        content=create_error_response(
+                            None, MCP_ERRORS["INVALID_REQUEST"], f"Batch too large (max {MAX_BATCH_SIZE})"
                         ).dict(),
                         status_code=400,
                     )
@@ -2700,6 +2720,14 @@ async def mcp_streamable_http_endpoint(
                     return JSONResponse(
                         content=create_error_response(
                             None, MCP_ERRORS["INVALID_REQUEST"], "Empty batch request"
+                        ).dict(),
+                        status_code=400,
+                        headers=response_headers,
+                    )
+                if len(body) > MAX_BATCH_SIZE:
+                    return JSONResponse(
+                        content=create_error_response(
+                            None, MCP_ERRORS["INVALID_REQUEST"], f"Batch too large (max {MAX_BATCH_SIZE})"
                         ).dict(),
                         status_code=400,
                         headers=response_headers,

@@ -84,7 +84,10 @@ class WazuhClient:
             response = await self.client.post(auth_url, auth=(self.config.wazuh_user, self.config.wazuh_pass))
             response.raise_for_status()
 
-            data = response.json()
+            try:
+                data = response.json()
+            except (json.JSONDecodeError, ValueError):
+                raise ValueError("Invalid JSON in authentication response from Wazuh API")
             if "data" not in data or "token" not in data["data"]:
                 raise ValueError("Invalid authentication response from Wazuh API")
 
@@ -224,7 +227,7 @@ class WazuhClient:
     async def get_rules(self, **params) -> Dict[str, Any]:
         """Get Wazuh detection rules (cached for 5 minutes)."""
         # Use caching for rules as they rarely change
-        cache_key = f"rules:{hash(frozenset(params.items()) if params else 'all')}"
+        cache_key = f"rules:{sorted(params.items()) if params else 'all'}"
         return await self._get_cached(cache_key, "/rules", params=params)
 
     async def get_rule_info(self, rule_id: str) -> Dict[str, Any]:
@@ -234,7 +237,7 @@ class WazuhClient:
     async def get_decoders(self, **params) -> Dict[str, Any]:
         """Get Wazuh log decoders (cached for 5 minutes)."""
         # Use caching for decoders as they rarely change
-        cache_key = f"decoders:{hash(frozenset(params.items()) if params else 'all')}"
+        cache_key = f"decoders:{sorted(params.items()) if params else 'all'}"
         return await self._get_cached(cache_key, "/decoders", params=params)
 
     async def execute_active_response(self, data: Dict[str, Any]) -> Dict[str, Any]:
@@ -370,7 +373,10 @@ class WazuhClient:
             response = await self.client.request(method, url, headers=headers, **kwargs)
             response.raise_for_status()
 
-            data = response.json()
+            try:
+                data = response.json()
+            except (json.JSONDecodeError, ValueError):
+                raise ValueError(f"Invalid JSON response from Wazuh API: {endpoint}")
 
             # Validate response structure
             if "data" not in data:
@@ -391,7 +397,10 @@ class WazuhClient:
                 headers = {"Authorization": f"Bearer {self.token}"}
                 response = await self.client.request(method, url, headers=headers, **kwargs)
                 response.raise_for_status()
-                return response.json()
+                try:
+                    return response.json()
+                except (json.JSONDecodeError, ValueError):
+                    raise ValueError(f"Invalid JSON response from Wazuh API after re-auth: {endpoint}")
             else:
                 logger.error(f"Wazuh API request failed: {e.response.status_code} - {e.response.text}")
                 raise ValueError(f"Wazuh API request failed: {e.response.status_code} - {e.response.text}")

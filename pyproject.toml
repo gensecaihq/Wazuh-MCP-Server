@@ -46,6 +46,8 @@ dependencies = [
     # Utilities
     "python-dotenv>=1.0.0",
     "aiofiles>=24.0.0",
+    # MCP Framework
+    "fastmcp>=2.14.0",
 ]
 
 [project.optional-dependencies]

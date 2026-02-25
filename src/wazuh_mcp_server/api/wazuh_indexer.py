@@ -7,6 +7,8 @@ Wazuh stores alerts and vulnerability data in the Wazuh Indexer
   - wazuh-states-vulnerabilities-* — vulnerability data (removed from Manager API in 4.8.0)
 """
 
+import asyncio
+import json
 import logging
 from typing import Any, Dict, Optional
 
@@ -45,6 +47,7 @@ class WazuhIndexerClient:
         self.timeout = timeout
         self.client: Optional[httpx.AsyncClient] = None
         self._initialized = False
+        self._init_lock = asyncio.Lock()
 
     @staticmethod
     def _normalize_host(host: str) -> str:
@@ -79,9 +82,12 @@ class WazuhIndexerClient:
             self._initialized = False
 
     async def _ensure_initialized(self):
-        """Ensure client is initialized."""
-        if not self._initialized:
-            await self.initialize()
+        """Ensure client is initialized (thread-safe)."""
+        if self._initialized:
+            return
+        async with self._init_lock:
+            if not self._initialized:
+                await self.initialize()
 
     @retry(
         stop=stop_after_attempt(3),
@@ -109,7 +115,10 @@ class WazuhIndexerClient:
         try:
             response = await self.client.post(url, json=body, headers={"Content-Type": "application/json"})
             response.raise_for_status()
-            return response.json()
+            try:
+                return response.json()
+            except (json.JSONDecodeError, ValueError):
+                raise ValueError(f"Invalid JSON response from Wazuh Indexer: {index}")
 
         except httpx.HTTPStatusError as e:
             logger.error(f"Indexer search failed: {e.response.status_code} - {e.response.text}")
@@ -185,7 +194,10 @@ class WazuhIndexerClient:
         try:
             response = await self.client.post(url, json=body, headers={"Content-Type": "application/json"})
             response.raise_for_status()
-            result = response.json()
+            try:
+                result = response.json()
+            except (json.JSONDecodeError, ValueError):
+                raise ValueError("Invalid JSON response from Wazuh Indexer alerts query")
         except httpx.HTTPStatusError as e:
             logger.error(f"Alerts query failed: {e.response.status_code} - {e.response.text}")
             raise ValueError(f"Alerts query failed: {e.response.status_code}")

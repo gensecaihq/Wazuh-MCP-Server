@@ -74,6 +74,17 @@ structured_logger = StructuredLogger(__name__)
 # Prometheus metrics registry
 REGISTRY = CollectorRegistry()
 
+# Known endpoints for metric label normalization (prevents unbounded cardinality)
+_KNOWN_ENDPOINTS = {"/", "/mcp", "/health", "/metrics"}
+
+
+def _normalize_endpoint(path: str) -> str:
+    """Collapse unknown paths to 'other' to prevent label explosion."""
+    if path in _KNOWN_ENDPOINTS:
+        return path
+    return "other"
+
+
 # Core metrics
 REQUEST_COUNT = Counter(
     "wazuh_mcp_requests_total", "Total number of requests", ["method", "endpoint", "status_code"], registry=REGISTRY
@@ -495,7 +506,7 @@ async def check_circuit_breaker() -> Dict[str, Any]:
         client = await get_wazuh_client()
         if hasattr(client, "_circuit_breaker"):
             cb = client._circuit_breaker
-            state = cb._state if hasattr(cb, "_state") else "unknown"
+            state = cb.state.value if hasattr(cb, "state") else "unknown"
             failure_count = cb.failure_count if hasattr(cb, "failure_count") else 0
 
             # Update Prometheus metric
@@ -608,8 +619,9 @@ def setup_monitoring_middleware():
             # Record metrics
             duration = time.time() - start_time
 
-            REQUEST_COUNT.labels(method=method, endpoint=path, status_code=status_code).inc()
-            REQUEST_DURATION.labels(method=method, endpoint=path).observe(duration)
+            normalized = _normalize_endpoint(path)
+            REQUEST_COUNT.labels(method=method, endpoint=normalized, status_code=status_code).inc()
+            REQUEST_DURATION.labels(method=method, endpoint=normalized).observe(duration)
 
             # Record slow requests with correlation ID
             if duration > performance_profiler.slow_threshold:

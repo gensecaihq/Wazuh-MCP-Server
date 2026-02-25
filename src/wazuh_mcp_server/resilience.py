@@ -14,7 +14,7 @@ from typing import Any, Callable, Optional, Type
 
 import httpx
 from fastapi import HTTPException
-from tenacity import retry, retry_if_exception_type, stop_after_attempt, wait_exponential
+from tenacity import retry, retry_if_exception, retry_if_exception_type, stop_after_attempt, wait_exponential
 
 logger = logging.getLogger(__name__)
 
@@ -53,6 +53,7 @@ class CircuitBreaker:
         self.failure_count = 0
         self.last_failure_time: Optional[float] = None
         self.next_retry_time: Optional[float] = None
+        self._lock = asyncio.Lock()
 
     def __call__(self, func: Callable) -> Callable:
         """Decorator to apply circuit breaker to function."""
@@ -66,19 +67,20 @@ class CircuitBreaker:
     async def _call(self, func: Callable, *args, **kwargs) -> Any:
         """Execute function with circuit breaker logic."""
 
-        # Check if circuit is open
-        if self.state == CircuitBreakerState.OPEN:
-            if self._should_attempt_reset():
-                self.state = CircuitBreakerState.HALF_OPEN
-                logger.info(f"Circuit breaker {func.__name__} moved to HALF_OPEN")
-            else:
-                if self.config.fallback_function:
-                    logger.warning(f"Circuit breaker {func.__name__} OPEN, using fallback")
-                    return await self.config.fallback_function(*args, **kwargs)
+        # Check if circuit is open (under lock to prevent race conditions)
+        async with self._lock:
+            if self.state == CircuitBreakerState.OPEN:
+                if self._should_attempt_reset():
+                    self.state = CircuitBreakerState.HALF_OPEN
+                    logger.info(f"Circuit breaker {func.__name__} moved to HALF_OPEN")
                 else:
-                    raise HTTPException(
-                        status_code=503, detail="Service temporarily unavailable - circuit breaker open"
-                    )
+                    if self.config.fallback_function:
+                        logger.warning(f"Circuit breaker {func.__name__} OPEN, using fallback")
+                        return await self.config.fallback_function(*args, **kwargs)
+                    else:
+                        raise HTTPException(
+                            status_code=503, detail="Service temporarily unavailable - circuit breaker open"
+                        )
 
         try:
             result = await func(*args, **kwargs)
@@ -101,23 +103,24 @@ class CircuitBreaker:
 
     async def _on_success(self, func_name: str):
         """Handle successful execution."""
-        if self.state == CircuitBreakerState.HALF_OPEN:
-            self.state = CircuitBreakerState.CLOSED
-            logger.info(f"Circuit breaker {func_name} reset to CLOSED")
-
-        self.failure_count = 0
-        self.last_failure_time = None
+        async with self._lock:
+            if self.state == CircuitBreakerState.HALF_OPEN:
+                self.state = CircuitBreakerState.CLOSED
+                logger.info(f"Circuit breaker {func_name} reset to CLOSED")
+            self.failure_count = 0
+            self.last_failure_time = None
 
     async def _on_failure(self, func_name: str, exception: Exception):
         """Handle failed execution."""
-        self.failure_count += 1
-        self.last_failure_time = time.time()
-
-        if self.failure_count >= self.config.failure_threshold:
-            self.state = CircuitBreakerState.OPEN
-            logger.warning(
-                f"Circuit breaker {func_name} opened after {self.failure_count} failures. " f"Last error: {exception}"
-            )
+        async with self._lock:
+            self.failure_count += 1
+            self.last_failure_time = time.time()
+            if self.failure_count >= self.config.failure_threshold:
+                self.state = CircuitBreakerState.OPEN
+                logger.warning(
+                    f"Circuit breaker {func_name} opened after {self.failure_count} failures. "
+                    f"Last error: {exception}"
+                )
 
 
 class TimeoutManager:
@@ -155,13 +158,22 @@ class TimeoutManager:
         return decorator
 
 
+def _is_retryable(exception):
+    """Only retry on transient errors (5xx, connection, timeout)."""
+    if isinstance(exception, httpx.RequestError):
+        return True  # Connection/timeout errors
+    if isinstance(exception, httpx.HTTPStatusError):
+        return exception.response.status_code >= 500
+    return False
+
+
 class RetryConfig:
     """Retry configuration."""
 
     WAZUH_API_RETRY = retry(
         stop=stop_after_attempt(3),
         wait=wait_exponential(multiplier=1, min=1, max=10),
-        retry=retry_if_exception_type((httpx.RequestError, httpx.HTTPStatusError)),
+        retry=retry_if_exception(_is_retryable),
         reraise=True,
     )
 

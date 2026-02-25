@@ -44,7 +44,7 @@ jobs:
     - name: Run tests
       run: |
         pip install pytest pytest-asyncio
-        pytest tests/ -v || true
+        pytest tests/ -v
     
     - name: Build package
       run: python -m build
