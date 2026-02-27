@@ -14,7 +14,6 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional
 
-from fastapi import Header, HTTPException
 from jose import jwt
 from jose.exceptions import ExpiredSignatureError, JWTError
 from pydantic import BaseModel, Field
@@ -268,20 +267,6 @@ class AuthManager:
 auth_manager = AuthManager()
 
 
-class TokenRequest(BaseModel):
-    """Token request model."""
-
-    api_key: str = Field(description="API key to exchange for token")
-
-
-class TokenResponse(BaseModel):
-    """Token response model."""
-
-    token: str = Field(description="Authentication token")
-    expires_in: int = Field(description="Token lifetime in seconds")
-    token_type: str = Field(default="Bearer")
-
-
 async def verify_bearer_token(authorization: str) -> AuthToken:
     """
     Verify bearer token from Authorization header.
@@ -379,57 +364,3 @@ def verify_token(token: str, secret_key: str) -> Dict[str, Any]:
         raise ValueError("Token has expired")
     except JWTError:
         raise ValueError("Invalid token")
-
-
-async def create_auth_endpoints(app):
-    """Add authentication endpoints to FastAPI app."""
-
-    @app.post("/auth/token", response_model=TokenResponse)
-    async def create_token(request: TokenRequest):
-        """Exchange API key for authentication token."""
-        token = auth_manager.create_token(request.api_key)
-        if not token:
-            raise HTTPException(status_code=401, detail="Invalid API key")
-
-        token_obj = auth_manager.tokens[token]
-        expires_in = int((token_obj.expires_at - datetime.now(timezone.utc)).total_seconds())
-
-        return TokenResponse(token=token, expires_in=expires_in)
-
-    @app.get("/auth/validate")
-    async def validate_token(authorization: str = Header(description="Bearer token")):
-        """Validate authentication token."""
-        try:
-            token_obj = await verify_bearer_token(authorization)
-            return {
-                "valid": True,
-                "api_key_id": token_obj.api_key_id,
-                "scopes": token_obj.scopes,
-                "expires_at": token_obj.expires_at.isoformat() if token_obj.expires_at else None,
-            }
-        except ValueError as e:
-            raise HTTPException(status_code=401, detail=str(e))
-
-    @app.post("/auth/revoke")
-    async def revoke_token(authorization: str = Header(description="Bearer token")):
-        """Revoke authentication token."""
-        if not authorization.startswith("Bearer "):
-            raise HTTPException(status_code=400, detail="Invalid authorization header")
-
-        token = authorization[7:]
-        if auth_manager.revoke_token(token):
-            return {"revoked": True}
-        else:
-            raise HTTPException(status_code=404, detail="Token not found")
-
-    @app.get("/auth/stats")
-    async def auth_stats(authorization: str = Header(description="Bearer token")):
-        """Get authentication statistics (requires admin scope)."""
-        try:
-            token_obj = await verify_bearer_token(authorization)
-            if not token_obj.has_scope("admin"):
-                raise HTTPException(status_code=403, detail="Admin scope required")
-
-            return auth_manager.get_stats()
-        except ValueError as e:
-            raise HTTPException(status_code=401, detail=str(e))

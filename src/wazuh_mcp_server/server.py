@@ -27,11 +27,12 @@ from wazuh_mcp_server.api.wazuh_client import WazuhClient
 from wazuh_mcp_server.api.wazuh_indexer import IndexerNotConfiguredError
 from wazuh_mcp_server.auth import create_access_token
 from wazuh_mcp_server.config import WazuhConfig, get_config
-from wazuh_mcp_server.monitoring import ACTIVE_CONNECTIONS, REQUEST_COUNT
+from wazuh_mcp_server.monitoring import ACTIVE_CONNECTIONS, REQUEST_COUNT, setup_monitoring_middleware
 from wazuh_mcp_server.resilience import GracefulShutdown
 from wazuh_mcp_server.security import (
     RateLimiter,
     ToolValidationError,
+    security_middleware,
     validate_active_response_command,
     validate_agent_id,
     validate_agent_status,
@@ -135,16 +136,16 @@ class MCPResponse(BaseModel):
     result: Optional[Any] = Field(default=None, description="Result data")
     error: Optional[Dict[str, Any]] = Field(default=None, description="Error object")
 
-    def dict(self, *args, **kwargs) -> Dict[str, Any]:
+    def model_dump(self, *args, **kwargs) -> Dict[str, Any]:
         """
-        Override dict() to comply with JSON-RPC 2.0 specification.
+        Override model_dump() to comply with JSON-RPC 2.0 specification.
 
         Per JSON-RPC 2.0 spec:
         - "result" and "error" MUST NOT both exist in the same response
         - On success: include 'result', exclude 'error'
         - On error: include 'error', exclude 'result'
         """
-        d = super().dict(*args, **kwargs)
+        d = super().model_dump(*args, **kwargs)
 
         # Remove error field on success (when result is present and error is None)
         if d.get("result") is not None and d.get("error") is None:
@@ -155,6 +156,10 @@ class MCPResponse(BaseModel):
             d.pop("result", None)
 
         return d
+
+    def dict(self, *args, **kwargs) -> Dict[str, Any]:
+        """Backwards-compatible wrapper for model_dump()."""
+        return self.model_dump(*args, **kwargs)
 
 
 class MCPError(BaseModel):
@@ -235,14 +240,16 @@ class SessionManager:
     def _run_sync(self, coro):
         """Run coroutine synchronously, handling existing event loop safely."""
         try:
-            # Check if we're in an async context
-            loop = asyncio.get_running_loop()
+            asyncio.get_running_loop()
             # If we get here, there's a running loop - this is not safe
             raise RuntimeError(
                 "Synchronous SessionManager methods cannot be called from async context. "
                 "Use async methods like 'await sessions.get()' instead."
             )
-        except RuntimeError:
+        except RuntimeError as e:
+            # Re-raise if this is our own "cannot be called from async" error
+            if "Synchronous SessionManager" in str(e):
+                raise
             # No running loop - safe to create one
             loop = asyncio.new_event_loop()
             try:
@@ -265,9 +272,9 @@ class SessionManager:
         """Synchronous delete (blocks). Not for use in async context."""
         self._run_sync(self.remove(session_id))
 
-    async def __contains__(self, session_id: str) -> bool:
-        """Check if session exists."""
-        return await self._store.exists(session_id)
+    def __contains__(self, session_id: str) -> bool:
+        """Check if session exists (synchronous for use with 'in' operator)."""
+        return self._run_sync(self._store.exists(session_id))
 
     async def remove(self, session_id: str) -> bool:
         """Remove session by ID."""
@@ -304,9 +311,9 @@ class SessionManager:
         data_dict = await self._store.get_all()
         return {sid: self._session_from_dict(data) for sid, data in data_dict.items()}
 
-    async def cleanup_expired(self) -> int:
+    async def cleanup_expired(self, timeout_minutes: int = 30) -> int:
         """Remove expired sessions and return count."""
-        return await self._store.cleanup_expired()
+        return await self._store.cleanup_expired(timeout_minutes=timeout_minutes)
 
 
 # Initialize session manager with pluggable backend
@@ -582,6 +589,12 @@ def validate_origin_header(origin: Optional[str], allowed_origins_config: str) -
     raise HTTPException(status_code=403, detail=f"Origin not allowed: {origin}")
 
 
+# Register monitoring middleware for request tracking and correlation IDs
+app.middleware("http")(setup_monitoring_middleware())
+
+# Register security middleware for security headers and request validation
+app.middleware("http")(security_middleware)
+
 allowed_origins = validate_cors_origins(config.ALLOWED_ORIGINS)
 
 app.add_middleware(
@@ -793,7 +806,12 @@ async def handle_initialize(params: Dict[str, Any], session: MCPSession) -> Dict
         "description": "MCP-compliant remote server for Wazuh SIEM integration",
     }
 
-    # Mark session as awaiting initialized notification
+    # Mark session as awaiting initialized notification (cap to prevent unbounded growth)
+    if len(_initialized_sessions) > 10000:
+        # Evict oldest entries to prevent memory leak
+        to_remove = list(_initialized_sessions.keys())[: len(_initialized_sessions) - 5000]
+        for k in to_remove:
+            _initialized_sessions.pop(k, None)
     _initialized_sessions[session.session_id] = False
 
     return {
@@ -1245,7 +1263,7 @@ async def handle_tools_list(params: Dict[str, Any], session: MCPSession) -> Dict
                     "agent_id": {"type": "string", "description": "Specific agent ID to query"},
                     "status": {
                         "type": "string",
-                        "enum": ["active", "disconnected", "never_connected"],
+                        "enum": ["active", "disconnected", "never_connected", "pending"],
                         "description": "Filter by agent status",
                     },
                     "limit": {"type": "integer", "minimum": 1, "maximum": 1000, "default": 100},
@@ -2016,9 +2034,11 @@ async def handle_tools_call(params: Dict[str, Any], session: MCPSession) -> Dict
         # Active Response / Action Tools
         elif tool_name == "wazuh_block_ip":
             ip_address = validate_ip_address(arguments.get("ip_address"), required=True)
-            duration = validate_limit(
-                arguments.get("duration"), min_val=0, max_val=86400, param_name="duration"
-            ) if arguments.get("duration") is not None else 0
+            duration = (
+                validate_limit(arguments.get("duration"), min_val=0, max_val=86400, param_name="duration")
+                if arguments.get("duration") is not None
+                else 0
+            )
             agent_id = validate_agent_id(arguments.get("agent_id"))
             result = await wazuh_client.block_ip(ip_address, duration, agent_id)
             _success = True
@@ -2032,9 +2052,7 @@ async def handle_tools_call(params: Dict[str, Any], session: MCPSession) -> Dict
 
         elif tool_name == "wazuh_kill_process":
             agent_id = validate_agent_id(arguments.get("agent_id"), required=True)
-            process_id = validate_limit(
-                arguments.get("process_id"), min_val=1, max_val=999999, param_name="process_id"
-            )
+            process_id = validate_limit(arguments.get("process_id"), min_val=1, max_val=999999, param_name="process_id")
             result = await wazuh_client.kill_process(agent_id, process_id)
             _success = True
             return {"content": [{"type": "text", "text": f"Kill Process Result:\n{json.dumps(result, indent=2)}"}]}
@@ -2051,9 +2069,7 @@ async def handle_tools_call(params: Dict[str, Any], session: MCPSession) -> Dict
             file_path = validate_file_path(arguments.get("file_path"), required=True)
             result = await wazuh_client.quarantine_file(agent_id, file_path)
             _success = True
-            return {
-                "content": [{"type": "text", "text": f"Quarantine File Result:\n{json.dumps(result, indent=2)}"}]
-            }
+            return {"content": [{"type": "text", "text": f"Quarantine File Result:\n{json.dumps(result, indent=2)}"}]}
 
         elif tool_name == "wazuh_active_response":
             agent_id = validate_agent_id(arguments.get("agent_id"), required=True)
@@ -2061,21 +2077,19 @@ async def handle_tools_call(params: Dict[str, Any], session: MCPSession) -> Dict
             parameters = arguments.get("parameters")
             result = await wazuh_client.run_active_response(agent_id, command, parameters)
             _success = True
-            return {
-                "content": [{"type": "text", "text": f"Active Response Result:\n{json.dumps(result, indent=2)}"}]
-            }
+            return {"content": [{"type": "text", "text": f"Active Response Result:\n{json.dumps(result, indent=2)}"}]}
 
         elif tool_name == "wazuh_firewall_drop":
             agent_id = validate_agent_id(arguments.get("agent_id"), required=True)
             src_ip = validate_ip_address(arguments.get("src_ip"), required=True, param_name="src_ip")
-            duration = validate_limit(
-                arguments.get("duration"), min_val=0, max_val=86400, param_name="duration"
-            ) if arguments.get("duration") is not None else 0
+            duration = (
+                validate_limit(arguments.get("duration"), min_val=0, max_val=86400, param_name="duration")
+                if arguments.get("duration") is not None
+                else 0
+            )
             result = await wazuh_client.firewall_drop(agent_id, src_ip, duration)
             _success = True
-            return {
-                "content": [{"type": "text", "text": f"Firewall Drop Result:\n{json.dumps(result, indent=2)}"}]
-            }
+            return {"content": [{"type": "text", "text": f"Firewall Drop Result:\n{json.dumps(result, indent=2)}"}]}
 
         elif tool_name == "wazuh_host_deny":
             agent_id = validate_agent_id(arguments.get("agent_id"), required=True)
@@ -2100,23 +2114,17 @@ async def handle_tools_call(params: Dict[str, Any], session: MCPSession) -> Dict
             agent_id = validate_agent_id(arguments.get("agent_id"))
             result = await wazuh_client.check_blocked_ip(ip_address, agent_id)
             _success = True
-            return {
-                "content": [{"type": "text", "text": f"Blocked IP Check:\n{json.dumps(result, indent=2)}"}]
-            }
+            return {"content": [{"type": "text", "text": f"Blocked IP Check:\n{json.dumps(result, indent=2)}"}]}
 
         elif tool_name == "wazuh_check_agent_isolation":
             agent_id = validate_agent_id(arguments.get("agent_id"), required=True)
             result = await wazuh_client.check_agent_isolation(agent_id)
             _success = True
-            return {
-                "content": [{"type": "text", "text": f"Agent Isolation Check:\n{json.dumps(result, indent=2)}"}]
-            }
+            return {"content": [{"type": "text", "text": f"Agent Isolation Check:\n{json.dumps(result, indent=2)}"}]}
 
         elif tool_name == "wazuh_check_process":
             agent_id = validate_agent_id(arguments.get("agent_id"), required=True)
-            process_id = validate_limit(
-                arguments.get("process_id"), min_val=1, max_val=999999, param_name="process_id"
-            )
+            process_id = validate_limit(arguments.get("process_id"), min_val=1, max_val=999999, param_name="process_id")
             result = await wazuh_client.check_process(agent_id, process_id)
             _success = True
             return {"content": [{"type": "text", "text": f"Process Check:\n{json.dumps(result, indent=2)}"}]}
@@ -2133,18 +2141,14 @@ async def handle_tools_call(params: Dict[str, Any], session: MCPSession) -> Dict
             file_path = validate_file_path(arguments.get("file_path"), required=True)
             result = await wazuh_client.check_file_quarantine(agent_id, file_path)
             _success = True
-            return {
-                "content": [{"type": "text", "text": f"File Quarantine Check:\n{json.dumps(result, indent=2)}"}]
-            }
+            return {"content": [{"type": "text", "text": f"File Quarantine Check:\n{json.dumps(result, indent=2)}"}]}
 
         # Rollback Tools
         elif tool_name == "wazuh_unisolate_host":
             agent_id = validate_agent_id(arguments.get("agent_id"), required=True)
             result = await wazuh_client.unisolate_host(agent_id)
             _success = True
-            return {
-                "content": [{"type": "text", "text": f"Unisolate Host Result:\n{json.dumps(result, indent=2)}"}]
-            }
+            return {"content": [{"type": "text", "text": f"Unisolate Host Result:\n{json.dumps(result, indent=2)}"}]}
 
         elif tool_name == "wazuh_enable_user":
             agent_id = validate_agent_id(arguments.get("agent_id"), required=True)
@@ -2165,9 +2169,7 @@ async def handle_tools_call(params: Dict[str, Any], session: MCPSession) -> Dict
             src_ip = validate_ip_address(arguments.get("src_ip"), required=True, param_name="src_ip")
             result = await wazuh_client.firewall_allow(agent_id, src_ip)
             _success = True
-            return {
-                "content": [{"type": "text", "text": f"Firewall Allow Result:\n{json.dumps(result, indent=2)}"}]
-            }
+            return {"content": [{"type": "text", "text": f"Firewall Allow Result:\n{json.dumps(result, indent=2)}"}]}
 
         elif tool_name == "wazuh_host_allow":
             agent_id = validate_agent_id(arguments.get("agent_id"), required=True)
@@ -2359,6 +2361,7 @@ def is_json_rpc_request(message: Dict[str, Any]) -> bool:
 @app.post("/")
 async def mcp_endpoint(
     request: Request,
+    authorization: str = Header(None),
     origin: Optional[str] = Header(None),
     accept: Optional[str] = Header(None),
     mcp_session_id: Optional[str] = Header(None, alias="MCP-Session-Id"),
@@ -2369,6 +2372,9 @@ async def mcp_endpoint(
     GET: Returns SSE stream for real-time communication
     POST: Handles JSON-RPC requests
     """
+    # Verify authentication based on configured mode
+    await verify_authentication(authorization, config)
+
     # Track active connections (request counting handled by monitoring middleware)
     ACTIVE_CONNECTIONS.inc()
 
@@ -2947,7 +2953,9 @@ async def metrics():
     """Prometheus metrics endpoint."""
     from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
 
-    return Response(content=generate_latest(), media_type=CONTENT_TYPE_LATEST)
+    from wazuh_mcp_server.monitoring import REGISTRY
+
+    return Response(content=generate_latest(REGISTRY), media_type=CONTENT_TYPE_LATEST)
 
 
 # OAuth 2.0 Discovery Endpoint (RFC 8414)
@@ -2983,22 +2991,11 @@ async def get_auth_token(request: Request):
         if not isinstance(api_key, str) or not api_key.startswith("wazuh_"):
             raise HTTPException(status_code=401, detail="Invalid API key format")
 
-        # Validate against configured API key
-        # Priority: MCP_API_KEY env var > auto-generated key
-        configured_key = os.getenv("MCP_API_KEY", "")
+        # Validate against auth_manager (handles MCP_API_KEY env var and auto-generated keys)
+        from wazuh_mcp_server.auth import auth_manager
 
-        if configured_key:
-            # Use constant-time comparison to prevent timing attacks
-            import hmac
-
-            if not hmac.compare_digest(api_key, configured_key):
-                raise HTTPException(status_code=401, detail="Invalid API key")
-        else:
-            # Fall back to auth_manager validation
-            from wazuh_mcp_server.auth import auth_manager
-
-            if not auth_manager.validate_api_key(api_key):
-                raise HTTPException(status_code=401, detail="Invalid API key")
+        if not auth_manager.validate_api_key(api_key):
+            raise HTTPException(status_code=401, detail="Invalid API key")
 
         # Create JWT token with safe payload (no API key exposure)
         token = create_access_token(

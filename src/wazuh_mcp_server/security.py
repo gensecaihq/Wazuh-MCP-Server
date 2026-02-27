@@ -39,7 +39,7 @@ class ToolValidationError(ValueError):
 
 
 # Valid enum values for tool parameters
-VALID_TIME_RANGES = {"1h", "6h", "24h", "7d", "1d", "30d"}
+VALID_TIME_RANGES = {"1h", "6h", "12h", "24h", "7d", "1d", "30d"}
 VALID_SEVERITIES = {"low", "medium", "high", "critical"}
 VALID_AGENT_STATUSES = {"active", "disconnected", "never_connected", "pending"}
 VALID_INDICATOR_TYPES = {"ip", "hash", "domain", "url"}
@@ -354,7 +354,9 @@ def validate_file_path(value: Any, required: bool = False, param_name: str = "fi
         raise ToolValidationError(param_name, "contains path traversal", "Path must not contain '..'")
 
     if len(file_path) > 500:
-        raise ToolValidationError(param_name, f"too long ({len(file_path)} chars)", "Path must be 500 characters or less")
+        raise ToolValidationError(
+            param_name, f"too long ({len(file_path)} chars)", "Path must be 500 characters or less"
+        )
 
     return file_path
 

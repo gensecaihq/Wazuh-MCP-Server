@@ -95,7 +95,9 @@ class WazuhIndexerClient:
         retry=retry_if_exception_type((httpx.RequestError, httpx.HTTPStatusError)),
         reraise=True,
     )
-    async def _search(self, index: str, query: Dict[str, Any], size: int = 100) -> Dict[str, Any]:
+    async def _search(
+        self, index: str, query: Dict[str, Any], size: int = 100, sort: Optional[list] = None
+    ) -> Dict[str, Any]:
         """
         Execute a search query against the Wazuh Indexer.
 
@@ -103,6 +105,7 @@ class WazuhIndexerClient:
             index: Index pattern to search
             query: Elasticsearch query DSL
             size: Maximum number of results
+            sort: Optional sort specification
 
         Returns:
             Search results from the indexer
@@ -110,7 +113,9 @@ class WazuhIndexerClient:
         await self._ensure_initialized()
 
         url = f"{self.base_url}/{index}/_search"
-        body = {"query": query, "size": size}
+        body: Dict[str, Any] = {"query": query, "size": size}
+        if sort:
+            body["sort"] = sort
 
         try:
             response = await self.client.post(url, json=body, headers={"Content-Type": "application/json"})
@@ -151,8 +156,6 @@ class WazuhIndexerClient:
         Returns:
             Alert data in standard Wazuh format
         """
-        await self._ensure_initialized()
-
         # Build bool query with must clauses for each non-empty filter
         must_clauses: list = []
 
@@ -183,28 +186,8 @@ class WazuhIndexerClient:
         else:
             query = {"match_all": {}}
 
-        # Build the full search body with sort by timestamp desc
-        url = f"{self.base_url}/{ALERTS_INDEX}/_search"
-        body = {
-            "query": query,
-            "size": limit,
-            "sort": [{"timestamp": {"order": "desc"}}],
-        }
-
-        try:
-            response = await self.client.post(url, json=body, headers={"Content-Type": "application/json"})
-            response.raise_for_status()
-            try:
-                result = response.json()
-            except (json.JSONDecodeError, ValueError):
-                raise ValueError("Invalid JSON response from Wazuh Indexer alerts query")
-        except httpx.HTTPStatusError as e:
-            logger.error(f"Alerts query failed: {e.response.status_code} - {e.response.text}")
-            raise ValueError(f"Alerts query failed: {e.response.status_code}")
-        except httpx.ConnectError:
-            raise ConnectionError(f"Cannot connect to Wazuh Indexer at {self.host}:{self.port}")
-        except httpx.TimeoutException:
-            raise ConnectionError(f"Timeout connecting to Wazuh Indexer at {self.host}:{self.port}")
+        # Use _search helper for consistent retry logic (sorted by timestamp desc)
+        result = await self._search(ALERTS_INDEX, query, size=limit, sort=[{"timestamp": {"order": "desc"}}])
 
         # Transform to standard Wazuh format
         hits = result.get("hits", {})

@@ -17,7 +17,27 @@ from wazuh_mcp_server.resilience import CircuitBreaker, CircuitBreakerConfig, Re
 logger = logging.getLogger(__name__)
 
 # Time range to hours mapping for indexer-based queries
-_TIME_RANGE_HOURS = {"1h": 1, "6h": 6, "12h": 12, "24h": 24, "7d": 168, "30d": 720}
+_TIME_RANGE_HOURS = {"1h": 1, "6h": 6, "12h": 12, "1d": 24, "24h": 24, "7d": 168, "30d": 720}
+
+
+def _dict_contains_text(d: Any, text: str) -> bool:
+    """Recursively check if any string value in a dict/list contains the given text.
+    Much faster than json.dumps() + string search for large nested dicts."""
+    if isinstance(d, dict):
+        for v in d.values():
+            if _dict_contains_text(v, text):
+                return True
+    elif isinstance(d, (list, tuple)):
+        for item in d:
+            if _dict_contains_text(item, text):
+                return True
+    elif isinstance(d, str):
+        if text in d.lower():
+            return True
+    elif isinstance(d, (int, float)):
+        if text in str(d):
+            return True
+    return False
 
 
 class WazuhClient:
@@ -462,9 +482,7 @@ class WazuhClient:
                     "level": rule.get("level", 0),
                 }
             rule_counts[rule_id]["count"] += 1
-        patterns = [
-            {"rule_id": k, **v} for k, v in rule_counts.items() if v["count"] >= min_frequency
-        ]
+        patterns = [{"rule_id": k, **v} for k, v in rule_counts.items() if v["count"] >= min_frequency]
         patterns.sort(key=lambda x: x["count"], reverse=True)
         return {
             "data": {
@@ -476,11 +494,20 @@ class WazuhClient:
         }
 
     async def search_security_events(self, query: str, time_range: str, limit: int) -> Dict[str, Any]:
-        """Search security events via the Wazuh Indexer."""
+        """Search security events via the Wazuh Indexer with query filtering."""
         if not self._indexer_client:
             raise IndexerNotConfiguredError()
         start = self._time_range_to_start(time_range)
-        return await self._indexer_client.get_alerts(limit=limit, timestamp_start=start)
+        # Fetch a larger batch from the indexer, then filter by query
+        fetch_limit = min(limit * 5, 2000)
+        result = await self._indexer_client.get_alerts(limit=fetch_limit, timestamp_start=start)
+        if query:
+            alerts = result.get("data", {}).get("affected_items", [])
+            query_lower = query.lower()
+            filtered = [a for a in alerts if _dict_contains_text(a, query_lower)]
+            result["data"]["affected_items"] = filtered[:limit]
+            result["data"]["total_affected_items"] = len(filtered)
+        return result
 
     async def get_running_agents(self) -> Dict[str, Any]:
         """Get running agents."""
@@ -589,11 +616,8 @@ class WazuhClient:
             raise IndexerNotConfiguredError()
         result = await self._indexer_client.get_alerts(limit=100)
         alerts = result.get("data", {}).get("affected_items", [])
-        matches = []
-        for alert in alerts:
-            alert_str = json.dumps(alert)
-            if indicator.lower() in alert_str.lower():
-                matches.append(alert)
+        indicator_lower = indicator.lower()
+        matches = [a for a in alerts if _dict_contains_text(a, indicator_lower)]
         return {
             "data": {
                 "indicator": indicator,
@@ -611,9 +635,9 @@ class WazuhClient:
         alerts = result.get("data", {}).get("affected_items", [])
         occurrences = 0
         max_level = 0
+        indicator_lower = indicator.lower()
         for alert in alerts:
-            alert_str = json.dumps(alert)
-            if indicator.lower() in alert_str.lower():
+            if _dict_contains_text(alert, indicator_lower):
                 occurrences += 1
                 level = alert.get("rule", {}).get("level", 0)
                 if isinstance(level, int) and level > max_level:
@@ -887,14 +911,12 @@ class WazuhClient:
             raise IndexerNotConfiguredError()
         result = await self._indexer_client.get_alerts(limit=50)
         alerts = result.get("data", {}).get("affected_items", [])
-        matches = [a for a in alerts if ip_address in json.dumps(a) and "firewall-drop" in json.dumps(a)]
+        matches = [a for a in alerts if _dict_contains_text(a, ip_address) and _dict_contains_text(a, "firewall-drop")]
         return {"data": {"ip_address": ip_address, "blocked": len(matches) > 0, "matching_alerts": len(matches)}}
 
     async def check_agent_isolation(self, agent_id: str) -> Dict[str, Any]:
         """Check agent isolation status."""
-        result = await self._request(
-            "GET", "/agents", params={"agents_list": agent_id, "select": "id,name,status"}
-        )
+        result = await self._request("GET", "/agents", params={"agents_list": agent_id, "select": "id,name,status"})
         agents = result.get("data", {}).get("affected_items", [])
         if not agents:
             raise ValueError(f"Agent {agent_id} not found")
@@ -910,9 +932,7 @@ class WazuhClient:
 
     async def check_process(self, agent_id: str, process_id: int) -> Dict[str, Any]:
         """Check if a process is still running on an agent."""
-        result = await self._request(
-            "GET", f"/syscollector/{agent_id}/processes", params={"limit": 500}
-        )
+        result = await self._request("GET", f"/syscollector/{agent_id}/processes", params={"limit": 500})
         processes = result.get("data", {}).get("affected_items", [])
         running = any(str(p.get("pid")) == str(process_id) for p in processes)
         return {"data": {"agent_id": agent_id, "process_id": process_id, "running": running}}
@@ -930,9 +950,7 @@ class WazuhClient:
 
     async def check_file_quarantine(self, agent_id: str, file_path: str) -> Dict[str, Any]:
         """Check if a file has been quarantined via FIM events."""
-        result = await self._request(
-            "GET", "/syscheck", params={"agents_list": agent_id, "q": f"file={file_path}"}
-        )
+        result = await self._request("GET", "/syscheck", params={"agents_list": agent_id, "q": f"file={file_path}"})
         events = result.get("data", {}).get("affected_items", [])
         quarantined = any(e.get("type") == "deleted" or "quarantine" in str(e) for e in events)
         return {"data": {"agent_id": agent_id, "file_path": file_path, "quarantined": quarantined}}
