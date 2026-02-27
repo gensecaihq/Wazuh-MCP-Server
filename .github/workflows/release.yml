@@ -127,31 +127,35 @@ jobs:
     - name: Generate release notes
       id: notes
       run: |
-        cat << EOF > RELEASE_NOTES.md
+        cat << 'ENDOFNOTES' > RELEASE_NOTES.md
         # Wazuh MCP Server Release ${{ steps.version.outputs.VERSION }}
-        
+
         ## 🚀 Features
         - Production-ready MCP server for Wazuh SIEM
-        - 29 specialized security tools
-        - Full MCP protocol compliance
-        - Enterprise-grade security
-        
+        - 48 specialized security tools (alerts, agents, vulnerabilities, active response, compliance)
+        - Full MCP 2025-11-25 protocol compliance (Streamable HTTP + legacy SSE)
+        - Enterprise-grade security with authentication on all endpoints
+
         ## 📦 Installation
-        
-        ### PyPI
-        \`\`\`bash
-        pip install wazuh-mcp-server==${{ steps.version.outputs.VERSION }}
-        \`\`\`
-        
-        ### Docker
-        \`\`\`bash
-        docker pull gensecai/wazuh-mcp-server:${{ steps.version.outputs.VERSION }}
-        \`\`\`
-        
+
+        ### From Source (Recommended)
+        ```bash
+        git clone https://github.com/gensecaihq/Wazuh-MCP-Server.git
+        cd Wazuh-MCP-Server
+        cp .env.example .env
+        # Edit .env with your Wazuh credentials
+        docker compose up -d
+        ```
+
+        ### Docker Compose
+        ```bash
+        docker compose up -d
+        ```
+
         ## 📋 Changelog
         See [CHANGELOG.md](https://github.com/${{ github.repository }}/blob/main/CHANGELOG.md)
-        EOF
-    
+        ENDOFNOTES
+
     - name: Create Release
       uses: softprops/action-gh-release@v2
       with:

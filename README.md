@@ -3,7 +3,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Python 3.13+](https://img.shields.io/badge/Python-3.13+-blue.svg)](https://www.python.org/downloads/)
 [![MCP 2025-11-25](https://img.shields.io/badge/MCP-2025--11--25-green.svg)](https://modelcontextprotocol.io/)
-[![Docker](https://img.shields.io/badge/Docker-Ready-blue.svg)](https://hub.docker.com/)
+[![Docker](https://img.shields.io/badge/Docker-Ready-blue.svg)](https://github.com/gensecaihq/Wazuh-MCP-Server)
 
 **Production-ready MCP server connecting AI assistants to Wazuh SIEM.**
 
