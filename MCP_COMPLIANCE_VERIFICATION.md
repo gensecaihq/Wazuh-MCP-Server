@@ -86,7 +86,7 @@ This document verifies that the Wazuh MCP Remote Server fully complies with the 
 |-------------|--------|----------------|
 | **JSON-RPC 2.0** | ✅ COMPLIANT | Full JSON-RPC 2.0 compliance |
 | **Session management** | ✅ COMPLIANT | MCPSession class with state tracking |
-| **Tool registration** | ✅ COMPLIANT | 29 tools properly registered |
+| **Tool registration** | ✅ COMPLIANT | 48 tools properly registered |
 | **Error handling** | ✅ COMPLIANT | Standard MCP error codes |
 | **Capability negotiation** | ✅ COMPLIANT | Server capabilities exposed |
 
@@ -98,7 +98,7 @@ This document verifies that the Wazuh MCP Remote Server fully complies with the 
 |--------|--------|----------------|
 | **initialize** | ✅ COMPLIANT | Session creation with capability negotiation |
 | **ping** | ✅ COMPLIANT | Returns empty `{}` per spec |
-| **tools/list** | ✅ COMPLIANT | 29 tools with pagination support |
+| **tools/list** | ✅ COMPLIANT | 48 tools with pagination support |
 | **tools/call** | ✅ COMPLIANT | Tool execution with error handling |
 | **prompts/list** | ✅ COMPLIANT | 4 security prompts with pagination |
 | **prompts/get** | ✅ COMPLIANT | Prompt content with argument substitution |
@@ -219,7 +219,7 @@ curl -X POST http://localhost:3000/mcp \
      -H "MCP-Session-Id: <session-id>" \
      -H "Content-Type: application/json" \
      -d '{"jsonrpc":"2.0","method":"tools/list","id":"2"}'
-# Expected: JSON-RPC response with 29 tools
+# Expected: JSON-RPC response with 48 tools
 
 # Test GET with SSE (requires Accept header)
 curl -H "Authorization: Bearer <token>" \

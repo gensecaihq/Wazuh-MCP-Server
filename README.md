@@ -7,7 +7,7 @@
 
 **Production-ready MCP server connecting AI assistants to Wazuh SIEM.**
 
-> **Version 4.0.7** | Wazuh 4.8.0 - 4.14.3 | [Full Changelog](CHANGELOG.md)
+> **Version 4.0.8** | Wazuh 4.8.0 - 4.14.3 | [Full Changelog](CHANGELOG.md)
 
 ---
 
@@ -58,13 +58,13 @@ Agentic SOC:     Alert → AI triages → Seconds later → Response ready for a
 | Category | Capabilities |
 |----------|-------------|
 | **MCP Protocol** | 100% compliant with MCP 2025-11-25, Streamable HTTP + Legacy SSE |
-| **Security Tools** | 29 specialized tools for alerts, agents, vulnerabilities, compliance |
+| **Security Tools** | 48 specialized tools for alerts, agents, vulnerabilities, compliance, active response |
 | **Authentication** | OAuth 2.0 with DCR, Bearer tokens (JWT), or authless mode |
-| **Production Ready** | Circuit breakers, rate limiting, graceful shutdown, Prometheus metrics |
+| **Production Ready** | Circuit breakers, rate limiting, security & monitoring middleware, Prometheus metrics |
 | **Deployment** | Docker containerized, multi-platform (AMD64/ARM64), serverless-ready |
 | **Token Efficiency** | Compact output mode reduces responses by ~66% |
 
-### 29 Security Tools
+### 48 Security Tools
 
 | Category | Tools |
 |----------|-------|
@@ -73,6 +73,9 @@ Agentic SOC:     Alert → AI triages → Seconds later → Response ready for a
 | **Vulnerabilities** (3) | `get_wazuh_vulnerabilities`, `get_wazuh_critical_vulnerabilities`, `get_wazuh_vulnerability_summary` |
 | **Security Analysis** (7) | `search_security_events`, `analyze_security_threat`, `check_ioc_reputation`, `perform_risk_assessment`, `get_top_security_threats`, `generate_security_report`, `run_compliance_check` |
 | **System** (10) | `get_wazuh_statistics`, `get_wazuh_weekly_stats`, `get_wazuh_cluster_health`, `get_wazuh_cluster_nodes`, `get_wazuh_rules_summary`, `get_wazuh_remoted_stats`, `get_wazuh_log_collector_stats`, `search_wazuh_manager_logs`, `get_wazuh_manager_error_logs`, `validate_wazuh_connection` |
+| **Active Response** (9) | `wazuh_block_ip`, `wazuh_isolate_host`, `wazuh_kill_process`, `wazuh_disable_user`, `wazuh_quarantine_file`, `wazuh_active_response`, `wazuh_firewall_drop`, `wazuh_host_deny`, `wazuh_restart` |
+| **Verification** (5) | `wazuh_check_blocked_ip`, `wazuh_check_agent_isolation`, `wazuh_check_process`, `wazuh_check_user_status`, `wazuh_check_file_quarantine` |
+| **Rollback** (5) | `wazuh_unisolate_host`, `wazuh_enable_user`, `wazuh_restore_file`, `wazuh_firewall_allow`, `wazuh_host_allow` |
 
 ---
 
@@ -185,26 +188,28 @@ curl http://localhost:3000/health
 
 ```
 src/wazuh_mcp_server/
-├── server.py           # MCP server with 29 tools
-├── config.py           # Configuration management
-├── auth.py             # JWT authentication
+├── server.py           # MCP server with 48 tools (Streamable HTTP + SSE)
+├── config.py           # Configuration management with validation
+├── config_validator.py # Startup configuration validation
+├── auth.py             # JWT & API key authentication
 ├── oauth.py            # OAuth 2.0 with DCR
-├── security.py         # Rate limiting, CORS
-├── monitoring.py       # Prometheus metrics
-├── resilience.py       # Circuit breakers, retries
-├── session_store.py    # Pluggable sessions
+├── security.py         # Rate limiting, CORS, input validation, security middleware
+├── monitoring.py       # Prometheus metrics, request tracking middleware
+├── resilience.py       # Circuit breakers, retries, graceful shutdown
+├── session_store.py    # Pluggable sessions (in-memory + Redis)
 └── api/
-    ├── wazuh_client.py    # Wazuh Manager API
-    └── wazuh_indexer.py   # Wazuh Indexer API
+    ├── wazuh_client.py    # Wazuh Manager API client
+    └── wazuh_indexer.py   # Wazuh Indexer API client (alerts + vulnerabilities)
 ```
 
 ---
 
 ## Security
 
-- **Authentication**: JWT tokens, OAuth 2.0 with DCR
+- **Authentication**: JWT tokens, OAuth 2.0 with DCR, all endpoints protected
+- **Security Middleware**: Automatic security headers (X-Content-Type-Options, X-Frame-Options, CSP)
 - **Rate Limiting**: Per-client request throttling
-- **Input Validation**: SQL injection and XSS protection
+- **Input Validation**: Comprehensive parameter validation with SQL injection and XSS protection
 - **Container Security**: Non-root user, read-only filesystem
 
 ```bash

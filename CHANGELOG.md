@@ -5,6 +5,34 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [4.0.8] - 2026-02-26
+
+### Fixed
+- **Auth bypass on root endpoint**: The `/` MCP endpoint was missing authentication, allowing unauthenticated access to all tools when `AUTH_MODE=bearer`
+- **`_run_sync` RuntimeError catch**: Method raised RuntimeError as a safety guard but then caught its own exception in the `except` block, silently falling through
+- **`__contains__` async bug**: `SessionManager.__contains__` was defined as `async def` but Python's `in` operator doesn't `await`, always returning a truthy coroutine object
+- **`/auth/token` bypassing auth_manager**: Token endpoint compared raw API key strings instead of using `auth_manager.validate_api_key()` with proper format checks and constant-time hash comparison
+- **`search_security_events` ignoring query**: The `query` parameter was validated but never passed to the indexer, returning unfiltered results
+- **`cleanup_expired` signature mismatch**: `SessionManager.cleanup_expired()` didn't accept `timeout_minutes` parameter, causing TypeError when called from `HealthRecovery._recover_memory_pressure`
+- **Monitoring middleware not registered**: `setup_monitoring_middleware()` was defined but never registered on the FastAPI app, so no request tracking or correlation IDs were applied
+- **Prometheus `/metrics` empty**: `generate_latest()` was called without the custom `REGISTRY`, returning empty default registry instead of actual metrics
+
+### Added
+- Security middleware now registered on the FastAPI app, adding security headers (X-Content-Type-Options, X-Frame-Options, etc.) to all responses
+- `"12h"` added to `VALID_TIME_RANGES` and `"1d": 24` added to `_TIME_RANGE_HOURS` for consistent time range support
+- `"pending"` added to agent status enum in tool schema to match `VALID_AGENT_STATUSES`
+- Max size guard on `_initialized_sessions` dict to prevent unbounded memory growth (capped at 10,000 entries)
+- 23 new test cases covering audit fixes (33 total tests, up from 10)
+
+### Changed
+- `MCPResponse` now overrides Pydantic v2 `model_dump()` instead of deprecated v1 `dict()` method
+- `get_alerts` in `WazuhIndexerClient` refactored to use `_search()` helper for consistent retry logic
+- `analyze_security_threat`, `check_ioc_reputation`, and `check_blocked_ip` use recursive dict search instead of O(n) `json.dumps()` per alert
+- `_search()` in `WazuhIndexerClient` now accepts optional `sort` parameter
+
+### Removed
+- Dead `create_auth_endpoints()` function, `TokenRequest`/`TokenResponse` classes, and unused `HTTPException` import from `auth.py`
+
 ## [4.0.7] - 2026-02-25
 
 ### Added

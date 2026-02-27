@@ -1,6 +1,6 @@
 # FastMCP Tools API Reference
 
-Complete reference for all 29 FastMCP tools available in Wazuh MCP Server v2.1.0.
+Complete reference for all 48 tools available in Wazuh MCP Server v4.0.8.
 
 ## 🛠️ Tool Categories
 
@@ -29,9 +29,10 @@ Identify and analyze security vulnerabilities across your environment.
 - **get_wazuh_critical_vulnerabilities** - Critical vulnerabilities only
 - **get_wazuh_vulnerability_summary** - Vulnerability statistics and trends
 
-### 🔍 [Security Analysis](security.md) (6 tools)
+### 🔍 [Security Analysis](security-analysis.md) (7 tools)
 AI-powered security analysis and threat intelligence capabilities.
 
+- **search_security_events** - Advanced security event search with query filtering
 - **analyze_security_threat** - AI-powered threat analysis
 - **check_ioc_reputation** - IoC reputation checking
 - **perform_risk_assessment** - Comprehensive risk analysis
@@ -39,7 +40,7 @@ AI-powered security analysis and threat intelligence capabilities.
 - **generate_security_report** - Automated security reporting
 - **run_compliance_check** - Compliance framework validation
 
-### 📊 [System Monitoring](monitoring.md) (10 tools)
+### 📊 [System Monitoring](system-monitoring.md) (10 tools)
 Monitor system health, performance, and operational metrics.
 
 - **get_wazuh_statistics** - Comprehensive system statistics
@@ -52,6 +53,37 @@ Monitor system health, performance, and operational metrics.
 - **search_wazuh_manager_logs** - Manager log search
 - **get_wazuh_manager_error_logs** - Error log retrieval
 - **validate_wazuh_connection** - Connection validation
+
+### ⚡ Active Response (9 tools)
+Execute active response actions on Wazuh agents.
+
+- **wazuh_block_ip** - Block IP address via active response
+- **wazuh_isolate_host** - Isolate a host from the network
+- **wazuh_kill_process** - Kill a running process on an agent
+- **wazuh_disable_user** - Disable a user account
+- **wazuh_quarantine_file** - Quarantine a suspicious file
+- **wazuh_active_response** - Send custom active response command
+- **wazuh_firewall_drop** - Add firewall drop rule
+- **wazuh_host_deny** - Add host deny rule
+- **wazuh_restart** - Restart Wazuh agent
+
+### ✅ Verification (5 tools)
+Verify the status of active response actions.
+
+- **wazuh_check_blocked_ip** - Verify IP is blocked
+- **wazuh_check_agent_isolation** - Verify agent isolation status
+- **wazuh_check_process** - Check if process is running
+- **wazuh_check_user_status** - Check user account status
+- **wazuh_check_file_quarantine** - Check file quarantine status
+
+### ↩️ Rollback (5 tools)
+Reverse active response actions.
+
+- **wazuh_unisolate_host** - Remove host isolation
+- **wazuh_enable_user** - Re-enable a disabled user
+- **wazuh_restore_file** - Restore a quarantined file
+- **wazuh_firewall_allow** - Remove firewall drop rule
+- **wazuh_host_allow** - Remove host deny rule
 
 ## 🎯 Quick Examples
 
@@ -109,7 +141,7 @@ All tools return JSON responses with consistent structure:
   "metadata": {
     "query_time": "2024-01-01T12:00:00Z",
     "api_source": "wazuh_server",
-    "version": "2.1.0"
+    "version": "4.0.8"
   }
 }
 ```

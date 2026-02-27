@@ -178,11 +178,11 @@ docker compose up -d
 
 | Endpoint | Method | Description |
 |----------|--------|-------------|
-| `/mcp` | GET/POST | **Recommended** - Streamable HTTP (2025-11-25) |
+| `/mcp` | GET/POST/DELETE | **Recommended** - Streamable HTTP (MCP 2025-11-25) |
 | `/sse` | GET | Legacy SSE endpoint |
-| `/` | POST | JSON-RPC 2.0 endpoint |
+| `/` | GET/POST | JSON-RPC 2.0 endpoint (authenticated) |
 | `/health` | GET | Health check |
-| `/metrics` | GET | Prometheus metrics |
+| `/metrics` | GET | Prometheus metrics (custom registry) |
 | `/docs` | GET | OpenAPI documentation |
 
 ### Authentication Endpoints

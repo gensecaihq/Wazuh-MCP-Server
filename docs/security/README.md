@@ -1,14 +1,16 @@
 # Security Configuration Guide
 
-Comprehensive security hardening guide for Wazuh MCP Server v2.1.0 production deployments.
+Comprehensive security hardening guide for Wazuh MCP Server v4.0.8 production deployments.
 
 ## 🔒 Security Overview
 
 Wazuh MCP Server implements multiple layers of security:
-- **Transport Security**: STDIO-only transport eliminates network attack vectors
-- **Authentication**: Robust credential management and token-based authentication
+- **Transport Security**: HTTPS with Streamable HTTP transport, CORS origin validation
+- **Authentication**: OAuth 2.0 with DCR, JWT bearer tokens, API key authentication on all endpoints
+- **Security Middleware**: Automatic security headers (X-Content-Type-Options, X-Frame-Options, CSP, etc.)
 - **Encryption**: TLS/SSL encryption for all API communications
-- **Input Validation**: Comprehensive parameter validation and sanitization
+- **Input Validation**: Comprehensive parameter validation and sanitization with dedicated validators
+- **Rate Limiting**: Per-client request throttling to prevent abuse
 - **Audit Logging**: Complete audit trail for security events
 
 ## 🛡️ Security Architecture
@@ -24,11 +26,13 @@ Wazuh MCP Server implements multiple layers of security:
 ### Threat Model
 
 **Mitigated Threats:**
-- ✅ Network-based attacks (STDIO transport only)
-- ✅ Man-in-the-middle attacks (TLS encryption)
-- ✅ Credential theft (secure storage practices)
-- ✅ Injection attacks (input validation)
-- ✅ Privilege escalation (least privilege)
+- ✅ Unauthorized access (authentication enforced on all MCP endpoints including `/`, `/mcp`, `/sse`)
+- ✅ Man-in-the-middle attacks (TLS encryption, security headers)
+- ✅ Credential theft (constant-time hash comparison, secure storage practices)
+- ✅ Injection attacks (comprehensive input validation with regex patterns)
+- ✅ Privilege escalation (least privilege, scope-based access)
+- ✅ Brute force attacks (rate limiting per client)
+- ✅ Clickjacking/XSS (security middleware headers)
 
 **Residual Risks:**
 - ⚠️ Local system compromise
@@ -296,7 +300,7 @@ rsyslog -f /etc/rsyslog.d/wazuh-mcp.conf
 #### Security Health Validation
 ```bash
 # Run security-focused health check
-./bin/wazuh-mcp-server --health-check --security
+curl http://localhost:3000/health
 
 # Expected security checks:
 # ✅ ssl_config: SSL verification enabled
@@ -339,7 +343,7 @@ fi
 #### Emergency Commands
 ```bash
 # Emergency shutdown
-pkill -f wazuh-mcp-server
+docker compose down
 
 # Revoke API access
 curl -k -X DELETE "https://wazuh-server:55000/security/users/mcp-service/tokens" \

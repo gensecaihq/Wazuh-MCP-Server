@@ -1,6 +1,6 @@
 # Configuration Guide
 
-Complete configuration reference for Wazuh MCP Server v2.1.0.
+Complete configuration reference for Wazuh MCP Server v4.0.8.
 
 ## 📋 Configuration Overview
 
@@ -33,7 +33,7 @@ WAZUH_USER=wazuh
 WAZUH_PASS=changeme
 
 # Transport Configuration
-MCP_TRANSPORT=stdio
+MCP_TRANSPORT=streamable-http
 ```
 
 ## 💡 Complete Configuration Reference
@@ -126,9 +126,9 @@ CACHE_MAX_SIZE=1000                      # Maximum cache entries
 
 ```bash
 # Transport Settings
-MCP_TRANSPORT=stdio                       # Transport type (stdio only)
+MCP_TRANSPORT=streamable-http            # Transport type (streamable-http)
 MCP_SERVER_NAME=Wazuh MCP Server         # Server name
-MCP_SERVER_VERSION=2.1.0                 # Server version
+MCP_SERVER_VERSION=4.0.8                 # Server version
 
 # Tool Configuration
 ENABLE_SECURITY_TOOLS=true               # Enable security analysis tools
@@ -261,26 +261,24 @@ CLIENT_KEY_PATH=/etc/wazuh-mcp/client.key
 
 ## 🎯 Configuration Validation
 
-### Health Check Command
+### Health Check
 
 ```bash
 # Validate configuration
-./bin/wazuh-mcp-server --health-check
+curl -s http://localhost:3000/health | jq .
 
-# Validate with detailed output
-./bin/wazuh-mcp-server --health-check --verbose
+# Check with verbose output
+curl -v http://localhost:3000/health
 ```
 
-### Configuration Test Script
+### Configuration Test
 
 ```bash
-# Test configuration
-python tools/validate_setup.py
+# Test configuration via health endpoint
+curl -s http://localhost:3000/health | jq .
 
-# Test specific components
-python tools/validate_setup.py --test-connection
-python tools/validate_setup.py --test-ssl
-python tools/validate_setup.py --test-auth
+# Verify imports
+PYTHONPATH=src python -c "from wazuh_mcp_server.server import app; print('OK')"
 ```
 
 ## 📝 Configuration Examples
@@ -294,7 +292,7 @@ WAZUH_PORT=55000
 WAZUH_USER=wazuh-api
 WAZUH_PASS=secure-password
 VERIFY_SSL=false
-MCP_TRANSPORT=stdio
+MCP_TRANSPORT=streamable-http
 LOG_LEVEL=INFO
 ```
 
@@ -347,10 +345,7 @@ Configuration precedence (highest to lowest):
 ```bash
 # Override via environment variable
 export WAZUH_HOST=new-server.com
-./bin/wazuh-mcp-server --stdio
-
-# Override via command line (if supported)
-./bin/wazuh-mcp-server --wazuh-host=new-server.com --stdio
+docker compose up -d
 ```
 
 ### Configuration Reloading
@@ -359,8 +354,7 @@ Currently, configuration changes require server restart:
 
 ```bash
 # After changing .env file
-pkill -f wazuh-mcp-server
-./bin/wazuh-mcp-server --stdio
+docker compose restart wazuh-mcp-remote-server
 ```
 
 ## 🐛 Troubleshooting Configuration
@@ -480,10 +474,10 @@ For detailed instructions, see the [Claude Desktop Integration](../README.md#-cl
 
 For configuration issues:
 
-1. **Check [Troubleshooting Guide](troubleshooting/README.md)**
-2. **Run health check**: `./bin/wazuh-mcp-server --health-check`
-3. **Validate setup**: `python tools/validate_setup.py`
-4. **Check logs**: `tail -f logs/wazuh-mcp-server.log`
+1. **Check [Troubleshooting Guide](TROUBLESHOOTING.md)**
+2. **Run health check**: `curl http://localhost:3000/health`
+3. **Check Prometheus metrics**: `curl http://localhost:3000/metrics`
+4. **Check logs**: `docker compose logs -f wazuh-mcp-remote-server`
 
 ---
 

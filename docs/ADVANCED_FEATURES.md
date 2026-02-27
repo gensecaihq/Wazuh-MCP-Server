@@ -17,8 +17,8 @@ The server includes production-grade HA features for maximum reliability.
 
 - Exponential backoff with jitter
 - 3 retry attempts with 1-10 second delays
-- Applies to all Wazuh API calls
-- Handles transient network failures
+- Applies to all Wazuh API and Indexer calls (including alert queries)
+- Only retries transient errors (5xx, connection errors) — not 400/401/404
 
 ### Graceful Shutdown
 
@@ -28,6 +28,15 @@ The server includes production-grade HA features for maximum reliability.
 - Integrates with Docker health checks
 
 **Implementation:** Automatically applied to all Wazuh API calls - no configuration required.
+
+### Security & Monitoring Middleware
+
+Two middleware layers are automatically registered on all HTTP requests:
+
+- **Monitoring Middleware**: Tracks request counts, active connections, response durations, and adds correlation IDs to every request
+- **Security Middleware**: Adds security headers to all responses (X-Content-Type-Options, X-Frame-Options, Content-Security-Policy, X-XSS-Protection, Referrer-Policy)
+
+Prometheus metrics are available at `/metrics` using a custom collector registry for accurate reporting.
 
 ---
 
