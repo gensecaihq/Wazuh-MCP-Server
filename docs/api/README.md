@@ -1,6 +1,6 @@
 # FastMCP Tools API Reference
 
-Complete reference for all 48 tools available in Wazuh MCP Server v4.0.8.
+Complete reference for all 48 tools available in Wazuh MCP Server v4.0.9.
 
 ## 🛠️ Tool Categories
 
@@ -141,7 +141,7 @@ All tools return JSON responses with consistent structure:
   "metadata": {
     "query_time": "2024-01-01T12:00:00Z",
     "api_source": "wazuh_server",
-    "version": "4.0.8"
+    "version": "4.0.9"
   }
 }
 ```

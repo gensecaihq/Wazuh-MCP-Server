@@ -336,8 +336,9 @@ async def get_or_create_session(session_id: Optional[str], origin: Optional[str]
             await sessions.set(session_id, existing_session)
             return existing_session
 
-    # Create new session
-    new_session_id = session_id or str(uuid.uuid4())
+    # Always generate server-side session IDs to prevent session fixation attacks.
+    # Client-provided session IDs are only used to look up existing sessions above.
+    new_session_id = str(uuid.uuid4())
     session = MCPSession(new_session_id, origin)
     await sessions.set(new_session_id, session)
 
@@ -573,17 +574,13 @@ def validate_origin_header(origin: Optional[str], allowed_origins_config: str) -
     # Parse allowed origins
     allowed_origins_list = allowed_origins_config.split(",") if allowed_origins_config else []
 
-    # Check if origin is allowed
+    # Check if origin is allowed (exact match only for security)
     for allowed in allowed_origins_list:
         allowed = allowed.strip()
         if allowed == "*":
             return  # Wildcard allows everything
         if allowed == origin:
             return  # Exact match
-        if allowed.startswith("*") and origin.endswith(allowed[1:]):
-            return  # Wildcard suffix match
-        if "localhost" in allowed and "localhost" in origin:
-            return  # Localhost match (for development)
 
     # Origin present but not in allowed list - per spec MUST return 403
     raise HTTPException(status_code=403, detail=f"Origin not allowed: {origin}")
@@ -1785,7 +1782,18 @@ async def handle_tools_call(params: Dict[str, Any], session: MCPSession) -> Dict
             # Validate all parameters
             limit = validate_limit(arguments.get("limit"), max_val=1000)
             rule_id = validate_rule_id(arguments.get("rule_id"))
-            level = arguments.get("level")  # Free-form (e.g., "12", "10+")
+            level = arguments.get("level")
+            # Validate level format: must be a number optionally followed by "+"
+            if level is not None:
+                import re
+
+                level = str(level).strip()
+                if not re.match(r"^[0-9]{1,2}\+?$", level):
+                    raise ToolValidationError(
+                        "level",
+                        f"invalid format '{level}'",
+                        "Use a number 0-15, optionally with '+' (e.g., '12', '10+')",
+                    )
             agent_id = validate_agent_id(arguments.get("agent_id"))
             timestamp_start = validate_timestamp(arguments.get("timestamp_start"), param_name="timestamp_start")
             timestamp_end = validate_timestamp(arguments.get("timestamp_end"), param_name="timestamp_end")
@@ -1811,6 +1819,14 @@ async def handle_tools_call(params: Dict[str, Any], session: MCPSession) -> Dict
         elif tool_name == "get_wazuh_alert_summary":
             time_range = validate_time_range(arguments.get("time_range"))
             group_by = arguments.get("group_by", "rule.level")
+            # Validate group_by to prevent injection (only allow safe dotted field paths)
+            VALID_GROUP_BY = {"rule.level", "rule.id", "rule.groups", "agent.id", "agent.name"}
+            if group_by not in VALID_GROUP_BY:
+                raise ToolValidationError(
+                    "group_by",
+                    f"invalid value '{group_by}'",
+                    f"Must be one of: {', '.join(sorted(VALID_GROUP_BY))}",
+                )
             result = await wazuh_client.get_alert_summary(time_range, group_by)
             _success = True
             return {"content": [{"type": "text", "text": f"Alert Summary:\n{json.dumps(result, indent=2)}"}]}
@@ -2296,7 +2312,7 @@ async def process_mcp_request(request: MCPRequest, session: MCPSession) -> MCPRe
         return create_error_response(request.id, MCP_ERRORS["INTERNAL_ERROR"], "Internal server error")
 
 
-async def generate_sse_events(session: MCPSession, event_id_counter: int = 0):
+async def generate_sse_events(session: MCPSession, event_id_counter: int = 0, track_connection: bool = False):
     """
     Generate Server-Sent Events for MCP Streamable HTTP transport.
 
@@ -2304,31 +2320,36 @@ async def generate_sse_events(session: MCPSession, event_id_counter: int = 0):
     - SSE events MUST include an 'id' field for resumability
     - Server SHOULD immediately send a priming event with event ID and empty data
     - Server SHOULD send retry field to indicate reconnection delay
+
+    Args:
+        session: The MCP session
+        event_id_counter: Starting event ID
+        track_connection: If True, decrement ACTIVE_CONNECTIONS when stream ends
     """
     event_id = event_id_counter
 
-    # Per 2025-11-25 spec: "The server SHOULD immediately send an SSE event
-    # consisting of an event ID and an empty data field in order to prime
-    # the client to reconnect (using that event ID as Last-Event-ID)"
-    event_id += 1
-    yield f"id: {event_id}\nretry: 3000\ndata: \n\n"
-
-    # Send session info as a JSON-RPC notification
-    event_id += 1
-    session_notification = {"jsonrpc": "2.0", "method": "notifications/session", "params": session.to_dict()}
-    yield f"id: {event_id}\nevent: message\ndata: {json.dumps(session_notification)}\n\n"
-
-    # Send capabilities notification
-    event_id += 1
-    capabilities_notification = {
-        "jsonrpc": "2.0",
-        "method": "notifications/capabilities",
-        "params": {"tools": True, "resources": True, "prompts": True, "logging": True},
-    }
-    yield f"id: {event_id}\nevent: message\ndata: {json.dumps(capabilities_notification)}\n\n"
-
-    # Send periodic keepalive (ping) to maintain connection
     try:
+        # Per 2025-11-25 spec: "The server SHOULD immediately send an SSE event
+        # consisting of an event ID and an empty data field in order to prime
+        # the client to reconnect (using that event ID as Last-Event-ID)"
+        event_id += 1
+        yield f"id: {event_id}\nretry: 3000\ndata: \n\n"
+
+        # Send session info as a JSON-RPC notification
+        event_id += 1
+        session_notification = {"jsonrpc": "2.0", "method": "notifications/session", "params": session.to_dict()}
+        yield f"id: {event_id}\nevent: message\ndata: {json.dumps(session_notification)}\n\n"
+
+        # Send capabilities notification
+        event_id += 1
+        capabilities_notification = {
+            "jsonrpc": "2.0",
+            "method": "notifications/capabilities",
+            "params": {"tools": True, "resources": True, "prompts": True, "logging": True},
+        }
+        yield f"id: {event_id}\nevent: message\ndata: {json.dumps(capabilities_notification)}\n\n"
+
+        # Send periodic keepalive (ping) to maintain connection
         while True:
             event_id += 1
             ping_notification = {
@@ -2340,6 +2361,9 @@ async def generate_sse_events(session: MCPSession, event_id_counter: int = 0):
             await asyncio.sleep(30)
     except (asyncio.CancelledError, GeneratorExit):
         logger.debug(f"SSE connection closed for session {session.session_id}")
+    finally:
+        if track_connection:
+            ACTIVE_CONNECTIONS.dec()
 
 
 def is_json_rpc_notification(message: Dict[str, Any]) -> bool:
@@ -2377,6 +2401,7 @@ async def mcp_endpoint(
 
     # Track active connections (request counting handled by monitoring middleware)
     ACTIVE_CONNECTIONS.inc()
+    _sse_returned = False  # Track if SSE stream was returned (generator handles decrement)
 
     try:
         # Origin validation per MCP 2025-11-25 spec
@@ -2405,8 +2430,10 @@ async def mcp_endpoint(
         # Handle GET request (SSE)
         if request.method == "GET":
             if accept and "text/event-stream" in accept:
+                # track_connection=True: decrement happens when stream closes
+                _sse_returned = True
                 response = StreamingResponse(
-                    generate_sse_events(session),
+                    generate_sse_events(session, track_connection=True),
                     media_type="text/event-stream",
                     headers={
                         "Cache-Control": "no-cache",
@@ -2561,7 +2588,9 @@ async def mcp_endpoint(
             raise HTTPException(status_code=405, detail="Method not allowed")
 
     finally:
-        ACTIVE_CONNECTIONS.dec()
+        # Only decrement for non-SSE responses; SSE generator handles its own decrement
+        if not _sse_returned:
+            ACTIVE_CONNECTIONS.dec()
 
 
 # Official MCP Remote Server SSE endpoint - as per Anthropic standards
@@ -2602,9 +2631,10 @@ async def mcp_sse_endpoint(
         session = await get_or_create_session(mcp_session_id, origin)
         session.authenticated = True  # Mark as authenticated via bearer token
 
-        # Return SSE stream
+        # Return SSE stream (track_connection=True so ACTIVE_CONNECTIONS is
+        # decremented when the stream actually closes, not when this function returns)
         response = StreamingResponse(
-            generate_sse_events(session),
+            generate_sse_events(session, track_connection=True),
             media_type="text/event-stream",
             headers={
                 "Cache-Control": "no-cache",
@@ -2616,11 +2646,9 @@ async def mcp_sse_endpoint(
         return response
 
     except Exception as e:
+        ACTIVE_CONNECTIONS.dec()
         logger.error(f"SSE endpoint error: {e}")
         raise HTTPException(status_code=500, detail="SSE stream error")
-
-    finally:
-        ACTIVE_CONNECTIONS.dec()
 
 
 # Standard MCP Endpoint - Streamable HTTP Transport (2025-11-25 Specification)
@@ -2666,6 +2694,7 @@ async def mcp_streamable_http_endpoint(
     # Track metrics
     REQUEST_COUNT.labels(method=request.method, endpoint="/mcp", status_code=200).inc()
     ACTIVE_CONNECTIONS.inc()
+    _sse_returned = False  # Track if SSE stream was returned (generator handles decrement)
 
     try:
         # Session validation per MCP Streamable HTTP spec:
@@ -2696,9 +2725,10 @@ async def mcp_streamable_http_endpoint(
         if request.method == "GET":
             # Per spec: server MUST return text/event-stream OR HTTP 405
             if accept and "text/event-stream" in accept:
-                # Return SSE stream for real-time communication
+                # track_connection=True: decrement happens when stream closes
+                _sse_returned = True
                 response = StreamingResponse(
-                    generate_sse_events(session),
+                    generate_sse_events(session, track_connection=True),
                     media_type="text/event-stream",
                     headers={**response_headers, "Cache-Control": "no-cache", "Connection": "keep-alive"},
                 )
@@ -2834,7 +2864,9 @@ async def mcp_streamable_http_endpoint(
         raise HTTPException(status_code=500, detail="Internal server error")
 
     finally:
-        ACTIVE_CONNECTIONS.dec()
+        # Only decrement for non-SSE responses; SSE generator handles its own decrement
+        if not _sse_returned:
+            ACTIVE_CONNECTIONS.dec()
 
 
 @app.delete("/mcp")

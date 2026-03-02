@@ -179,6 +179,9 @@ class OAuthManager:
             token_endpoint_auth_method=request_data.get("token_endpoint_auth_method", "client_secret_post"),
         )
 
+        # Bound number of registered clients
+        if len(self.clients) > 1000:
+            raise ValueError("Maximum number of registered clients reached")
         self.clients[client_id] = client
         logger.info(f"Registered new OAuth client: {client_name} ({client_id})")
 
@@ -217,6 +220,9 @@ class OAuthManager:
             code_challenge_method=code_challenge_method,
         )
 
+        # Cleanup expired entries periodically to bound memory
+        if len(self.authorization_codes) > 1000:
+            self.cleanup_expired()
         self.authorization_codes[code] = auth_code
         return code
 
@@ -259,6 +265,9 @@ class OAuthManager:
         access_token = self._create_jwt_token(client_id, auth_code.scope, "access")
         refresh_token = self._create_jwt_token(client_id, auth_code.scope, "refresh")
 
+        # Cleanup expired tokens periodically to bound memory
+        if len(self.access_tokens) > 5000 or len(self.refresh_tokens) > 5000:
+            self.cleanup_expired()
         # Store tokens
         self.access_tokens[access_token] = OAuthToken(
             token=access_token,

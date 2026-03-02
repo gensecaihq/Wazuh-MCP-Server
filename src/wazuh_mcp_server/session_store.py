@@ -152,6 +152,7 @@ class RedisSessionStore(SessionStore):
         self._redis = None
         self._initialized = False
 
+        # Don't log the full URL which may contain password
         logger.info(f"RedisSessionStore configured with TTL={ttl_seconds}s")
 
     async def _ensure_initialized(self):
@@ -167,7 +168,7 @@ class RedisSessionStore(SessionStore):
             # Test connection
             await self._redis.ping()
             self._initialized = True
-            logger.info(f"✅ Redis connection established: {self.redis_url}")
+            logger.info("Redis connection established")
 
         except ImportError:
             logger.error("redis package not installed. Install with: pip install redis[async]")
@@ -228,13 +229,24 @@ class RedisSessionStore(SessionStore):
             logger.error(f"Failed to check session {session_id} existence in Redis: {e}")
             return False
 
+    async def _scan_keys(self, pattern: str) -> list:
+        """Use SCAN instead of KEYS to avoid O(N) blocking on large Redis databases."""
+        keys = []
+        cursor = 0
+        while True:
+            cursor, batch = await self._redis.scan(cursor=cursor, match=pattern, count=100)
+            keys.extend(batch)
+            if cursor == 0:
+                break
+        return keys
+
     async def get_all(self) -> Dict[str, Dict[str, Any]]:
         """Get all sessions."""
         await self._ensure_initialized()
 
         try:
             pattern = self._session_key("*")
-            keys = await self._redis.keys(pattern)
+            keys = await self._scan_keys(pattern)
 
             sessions = {}
             for key in keys:
@@ -254,7 +266,7 @@ class RedisSessionStore(SessionStore):
 
         try:
             pattern = self._session_key("*")
-            keys = await self._redis.keys(pattern)
+            keys = await self._scan_keys(pattern)
 
             if keys:
                 await self._redis.delete(*keys)
@@ -292,7 +304,7 @@ def create_session_store() -> SessionStore:
     if redis_url:
         try:
             ttl_seconds = int(os.getenv("SESSION_TTL_SECONDS", "1800"))
-            logger.info(f"Creating RedisSessionStore with URL: {redis_url}")
+            logger.info("Creating RedisSessionStore (Redis URL configured)")
             return RedisSessionStore(redis_url, ttl_seconds)
         except Exception as e:
             logger.warning(f"Failed to create RedisSessionStore: {e}. Falling back to InMemorySessionStore")

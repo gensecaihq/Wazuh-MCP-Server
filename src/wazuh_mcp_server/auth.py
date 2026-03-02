@@ -40,8 +40,10 @@ class AuthToken:
 
     def has_scope(self, scope: str) -> bool:
         """Check if token has specific scope."""
+        if self.scopes is None:
+            return True  # None means scopes not configured (legacy tokens)
         if not self.scopes:
-            return True  # No scopes means full access
+            return False  # Empty list means no permissions
         return scope in self.scopes
 
 
@@ -206,6 +208,15 @@ class AuthManager:
             scopes=key_obj.scopes,
             metadata={"api_key_name": key_obj.name, **key_obj.metadata},
         )
+
+        # Bound token storage to prevent memory growth
+        if len(self.tokens) > 10000:
+            self.cleanup_expired()
+        if len(self.tokens) > 10000:
+            # Still too many — evict oldest tokens
+            sorted_tokens = sorted(self.tokens.items(), key=lambda t: t[1].created_at)
+            for old_token, _ in sorted_tokens[: len(sorted_tokens) - 5000]:
+                self.tokens.pop(old_token, None)
 
         self.tokens[token] = token_obj
         return token

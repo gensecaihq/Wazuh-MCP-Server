@@ -10,7 +10,7 @@ import logging
 import time
 from dataclasses import dataclass
 from enum import Enum
-from typing import Any, Callable, Optional, Type
+from typing import Any, Callable, Optional, Tuple, Type, Union
 
 import httpx
 from fastapi import HTTPException
@@ -40,7 +40,7 @@ class CircuitBreakerConfig:
 
     failure_threshold: int = 5
     recovery_timeout: int = 60
-    expected_exception: Type[Exception] = Exception
+    expected_exception: Union[Type[Exception], Tuple[Type[Exception], ...]] = Exception
     fallback_function: Optional[Callable] = None
 
 

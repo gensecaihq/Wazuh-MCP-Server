@@ -59,8 +59,13 @@ class WazuhClient:
         self._cache_ttl = 300  # 5 minutes for static data
         self._cache_max_size = 100
 
-        # Circuit breaker for API resilience
-        circuit_config = CircuitBreakerConfig(failure_threshold=5, recovery_timeout=60, expected_exception=Exception)
+        # Circuit breaker for API resilience — only trip on connection/server errors,
+        # not on user-input errors (ValueError) which shouldn't degrade the circuit
+        circuit_config = CircuitBreakerConfig(
+            failure_threshold=5,
+            recovery_timeout=60,
+            expected_exception=(ConnectionError, httpx.ConnectError, httpx.TimeoutException, httpx.HTTPStatusError),
+        )
         self._circuit_breaker = CircuitBreaker(circuit_config)
 
         # Initialize Wazuh Indexer client if configured (required for Wazuh 4.8.0+)
@@ -421,15 +426,23 @@ class WazuhClient:
                     return response.json()
                 except (json.JSONDecodeError, ValueError):
                     raise ValueError(f"Invalid JSON response from Wazuh API after re-auth: {endpoint}")
+            elif e.response.status_code >= 500:
+                # Server errors: let them propagate as httpx exceptions so tenacity
+                # retry logic can see them and retry (via _is_retryable)
+                logger.error(f"Wazuh API server error: {e.response.status_code} - {e.response.text}")
+                raise
             else:
+                # Client errors (4xx except 401): not retryable, wrap as ValueError
                 logger.error(f"Wazuh API request failed: {e.response.status_code} - {e.response.text}")
                 raise ValueError(f"Wazuh API request failed: {e.response.status_code} - {e.response.text}")
         except httpx.ConnectError:
+            # Let connection errors propagate for retry logic
             logger.error(f"Lost connection to Wazuh server at {self.config.wazuh_host}")
-            raise ConnectionError(f"Lost connection to Wazuh server at {self.config.wazuh_host}")
+            raise
         except httpx.TimeoutException:
+            # Let timeout errors propagate for retry logic
             logger.error("Request timeout to Wazuh server")
-            raise ConnectionError("Request timeout to Wazuh server")
+            raise
 
     async def get_manager_info(self) -> Dict[str, Any]:
         """Get Wazuh manager information (cached for 5 minutes)."""
@@ -837,8 +850,27 @@ class WazuhClient:
     # Active Response / Action Tools
     # =========================================================================
 
+    @staticmethod
+    def _sanitize_ar_argument(value: str, param_name: str) -> str:
+        """Sanitize active response argument to prevent command injection.
+
+        Active response arguments are passed to shell commands on agents.
+        Only allow safe characters to prevent shell metacharacter injection.
+        """
+        import re
+
+        # Strip leading/trailing whitespace
+        value = value.strip()
+        if not value:
+            raise ValueError(f"{param_name} cannot be empty")
+        # Block shell metacharacters and control chars
+        if re.search(r'[;&|`$(){}\[\]<>!\\\'"\n\r\t]', value):
+            raise ValueError(f"{param_name} contains invalid characters")
+        return value
+
     async def block_ip(self, ip_address: str, duration: int = 0, agent_id: str = None) -> Dict[str, Any]:
         """Block IP via firewall-drop active response."""
+        ip_address = self._sanitize_ar_argument(ip_address, "ip_address")
         data = {
             "command": "firewall-drop0",
             "agent_list": [agent_id] if agent_id else ["all"],
@@ -854,16 +886,18 @@ class WazuhClient:
 
     async def kill_process(self, agent_id: str, process_id: int) -> Dict[str, Any]:
         """Kill process on agent via active response."""
-        data = {"command": "kill-process0", "agent_list": [agent_id], "arguments": [str(process_id)]}
+        data = {"command": "kill-process0", "agent_list": [agent_id], "arguments": [str(int(process_id))]}
         return await self.execute_active_response(data)
 
     async def disable_user(self, agent_id: str, username: str) -> Dict[str, Any]:
         """Disable user account on agent via active response."""
+        username = self._sanitize_ar_argument(username, "username")
         data = {"command": "disable-account0", "agent_list": [agent_id], "arguments": [username]}
         return await self.execute_active_response(data)
 
     async def quarantine_file(self, agent_id: str, file_path: str) -> Dict[str, Any]:
         """Quarantine file on agent via active response."""
+        file_path = self._sanitize_ar_argument(file_path, "file_path")
         data = {"command": "quarantine0", "agent_list": [agent_id], "arguments": [file_path]}
         return await self.execute_active_response(data)
 
@@ -871,12 +905,13 @@ class WazuhClient:
         """Execute generic active response command."""
         args = []
         if parameters:
-            args = [f"{k}={v}" for k, v in parameters.items()]
+            args = [self._sanitize_ar_argument(f"{k}={v}", f"parameter:{k}") for k, v in parameters.items()]
         data = {"command": command, "agent_list": [agent_id], "arguments": args}
         return await self.execute_active_response(data)
 
     async def firewall_drop(self, agent_id: str, src_ip: str, duration: int = 0) -> Dict[str, Any]:
         """Add firewall drop rule via active response."""
+        src_ip = self._sanitize_ar_argument(src_ip, "src_ip")
         data = {
             "command": "firewall-drop0",
             "agent_list": [agent_id],
@@ -887,6 +922,7 @@ class WazuhClient:
 
     async def host_deny(self, agent_id: str, src_ip: str) -> Dict[str, Any]:
         """Add hosts.deny entry via active response."""
+        src_ip = self._sanitize_ar_argument(src_ip, "src_ip")
         data = {
             "command": "host-deny0",
             "agent_list": [agent_id],
@@ -915,18 +951,33 @@ class WazuhClient:
         return {"data": {"ip_address": ip_address, "blocked": len(matches) > 0, "matching_alerts": len(matches)}}
 
     async def check_agent_isolation(self, agent_id: str) -> Dict[str, Any]:
-        """Check agent isolation status."""
+        """Check agent isolation status by examining agent connectivity and alert history."""
         result = await self._request("GET", "/agents", params={"agents_list": agent_id, "select": "id,name,status"})
         agents = result.get("data", {}).get("affected_items", [])
         if not agents:
             raise ValueError(f"Agent {agent_id} not found")
         agent = agents[0]
+        status = agent.get("status")
+        # Check alert history for isolation commands if indexer is available
+        isolation_confirmed = False
+        if self._indexer_client and status == "disconnected":
+            try:
+                alerts = await self._indexer_client.get_alerts(limit=20)
+                items = alerts.get("data", {}).get("affected_items", [])
+                isolation_confirmed = any(
+                    _dict_contains_text(a, "host-isolation") and _dict_contains_text(a, agent_id) for a in items
+                )
+            except Exception:
+                pass
         return {
             "data": {
                 "agent_id": agent_id,
-                "isolated": agent.get("status") == "disconnected",
-                "status": agent.get("status"),
+                "status": status,
+                "possibly_isolated": status == "disconnected",
+                "isolation_confirmed": isolation_confirmed,
                 "name": agent.get("name"),
+                "note": "A disconnected agent may be isolated or simply offline. "
+                "Check isolation_confirmed for active response evidence.",
             }
         }
 
@@ -938,13 +989,32 @@ class WazuhClient:
         return {"data": {"agent_id": agent_id, "process_id": process_id, "running": running}}
 
     async def check_user_status(self, agent_id: str, username: str) -> Dict[str, Any]:
-        """Check if a user account is disabled."""
+        """Check user account status by searching active response alerts and agent logs."""
+        # Search for disable-account active response alerts
+        disable_evidence = False
+        enable_evidence = False
+        if self._indexer_client:
+            try:
+                alerts = await self._indexer_client.get_alerts(limit=50)
+                items = alerts.get("data", {}).get("affected_items", [])
+                for alert in items:
+                    if _dict_contains_text(alert, username) and _dict_contains_text(alert, agent_id):
+                        if _dict_contains_text(alert, "disable-account"):
+                            disable_evidence = True
+                        if _dict_contains_text(alert, "enable-account"):
+                            enable_evidence = True
+            except Exception:
+                pass
+        # Most recent action takes precedence
+        likely_disabled = disable_evidence and not enable_evidence
         return {
             "data": {
                 "agent_id": agent_id,
                 "username": username,
-                "disabled": False,
-                "note": "Check agent logs for disable-account confirmation",
+                "likely_disabled": likely_disabled,
+                "disable_action_found": disable_evidence,
+                "enable_action_found": enable_evidence,
+                "note": "Status based on active response alert history. " "Verify on the host for definitive status.",
             }
         }
 
@@ -966,16 +1036,19 @@ class WazuhClient:
 
     async def enable_user(self, agent_id: str, username: str) -> Dict[str, Any]:
         """Re-enable user account via active response."""
+        username = self._sanitize_ar_argument(username, "username")
         data = {"command": "enable-account0", "agent_list": [agent_id], "arguments": [username]}
         return await self.execute_active_response(data)
 
     async def restore_file(self, agent_id: str, file_path: str) -> Dict[str, Any]:
         """Restore a quarantined file via active response."""
+        file_path = self._sanitize_ar_argument(file_path, "file_path")
         data = {"command": "quarantine0", "agent_list": [agent_id], "arguments": ["restore", file_path]}
         return await self.execute_active_response(data)
 
     async def firewall_allow(self, agent_id: str, src_ip: str) -> Dict[str, Any]:
         """Remove firewall drop rule via active response."""
+        src_ip = self._sanitize_ar_argument(src_ip, "src_ip")
         data = {
             "command": "firewall-drop0",
             "agent_list": [agent_id],
@@ -985,6 +1058,7 @@ class WazuhClient:
 
     async def host_allow(self, agent_id: str, src_ip: str) -> Dict[str, Any]:
         """Remove hosts.deny entry via active response."""
+        src_ip = self._sanitize_ar_argument(src_ip, "src_ip")
         data = {
             "command": "host-deny0",
             "agent_list": [agent_id],

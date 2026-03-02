@@ -5,6 +5,39 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [4.0.9] - 2026-03-02
+
+### Security
+- **Session fixation prevention**: Server now always generates UUIDs for new sessions; client-provided session IDs are only used to look up existing sessions
+- **Origin validation hardened**: Removed insecure wildcard suffix matching (`*.example.com`) and overly-permissive localhost substring matching; only exact match and explicit `*` wildcard are allowed
+- **Command injection prevention**: All active response and rollback methods now sanitize arguments, blocking shell metacharacters (`;`, `|`, `` ` ``, `$`, etc.)
+- **Auth token scopes**: Empty scopes list (`[]`) now correctly denies all access; previously returned True like `None` (full access)
+- **Bounded token storage**: Auth token store evicts oldest entries when exceeding 10,000 tokens
+- **OAuth bounded stores**: Authorization codes (1,000 max), access/refresh tokens (5,000 max), and client registrations (1,000 max) are now bounded to prevent memory exhaustion
+- **Rate limiter bounded memory**: Added `MAX_TRACKED_CLIENTS = 10,000` with automatic cleanup of stale entries
+- **Redis URL logging**: Removed Redis URLs (which may contain passwords) from log messages
+
+### Fixed
+- **Circuit breaker tripping on user errors**: Narrowed `expected_exception` from `Exception` to specific connection/server error types so `ValueError` doesn't trip the circuit
+- **Retry logic defeated by exception wrapping**: 5xx `HTTPStatusError`, `ConnectError`, and `TimeoutException` now propagate directly to tenacity instead of being wrapped
+- **SSE ACTIVE_CONNECTIONS double-decrement**: Moved decrement into SSE generator `finally` block with `track_connection` flag to prevent gauge going negative
+- **IPv6 validation**: Replaced regex-based IP validation with `ipaddress.ip_address()` for proper IPv4 and IPv6 support
+- **SanitizingLogFilter dict args**: Fixed crash when log record args is a dict instead of a tuple
+- **Redis KEYS command**: Replaced `KEYS` (O(N) blocking) with `SCAN` (cursor-based iteration) in `RedisSessionStore`
+- **Indexer retry logic**: `_search()` now lets 5xx, ConnectError, and TimeoutException propagate for tenacity retry
+- **`check_agent_isolation`**: Now checks alert history for isolation evidence instead of using disconnected status as a proxy
+- **`check_user_status`**: Now searches active response alert history instead of returning hardcoded data
+
+### Added
+- `_sanitize_ar_argument()` static method on `WazuhClient` for input sanitization of active response commands
+- `group_by` parameter validation with whitelist of allowed fields
+- `level` parameter format validation (must match `^[0-9]{1,2}\+?$`)
+- 21 new test cases covering all audit v2 fixes (54 total tests)
+
+### Changed
+- `CircuitBreakerConfig.expected_exception` now accepts `Union[Type[Exception], Tuple[Type[Exception], ...]]`
+- `WazuhClient` circuit breaker uses `(ConnectionError, httpx.ConnectError, httpx.TimeoutException, httpx.HTTPStatusError)` instead of `Exception`
+
 ## [4.0.8] - 2026-02-26
 
 ### Fixed

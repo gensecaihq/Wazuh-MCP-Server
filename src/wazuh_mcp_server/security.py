@@ -50,7 +50,8 @@ VALID_COMPLIANCE_FRAMEWORKS = {"PCI-DSS", "HIPAA", "SOX", "GDPR", "NIST"}
 AGENT_ID_PATTERN = re.compile(r"^[0-9]{3,5}$")  # Wazuh agent IDs are numeric
 RULE_ID_PATTERN = re.compile(r"^[0-9]{1,6}$")  # Rule IDs are numeric
 ISO_TIMESTAMP_PATTERN = re.compile(r"^\d{4}-\d{2}-\d{2}(T\d{2}:\d{2}:\d{2}(\.\d+)?(Z|[+-]\d{2}:?\d{2})?)?$")
-IP_ADDRESS_PATTERN = re.compile(r"^(\d{1,3}\.){3}\d{1,3}$|^([0-9a-fA-F]{1,4}:){7}[0-9a-fA-F]{1,4}$")
+# Use ipaddress module for proper validation instead of regex
+IP_ADDRESS_PATTERN = None  # Replaced by _is_valid_ip() function
 HASH_PATTERN = re.compile(r"^[a-fA-F0-9]{32,128}$")  # MD5 to SHA-512
 DOMAIN_PATTERN = re.compile(r"^[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?(\.[a-zA-Z]{2,})+$")
 
@@ -201,7 +202,9 @@ def validate_indicator(value: Any, indicator_type: str, param_name: str = "indic
     indicator = str(value).strip()
 
     if indicator_type == "ip":
-        if not IP_ADDRESS_PATTERN.match(indicator):
+        try:
+            ipaddress.ip_address(indicator)
+        except ValueError:
             raise ToolValidationError(
                 param_name, f"invalid IP address '{indicator}'", "Use valid IPv4 (e.g., '192.168.1.1') or IPv6 address"
             )
@@ -515,13 +518,17 @@ class SanitizingLogFilter(logging.Filter):
         if hasattr(record, "msg") and isinstance(record.msg, str):
             record.msg = sanitize_log_message(record.msg)
         if hasattr(record, "args") and record.args:
-            sanitized_args = []
-            for arg in record.args:
-                if isinstance(arg, str):
-                    sanitized_args.append(sanitize_log_message(arg))
-                else:
-                    sanitized_args.append(arg)
-            record.args = tuple(sanitized_args)
+            # record.args can be a tuple, dict, or single value
+            if isinstance(record.args, dict):
+                record.args = {k: sanitize_log_message(v) if isinstance(v, str) else v for k, v in record.args.items()}
+            elif isinstance(record.args, (tuple, list)):
+                sanitized_args = []
+                for arg in record.args:
+                    if isinstance(arg, str):
+                        sanitized_args.append(sanitize_log_message(arg))
+                    else:
+                        sanitized_args.append(arg)
+                record.args = tuple(sanitized_args)
         return True
 
 
@@ -543,7 +550,9 @@ class SecurityMetrics:
 
 
 class RateLimiter:
-    """Advanced rate limiting with sliding window."""
+    """Advanced rate limiting with sliding window and bounded memory."""
+
+    MAX_TRACKED_CLIENTS = 10000  # Prevent unbounded memory growth
 
     def __init__(self, max_requests: int = 100, window_seconds: int = 60):
         self.max_requests = max_requests
@@ -578,7 +587,26 @@ class RateLimiter:
 
         # Allow request
         request_times.append(now)
+
+        # Periodic cleanup to bound memory
+        if len(self.requests) > self.MAX_TRACKED_CLIENTS:
+            self.cleanup()
+
         return True, None
+
+    def cleanup(self):
+        """Remove stale entries to bound memory usage."""
+        now = time.time()
+        window_start = now - self.window_seconds
+        # Remove clients with no recent requests
+        stale = [k for k, v in self.requests.items() if not v or v[-1] < window_start]
+        for k in stale:
+            del self.requests[k]
+        # Remove expired blocks
+        now_dt = datetime.now(timezone.utc)
+        expired = [k for k, v in self.blocked_until.items() if v < now_dt]
+        for k in expired:
+            del self.blocked_until[k]
 
 
 class SecurityValidator:

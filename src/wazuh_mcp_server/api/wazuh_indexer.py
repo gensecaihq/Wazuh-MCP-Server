@@ -92,7 +92,9 @@ class WazuhIndexerClient:
     @retry(
         stop=stop_after_attempt(3),
         wait=wait_exponential(multiplier=1, min=1, max=10),
-        retry=retry_if_exception_type((httpx.RequestError, httpx.HTTPStatusError)),
+        retry=retry_if_exception_type(
+            (httpx.RequestError, httpx.HTTPStatusError, httpx.ConnectError, httpx.TimeoutException)
+        ),
         reraise=True,
     )
     async def _search(
@@ -127,11 +129,16 @@ class WazuhIndexerClient:
 
         except httpx.HTTPStatusError as e:
             logger.error(f"Indexer search failed: {e.response.status_code} - {e.response.text}")
+            if e.response.status_code >= 500:
+                # Let server errors propagate so tenacity retry can see them
+                raise
             raise ValueError(f"Indexer query failed: {e.response.status_code}")
         except httpx.ConnectError:
-            raise ConnectionError(f"Cannot connect to Wazuh Indexer at {self.host}:{self.port}")
+            # Let connection errors propagate for retry
+            raise
         except httpx.TimeoutException:
-            raise ConnectionError(f"Timeout connecting to Wazuh Indexer at {self.host}:{self.port}")
+            # Let timeout errors propagate for retry
+            raise
 
     async def get_alerts(
         self,

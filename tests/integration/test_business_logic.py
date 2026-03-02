@@ -356,5 +356,222 @@ class TestIndexerNotConfiguredError:
         assert str(err) == "custom msg"
 
 
+class TestSessionFixation:
+    """Tests for session fixation prevention (audit v2 fix)."""
+
+    @pytest.mark.asyncio
+    async def test_session_always_gets_server_generated_id(self):
+        """Verify get_or_create_session always generates server-side IDs."""
+        from wazuh_mcp_server.server import get_or_create_session
+
+        # Even when passing a client-chosen session ID that doesn't exist,
+        # the server should generate its own ID
+        session = await get_or_create_session("client-chosen-id", None)
+        assert session.session_id != "client-chosen-id"
+        # Session ID should be a UUID4 format
+        import uuid
+
+        uuid.UUID(session.session_id, version=4)  # Raises ValueError if not valid UUID4
+
+
+class TestOriginValidation:
+    """Tests for strict origin validation (audit v2 fix)."""
+
+    def test_exact_match_allowed(self):
+        from wazuh_mcp_server.server import validate_origin_header
+
+        # Should not raise for exact match
+        validate_origin_header("https://claude.ai", "https://claude.ai")
+
+    def test_wildcard_allows_everything(self):
+        from wazuh_mcp_server.server import validate_origin_header
+
+        validate_origin_header("https://anything.example.com", "*")
+
+    def test_invalid_origin_raises_403(self):
+        from fastapi import HTTPException
+
+        from wazuh_mcp_server.server import validate_origin_header
+
+        with pytest.raises(HTTPException) as exc_info:
+            validate_origin_header("https://evil.com", "https://claude.ai")
+        assert exc_info.value.status_code == 403
+
+    def test_no_origin_is_acceptable(self):
+        from wazuh_mcp_server.server import validate_origin_header
+
+        # Per MCP spec: no Origin header is acceptable
+        validate_origin_header(None, "https://claude.ai")
+
+    def test_suffix_match_no_longer_works(self):
+        """Wildcard suffix matching was removed for security."""
+        from fastapi import HTTPException
+
+        from wazuh_mcp_server.server import validate_origin_header
+
+        with pytest.raises(HTTPException):
+            validate_origin_header("https://evil.claude.ai", "*.claude.ai")
+
+
+class TestCommandInjectionPrevention:
+    """Tests for active response command injection prevention (audit v2 fix)."""
+
+    def test_sanitize_rejects_shell_metacharacters(self):
+        from wazuh_mcp_server.api.wazuh_client import WazuhClient
+
+        # Semicolon
+        with pytest.raises(ValueError):
+            WazuhClient._sanitize_ar_argument("192.168.1.1; rm -rf /", "ip")
+        # Pipe
+        with pytest.raises(ValueError):
+            WazuhClient._sanitize_ar_argument("test|cat /etc/passwd", "param")
+        # Backtick
+        with pytest.raises(ValueError):
+            WazuhClient._sanitize_ar_argument("`whoami`", "param")
+        # Dollar
+        with pytest.raises(ValueError):
+            WazuhClient._sanitize_ar_argument("$(id)", "param")
+
+    def test_sanitize_allows_valid_inputs(self):
+        from wazuh_mcp_server.api.wazuh_client import WazuhClient
+
+        assert WazuhClient._sanitize_ar_argument("192.168.1.1", "ip") == "192.168.1.1"
+        assert WazuhClient._sanitize_ar_argument("admin_user", "username") == "admin_user"
+        assert WazuhClient._sanitize_ar_argument("/var/log/test.log", "path") == "/var/log/test.log"
+        assert WazuhClient._sanitize_ar_argument("-srcip 10.0.0.1", "arg") == "-srcip 10.0.0.1"
+
+    def test_sanitize_rejects_empty(self):
+        from wazuh_mcp_server.api.wazuh_client import WazuhClient
+
+        with pytest.raises(ValueError):
+            WazuhClient._sanitize_ar_argument("", "param")
+        with pytest.raises(ValueError):
+            WazuhClient._sanitize_ar_argument("   ", "param")
+
+
+class TestCircuitBreakerConfig:
+    """Tests for circuit breaker configuration (audit v2 fix)."""
+
+    def test_circuit_breaker_accepts_tuple_of_exceptions(self):
+        from wazuh_mcp_server.resilience import CircuitBreaker, CircuitBreakerConfig
+
+        config = CircuitBreakerConfig(
+            failure_threshold=3, recovery_timeout=30, expected_exception=(ConnectionError, ValueError)
+        )
+        cb = CircuitBreaker(config)
+        assert cb.config.expected_exception == (ConnectionError, ValueError)
+
+    def test_wazuh_client_circuit_breaker_excludes_valueerror(self):
+        """Circuit breaker should NOT trip on ValueError (user input errors)."""
+        from wazuh_mcp_server.api.wazuh_client import WazuhClient
+        from wazuh_mcp_server.config import WazuhConfig
+
+        config = WazuhConfig(
+            wazuh_host="localhost", wazuh_user="test", wazuh_pass="test", wazuh_port=55000, verify_ssl=False
+        )
+        client = WazuhClient(config)
+        # ValueError should NOT be in the expected_exception tuple
+        expected = client._circuit_breaker.config.expected_exception
+        assert ValueError not in (expected if isinstance(expected, tuple) else (expected,))
+
+
+class TestAuthTokenScopes:
+    """Tests for auth token scope checking (audit v2 fix)."""
+
+    def test_none_scopes_means_full_access(self):
+        from wazuh_mcp_server.auth import AuthToken
+        from datetime import datetime, timezone
+
+        token = AuthToken(token="test", api_key_id="k", created_at=datetime.now(timezone.utc), scopes=None)
+        assert token.has_scope("wazuh:read") is True
+
+    def test_empty_scopes_means_no_access(self):
+        from wazuh_mcp_server.auth import AuthToken
+        from datetime import datetime, timezone
+
+        token = AuthToken(token="test", api_key_id="k", created_at=datetime.now(timezone.utc), scopes=[])
+        assert token.has_scope("wazuh:read") is False
+
+    def test_specific_scopes(self):
+        from wazuh_mcp_server.auth import AuthToken
+        from datetime import datetime, timezone
+
+        token = AuthToken(token="test", api_key_id="k", created_at=datetime.now(timezone.utc), scopes=["wazuh:read"])
+        assert token.has_scope("wazuh:read") is True
+        assert token.has_scope("wazuh:write") is False
+
+
+class TestRateLimiterCleanup:
+    """Tests for rate limiter bounded memory (audit v2 fix)."""
+
+    def test_cleanup_removes_stale_entries(self):
+        import time
+
+        from wazuh_mcp_server.security import RateLimiter
+
+        limiter = RateLimiter(max_requests=100, window_seconds=1)
+        # Add some entries and let them expire
+        limiter.requests["old_client"].append(time.time() - 100)
+        limiter.requests["recent_client"].append(time.time())
+        limiter.cleanup()
+        assert "old_client" not in limiter.requests
+        assert "recent_client" in limiter.requests
+
+
+class TestIPValidation:
+    """Tests for IP validation using ipaddress module (audit v2 fix)."""
+
+    def test_ipv4_valid(self):
+        from wazuh_mcp_server.security import validate_ip_address
+
+        assert validate_ip_address("192.168.1.1", required=True) == "192.168.1.1"
+
+    def test_ipv6_compressed_valid(self):
+        from wazuh_mcp_server.security import validate_ip_address
+
+        assert validate_ip_address("::1", required=True) == "::1"
+        assert validate_ip_address("fe80::1", required=True) == "fe80::1"
+
+    def test_ipv6_full_valid(self):
+        from wazuh_mcp_server.security import validate_ip_address
+
+        result = validate_ip_address("2001:0db8:85a3:0000:0000:8a2e:0370:7334", required=True)
+        assert result == "2001:0db8:85a3:0000:0000:8a2e:0370:7334"
+
+    def test_invalid_ip_raises(self):
+        from wazuh_mcp_server.security import ToolValidationError, validate_ip_address
+
+        with pytest.raises(ToolValidationError):
+            validate_ip_address("not-an-ip", required=True)
+
+
+class TestSanitizingLogFilter:
+    """Tests for SanitizingLogFilter handling dict args (audit v2 fix)."""
+
+    def test_handles_dict_args(self):
+        import logging
+
+        from wazuh_mcp_server.security import SanitizingLogFilter
+
+        f = SanitizingLogFilter()
+        # Create record with no args, then set dict args manually
+        # (LogRecord.__init__ treats dict args specially and tries args[0])
+        record = logging.LogRecord("test", logging.INFO, "", 0, "test %(key)s", None, None)
+        record.args = {"key": "value"}
+        # Should not raise
+        result = f.filter(record)
+        assert result is True
+
+    def test_handles_tuple_args(self):
+        import logging
+
+        from wazuh_mcp_server.security import SanitizingLogFilter
+
+        f = SanitizingLogFilter()
+        record = logging.LogRecord("test", logging.INFO, "", 0, "test %s %s", ("a", "b"), None)
+        result = f.filter(record)
+        assert result is True
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
