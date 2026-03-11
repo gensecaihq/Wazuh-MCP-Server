@@ -724,25 +724,40 @@ class SecurityManager:
         )
         self.validator = SecurityValidator()
         self.circuit_breaker = CircuitBreaker()
-        self.trusted_proxies = set(os.getenv("TRUSTED_PROXIES", "").split(","))
+        self.trusted_proxies = {p.strip() for p in os.getenv("TRUSTED_PROXIES", "").split(",") if p.strip()}
 
     def get_client_ip(self, request: Request) -> str:
-        """Get real client IP accounting for proxies."""
-        # Check X-Forwarded-For header from trusted proxies
+        """Get real client IP accounting for proxies.
+
+        Uses the rightmost untrusted IP from X-Forwarded-For to prevent
+        IP spoofing via attacker-controlled header entries.
+        """
+        if not request.client:
+            return "unknown"
+
+        direct_ip = request.client.host
+
+        # Only trust proxy headers if the direct connection is from a trusted proxy
+        if not self._is_trusted_proxy(direct_ip):
+            return direct_ip
+
+        # Check X-Forwarded-For: use rightmost non-trusted IP
         if "x-forwarded-for" in request.headers:
-            forwarded_ips = request.headers["x-forwarded-for"].split(",")
-            for ip in forwarded_ips:
-                ip = ip.strip()
-                if self._is_trusted_proxy(request.client.host):
+            forwarded_ips = [ip.strip() for ip in request.headers["x-forwarded-for"].split(",")]
+            # Walk from right to left, find the first non-trusted IP
+            for ip in reversed(forwarded_ips):
+                if ip and not self._is_trusted_proxy(ip):
                     return ip
+            # All IPs are trusted proxies, use the leftmost
+            if forwarded_ips and forwarded_ips[0]:
+                return forwarded_ips[0]
 
         # Check X-Real-IP header
         if "x-real-ip" in request.headers:
-            if self._is_trusted_proxy(request.client.host):
-                return request.headers["x-real-ip"]
+            return request.headers["x-real-ip"].strip()
 
         # Fall back to direct connection
-        return request.client.host
+        return direct_ip
 
     def _is_trusted_proxy(self, ip: str) -> bool:
         """Check if IP is a trusted proxy."""

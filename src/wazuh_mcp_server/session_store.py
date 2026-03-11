@@ -4,6 +4,7 @@ Session storage backends for serverless-ready architecture
 Provides pluggable session storage with in-memory and Redis implementations
 """
 
+import asyncio
 import json
 import logging
 import os
@@ -151,15 +152,22 @@ class RedisSessionStore(SessionStore):
         self.ttl_seconds = ttl_seconds
         self._redis = None
         self._initialized = False
+        self._init_lock = asyncio.Lock()
 
         # Don't log the full URL which may contain password
         logger.info(f"RedisSessionStore configured with TTL={ttl_seconds}s")
 
     async def _ensure_initialized(self):
-        """Lazy initialization of Redis connection."""
+        """Lazy initialization of Redis connection (thread-safe)."""
         if self._initialized:
             return
+        async with self._init_lock:
+            if self._initialized:
+                return
+            await self._connect()
 
+    async def _connect(self):
+        """Establish Redis connection."""
         try:
             import redis.asyncio as aioredis
 
@@ -174,7 +182,7 @@ class RedisSessionStore(SessionStore):
             logger.error("redis package not installed. Install with: pip install redis[async]")
             raise ImportError("redis package required for RedisSessionStore")
         except Exception as e:
-            logger.error(f"Failed to connect to Redis at {self.redis_url}: {e}")
+            logger.error(f"Failed to connect to Redis: {e}")
             raise ConnectionError(f"Redis connection failed: {e}")
 
     def _session_key(self, session_id: str) -> str:

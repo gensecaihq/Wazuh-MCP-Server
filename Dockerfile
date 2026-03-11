@@ -5,7 +5,7 @@
 
 ARG PYTHON_VERSION=3.13
 ARG BUILD_DATE
-ARG VERSION=4.0.7
+ARG VERSION=4.1.0
 
 # Stage 1: Build dependencies
 FROM python:${PYTHON_VERSION}-alpine AS builder
@@ -43,7 +43,7 @@ COPY --from=builder /root/.local /scan
 ARG TRIVY_EXIT_CODE=0
 RUN trivy fs \
     --no-progress \
-    --security-checks vuln,secret,config \
+    --scanners vuln,secret,misconfig \
     --severity HIGH,CRITICAL \
     --format json \
     --output /scan-results.json \
@@ -97,7 +97,7 @@ ENV PATH="/home/wazuh/.local/bin:${PATH}" \
     PYTHONPATH="/app/src:${PYTHONPATH}" \
     PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
-    # Security: Don't leak Python errors
+    # Enable Python fault handler for crash diagnostics
     PYTHONFAULTHANDLER=1 \
     # Default to production settings
     MCP_HOST=0.0.0.0 \
@@ -117,16 +117,16 @@ EXPOSE 3000
 
 # OCI-compliant metadata labels (latest spec)
 LABEL org.opencontainers.image.title="Wazuh MCP Remote Server" \
-      org.opencontainers.image.description="MCP-compliant remote server for Wazuh SIEM integration with SSE transport (mcp-remote branch)" \
+      org.opencontainers.image.description="MCP-compliant remote server for Wazuh SIEM integration with SSE transport (main branch)" \
       org.opencontainers.image.version="${VERSION}" \
       org.opencontainers.image.created="${BUILD_DATE}" \
-      org.opencontainers.image.source="https://github.com/gensecaihq/Wazuh-MCP-Server/tree/mcp-remote" \
-      org.opencontainers.image.url="https://github.com/gensecaihq/Wazuh-MCP-Server/tree/mcp-remote" \
-      org.opencontainers.image.documentation="https://github.com/gensecaihq/Wazuh-MCP-Server/blob/mcp-remote/README.md" \
+      org.opencontainers.image.source="https://github.com/gensecaihq/Wazuh-MCP-Server/tree/main" \
+      org.opencontainers.image.url="https://github.com/gensecaihq/Wazuh-MCP-Server/tree/main" \
+      org.opencontainers.image.documentation="https://github.com/gensecaihq/Wazuh-MCP-Server/blob/main/README.md" \
       org.opencontainers.image.licenses="MIT" \
       org.opencontainers.image.vendor="GenSec AI" \
       org.opencontainers.image.authors="GenSec AI <info@gensecai.com>" \
-      org.opencontainers.image.ref.name="wazuh-mcp-remote-server" \
+      org.opencontainers.image.ref.name="wazuh-main-server" \
       org.opencontainers.image.base.name="python:3.13-alpine"
 
 # Use tini for proper signal handling

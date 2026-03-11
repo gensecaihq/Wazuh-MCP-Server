@@ -1,6 +1,6 @@
-# Wazuh MCP Server v4.0.7 - Production Grade
+# Wazuh MCP Server v4.1.0 - Production Grade
 # MCP-compliant remote server with comprehensive monitoring
-# Updated: February 2026
+# Updated: March 2026
 
 # Core MCP framework
 fastmcp>=2.14.0
@@ -19,7 +19,7 @@ pydantic>=2.12.0
 python-dotenv>=1.0.0
 
 # Authentication and security
-python-jose[cryptography]>=3.5.0  # Security fix: CVE-2024-33663, CVE-2024-33664
+pyjwt[crypto]>=2.9.0
 passlib[bcrypt]>=1.7.4
 python-multipart>=0.0.9  # Form data for OAuth token endpoint
 
@@ -31,8 +31,5 @@ psutil>=6.0.0
 tenacity>=9.0.0  # Retry logic
 aiofiles>=24.0.0  # Async file operations
 
-# Session storage for serverless (optional)
-redis>=7.0.0  # Redis async client for serverless session storage
-
 # Security and encryption
-cryptography>=46.0.5  # Security fix: CVE-2026-26007
+cryptography>=44.0.0

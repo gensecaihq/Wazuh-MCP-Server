@@ -5,6 +5,44 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [4.1.0] - 2026-03-11
+
+### Security
+- **X-Forwarded-For IP spoofing fix**: `get_client_ip` now returns the rightmost untrusted IP instead of the first (attacker-controlled) IP, preventing rate limit bypass
+- **Trusted proxies empty string fix**: Empty `TRUSTED_PROXIES` env var no longer includes empty string in the trusted set
+- **OAuth revocation authentication**: `/oauth/revoke` endpoint now validates client credentials per RFC 7009
+- **Redis credential leakage fix**: Redis connection error logs no longer expose the full URL containing passwords
+- **Health endpoint hardened**: Error details from Wazuh/Indexer connections no longer exposed to unauthenticated clients
+- **validate_token null safety**: `validate_token` no longer crashes with `AttributeError` when called with `None`
+
+### Fixed
+- **Batch request TypeError**: Non-dict items in JSON-RPC batch requests now return proper error responses instead of crashing the entire batch
+- **process_id validation**: `wazuh_kill_process` and `wazuh_check_process` now properly require `process_id` parameter instead of silently defaulting to 100
+- **Session DELETE 404**: `close_mcp_session` now correctly returns 404 for non-existent sessions instead of relying on unreachable `KeyError` handler
+- **SSE metrics accuracy**: Request status code metrics now recorded after request processing, not before (previously all requests counted as 200)
+- **WazuhIndexerClient resource leak**: `initialize()` now closes existing HTTP client before creating a new one
+- **RedisSessionStore race condition**: Added async lock to `_ensure_initialized` to prevent concurrent double-initialization
+
+### Changed
+- **JWT library migration**: Replaced abandoned `python-jose` (no 3.5.0 release exists) with actively maintained `pyjwt[crypto]>=2.9.0`
+- **Dependency versions**: Fixed `cryptography>=44.0.0` (was >=46.0.5 which doesn't exist)
+- **Version alignment**: Synchronized version across Dockerfile, compose.yml, requirements.txt, pyproject.toml (was 4.0.7 in several places)
+- **Stale branch references**: Updated all `mcp-remote` branch references to `main` across Dockerfile, compose.yml, and labels
+
+### CI/CD
+- **Release workflow fix**: Docker release condition now triggers on tag pushes (was checking for non-existent `mcp-remote` branch)
+- **Semgrep action update**: Migrated from deprecated `returntocorp/semgrep-action` to `semgrep/semgrep-action`
+- **Pinned CI dependencies**: Trivy action pinned to v0.31.0 (was `@master`), TruffleHog pinned to v3.88.0 (was `@main`)
+- **Gitleaks updated**: Bumped from v8.18.4 to v8.21.2
+- **Build job gating**: Build now depends on lint, test, and syntax-check (was syntax-check only)
+- **Removed unused mypy**: No longer installed in CI lint job since it was never executed
+- **Docker build action**: Updated `docker/build-push-action` from v5 to v6
+
+### Infrastructure
+- **Dockerfile**: Updated Trivy flag from deprecated `--security-checks` to `--scanners`; fixed misleading PYTHONFAULTHANDLER comment
+- **compose.yml**: Removed unnecessary `NET_BIND_SERVICE` capability (port 3000 > 1024); removed unused volume definition
+- **README**: Fixed Python badge (3.11+ not 3.13+)
+
 ## [4.0.9] - 2026-03-02
 
 ### Security

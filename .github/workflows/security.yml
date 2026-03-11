@@ -88,7 +88,7 @@ jobs:
         echo '```' >> $GITHUB_STEP_SUMMARY
     
     - name: Run Semgrep
-      uses: returntocorp/semgrep-action@v1
+      uses: semgrep/semgrep-action@v1
       with:
         config: auto
       continue-on-error: true
@@ -109,7 +109,7 @@ jobs:
     - uses: actions/checkout@v4
     
     - name: Run Trivy vulnerability scanner
-      uses: aquasecurity/trivy-action@master
+      uses: aquasecurity/trivy-action@0.31.0
       with:
         scan-type: 'fs'
         scan-ref: '.'
@@ -150,7 +150,7 @@ jobs:
         fetch-depth: 0
 
     - name: TruffleHog OSS
-      uses: trufflesecurity/trufflehog@main
+      uses: trufflesecurity/trufflehog@v3.88.0
       with:
         path: ./
         extra_args: --only-verified
@@ -159,8 +159,8 @@ jobs:
     - name: Gitleaks (manual)
       run: |
         # Install gitleaks CLI (free version)
-        wget -q https://github.com/gitleaks/gitleaks/releases/download/v8.18.4/gitleaks_8.18.4_linux_x64.tar.gz
-        tar -xzf gitleaks_8.18.4_linux_x64.tar.gz
+        wget -q https://github.com/gitleaks/gitleaks/releases/download/v8.21.2/gitleaks_8.21.2_linux_x64.tar.gz
+        tar -xzf gitleaks_8.21.2_linux_x64.tar.gz
         ./gitleaks detect --source . --verbose --report-path gitleaks-report.json
         echo "### Gitleaks Report" >> $GITHUB_STEP_SUMMARY
         if [ -f gitleaks-report.json ]; then

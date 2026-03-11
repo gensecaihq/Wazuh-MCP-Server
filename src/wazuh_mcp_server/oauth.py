@@ -14,8 +14,8 @@ from urllib.parse import urlencode
 
 from fastapi import APIRouter, Form, Query, Request
 from fastapi.responses import JSONResponse, RedirectResponse
-from jose import jwt
-from jose.exceptions import JWTError
+import jwt
+from jwt.exceptions import PyJWTError as JWTError
 
 logger = logging.getLogger(__name__)
 
@@ -550,12 +550,31 @@ def create_oauth_router(oauth_manager: OAuthManager) -> APIRouter:
 
     @router.post("/revoke")
     async def revoke(
+        request: Request,
         token: str = Form(...),
         token_type_hint: Optional[str] = Form(default=None),
         client_id: Optional[str] = Form(default=None),
         client_secret: Optional[str] = Form(default=None),
     ):
         """Token Revocation Endpoint (RFC 7009)."""
+        # Extract client credentials from Authorization header if not in body
+        if not client_id:
+            auth_header = request.headers.get("Authorization", "")
+            if auth_header.startswith("Basic "):
+                import base64
+
+                try:
+                    decoded = base64.b64decode(auth_header[6:]).decode()
+                    client_id, client_secret = decoded.split(":", 1)
+                except Exception:
+                    pass
+
+        # Validate client credentials per RFC 7009
+        if client_id:
+            client = oauth_manager.clients.get(client_id)
+            if not client or (client.client_secret and client.client_secret != client_secret):
+                return JSONResponse({"error": "invalid_client"}, status_code=401)
+
         oauth_manager.revoke_token(token)
         # Always return 200 OK per RFC 7009
         return JSONResponse({})

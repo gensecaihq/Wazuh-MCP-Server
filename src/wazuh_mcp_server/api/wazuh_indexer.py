@@ -67,6 +67,13 @@ class WazuhIndexerClient:
 
     async def initialize(self):
         """Initialize the HTTP client."""
+        # Close existing client to prevent resource leak on re-initialization
+        if self.client:
+            try:
+                await self.client.aclose()
+            except Exception:
+                pass
+
         auth = None
         if self.username and self.password:
             auth = (self.username, self.password)

@@ -2068,7 +2068,10 @@ async def handle_tools_call(params: Dict[str, Any], session: MCPSession) -> Dict
 
         elif tool_name == "wazuh_kill_process":
             agent_id = validate_agent_id(arguments.get("agent_id"), required=True)
-            process_id = validate_limit(arguments.get("process_id"), min_val=1, max_val=999999, param_name="process_id")
+            process_id = arguments.get("process_id")
+            if process_id is None:
+                raise ValueError("Parameter 'process_id' is required")
+            process_id = validate_limit(process_id, min_val=1, max_val=999999, param_name="process_id")
             result = await wazuh_client.kill_process(agent_id, process_id)
             _success = True
             return {"content": [{"type": "text", "text": f"Kill Process Result:\n{json.dumps(result, indent=2)}"}]}
@@ -2140,7 +2143,10 @@ async def handle_tools_call(params: Dict[str, Any], session: MCPSession) -> Dict
 
         elif tool_name == "wazuh_check_process":
             agent_id = validate_agent_id(arguments.get("agent_id"), required=True)
-            process_id = validate_limit(arguments.get("process_id"), min_val=1, max_val=999999, param_name="process_id")
+            process_id = arguments.get("process_id")
+            if process_id is None:
+                raise ValueError("Parameter 'process_id' is required")
+            process_id = validate_limit(process_id, min_val=1, max_val=999999, param_name="process_id")
             result = await wazuh_client.check_process(agent_id, process_id)
             _success = True
             return {"content": [{"type": "text", "text": f"Process Check:\n{json.dumps(result, indent=2)}"}]}
@@ -2518,10 +2524,14 @@ async def mcp_endpoint(
                     if isinstance(item, dict) and is_json_rpc_response(item):
                         continue
                     try:
+                        if not isinstance(item, dict):
+                            raise ValidationError.from_exception_data(
+                                "MCPRequest", line_errors=[], input_type="python"
+                            )
                         mcp_request = MCPRequest(**item)
                         response = await process_mcp_request(mcp_request, session)
                         responses.append(response.dict())
-                    except ValidationError as e:
+                    except (ValidationError, TypeError) as e:
                         responses.append(
                             create_error_response(
                                 item.get("id") if isinstance(item, dict) else None,
@@ -2622,14 +2632,16 @@ async def mcp_sse_endpoint(
         headers = {"Retry-After": str(retry_after)} if retry_after else {}
         raise HTTPException(status_code=429, detail="Rate limit exceeded", headers=headers)
 
-    # Track metrics
-    REQUEST_COUNT.labels(method="GET", endpoint="/sse", status_code=200).inc()
+    # Track active connections
     ACTIVE_CONNECTIONS.inc()
 
     try:
         # Get or create session
         session = await get_or_create_session(mcp_session_id, origin)
         session.authenticated = True  # Mark as authenticated via bearer token
+
+        # Track metrics on successful setup
+        REQUEST_COUNT.labels(method="GET", endpoint="/sse", status_code=200).inc()
 
         # Return SSE stream (track_connection=True so ACTIVE_CONNECTIONS is
         # decremented when the stream actually closes, not when this function returns)
@@ -2647,6 +2659,7 @@ async def mcp_sse_endpoint(
 
     except Exception as e:
         ACTIVE_CONNECTIONS.dec()
+        REQUEST_COUNT.labels(method="GET", endpoint="/sse", status_code=500).inc()
         logger.error(f"SSE endpoint error: {e}")
         raise HTTPException(status_code=500, detail="SSE stream error")
 
@@ -2794,10 +2807,12 @@ async def mcp_streamable_http_endpoint(
                     if isinstance(item, dict) and is_json_rpc_response(item):
                         continue
                     try:
+                        if not isinstance(item, dict):
+                            raise TypeError(f"Expected dict, got {type(item).__name__}")
                         mcp_request = MCPRequest(**item)
                         resp = await process_mcp_request(mcp_request, session)
                         responses.append(resp.dict())
-                    except ValidationError as e:
+                    except (ValidationError, TypeError) as e:
                         responses.append(
                             create_error_response(
                                 item.get("id") if isinstance(item, dict) else None,
@@ -2881,13 +2896,13 @@ async def close_mcp_session(
     await verify_authentication(authorization, config)
 
     # Remove session
-    try:
-        await sessions.remove(mcp_session_id)
-        _initialized_sessions.pop(mcp_session_id, None)
-        logger.info(f"Session {mcp_session_id} closed via DELETE")
-        return Response(status_code=204)  # No content
-    except KeyError:
+    existing = await sessions.get(mcp_session_id)
+    if not existing:
         raise HTTPException(status_code=404, detail="Session not found")
+    await sessions.remove(mcp_session_id)
+    _initialized_sessions.pop(mcp_session_id, None)
+    logger.info(f"Session {mcp_session_id} closed via DELETE")
+    return Response(status_code=204)  # No content
 
 
 @app.get("/health")
@@ -2898,8 +2913,8 @@ async def health_check():
         wazuh_status = "healthy"
         try:
             await wazuh_client.get_manager_info()
-        except Exception as e:
-            wazuh_status = f"unhealthy: {str(e)}"
+        except Exception:
+            wazuh_status = "unhealthy"
 
         # Test Wazuh Indexer connectivity (if configured)
         indexer_status = "not_configured"
@@ -2911,9 +2926,9 @@ async def health_check():
                 elif health.get("status") == "red":
                     indexer_status = "degraded"
                 else:
-                    indexer_status = health.get("status", "unknown")
-            except Exception as e:
-                indexer_status = f"unhealthy: {str(e)}"
+                    indexer_status = "unknown"
+            except Exception:
+                indexer_status = "unhealthy"
 
         # Check session count
         all_sessions = await sessions.get_all()
@@ -2974,8 +2989,9 @@ async def health_check():
             status_code=status_code,
         )
     except Exception as e:
+        logger.error(f"Health check failed: {e}")
         return JSONResponse(
-            content={"status": "unhealthy", "timestamp": datetime.now(timezone.utc).isoformat(), "error": str(e)},
+            content={"status": "unhealthy", "timestamp": datetime.now(timezone.utc).isoformat()},
             status_code=503,
         )
 

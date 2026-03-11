@@ -1,13 +1,13 @@
 # Wazuh MCP Server
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Python 3.13+](https://img.shields.io/badge/Python-3.13+-blue.svg)](https://www.python.org/downloads/)
+[![Python 3.11+](https://img.shields.io/badge/Python-3.11+-blue.svg)](https://www.python.org/downloads/)
 [![MCP 2025-11-25](https://img.shields.io/badge/MCP-2025--11--25-green.svg)](https://modelcontextprotocol.io/)
 [![Docker](https://img.shields.io/badge/Docker-Ready-blue.svg)](https://github.com/gensecaihq/Wazuh-MCP-Server)
 
 **Production-ready MCP server connecting AI assistants to Wazuh SIEM.**
 
-> **Version 4.0.9** | Wazuh 4.8.0 - 4.14.3 | [Full Changelog](CHANGELOG.md)
+> **Version 4.1.0** | Wazuh 4.8.0 - 4.14.3 | [Full Changelog](CHANGELOG.md)
 
 ---
 

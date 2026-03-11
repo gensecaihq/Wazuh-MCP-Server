@@ -14,8 +14,8 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional
 
-from jose import jwt
-from jose.exceptions import ExpiredSignatureError, JWTError
+import jwt
+from jwt.exceptions import ExpiredSignatureError, PyJWTError
 from pydantic import BaseModel, Field
 
 logger = logging.getLogger(__name__)
@@ -223,7 +223,7 @@ class AuthManager:
 
     def validate_token(self, token: str) -> Optional[AuthToken]:
         """Validate token and return token object if valid."""
-        if not token.startswith("wst_"):
+        if not token or not token.startswith("wst_"):
             return None
 
         token_obj = self.tokens.get(token)
@@ -373,5 +373,5 @@ def verify_token(token: str, secret_key: str) -> Dict[str, Any]:
         return payload
     except ExpiredSignatureError:
         raise ValueError("Token has expired")
-    except JWTError:
+    except PyJWTError:
         raise ValueError("Invalid token")
