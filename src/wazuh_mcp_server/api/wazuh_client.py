@@ -271,7 +271,12 @@ class WazuhClient:
         # Ensure data dict doesn't contain deprecated 'custom' parameter
         if "custom" in data:
             data = {k: v for k, v in data.items() if k != "custom"}
-        return await self._request("PUT", "/active-response", json=data)
+        # Wazuh 4.x API: agent_list must be passed as query param 'agents_list', not in body
+        agents_list = data.pop("agent_list", None)
+        params = {}
+        if agents_list:
+            params["agents_list"] = ",".join(agents_list) if isinstance(agents_list, list) else str(agents_list)
+        return await self._request("PUT", "/active-response", json=data, params=params)
 
     async def get_active_response_commands(self, **params) -> Dict[str, Any]:
         """Get available active response commands."""
