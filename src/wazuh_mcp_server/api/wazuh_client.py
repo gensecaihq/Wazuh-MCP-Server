@@ -281,7 +281,41 @@ class WazuhClient:
             if numeric_agents:
                 params["agents_list"] = ",".join(numeric_agents)
             # If only "all" was specified, omit agents_list to target all agents
-        return await self._request("PUT", "/active-response", json=data, params=params)
+        result = await self._request("PUT", "/active-response", json=data, params=params)
+
+        # Check for partial/total failures in the response body
+        # Wazuh returns HTTP 200 even when the command fails on all agents
+        resp_data = result.get("data", {})
+        total_affected = resp_data.get("total_affected_items", 0)
+        total_failed = resp_data.get("total_failed_items", 0)
+        failed_items = resp_data.get("failed_items", [])
+
+        if total_affected == 0 and total_failed > 0:
+            # Build error details from failed_items
+            errors = []
+            for item in failed_items:
+                err = item.get("error", {})
+                agent_ids = item.get("id", [])
+                errors.append(
+                    f"agents {agent_ids}: code {err.get('code')} - {err.get('message', 'unknown error')}"
+                )
+            error_detail = "; ".join(errors) if errors else "no agents affected"
+            raise ValueError(
+                f"Active response command failed on all agents "
+                f"(0/{total_failed} succeeded): {error_detail}"
+            )
+
+        # Log partial failures as warnings but still return success
+        if total_failed > 0 and total_affected > 0:
+            for item in failed_items:
+                err = item.get("error", {})
+                agent_ids = item.get("id", [])
+                logger.warning(
+                    f"Active response partially failed on agents {agent_ids}: "
+                    f"code {err.get('code')} - {err.get('message')}"
+                )
+
+        return result
 
     async def get_active_response_commands(self, **params) -> Dict[str, Any]:
         """Get available active response commands."""
