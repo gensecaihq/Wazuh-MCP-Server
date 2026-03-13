@@ -272,10 +272,15 @@ class WazuhClient:
         if "custom" in data:
             data = {k: v for k, v in data.items() if k != "custom"}
         # Wazuh 4.x API: agent_list must be passed as query param 'agents_list', not in body
+        # Omit agents_list entirely to target all agents (Wazuh rejects "all" as non-numeric)
         agents_list = data.pop("agent_list", None)
         params = {}
         if agents_list:
-            params["agents_list"] = ",".join(agents_list) if isinstance(agents_list, list) else str(agents_list)
+            # Filter out "all" — Wazuh 4.x requires numeric agent IDs only
+            numeric_agents = [a for a in (agents_list if isinstance(agents_list, list) else [agents_list]) if a != "all"]
+            if numeric_agents:
+                params["agents_list"] = ",".join(numeric_agents)
+            # If only "all" was specified, omit agents_list to target all agents
         return await self._request("PUT", "/active-response", json=data, params=params)
 
     async def get_active_response_commands(self, **params) -> Dict[str, Any]:
