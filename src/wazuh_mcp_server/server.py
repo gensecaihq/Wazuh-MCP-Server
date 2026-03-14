@@ -920,7 +920,7 @@ async def handle_prompts_list(params: Dict[str, Any], session: MCPSession) -> Di
 
     # Simple pagination (no cursor means start from beginning)
     # In production, implement proper cursor-based pagination
-    return {"prompts": prompts, "nextCursor": None}  # No more results
+    return {"prompts": prompts}  # No more results
 
 
 async def handle_prompts_get(params: Dict[str, Any], session: MCPSession) -> Dict[str, Any]:
@@ -1065,7 +1065,7 @@ async def handle_resources_list(params: Dict[str, Any], session: MCPSession) -> 
         },
     ]
 
-    return {"resources": resources, "nextCursor": None}
+    return {"resources": resources}
 
 
 async def handle_resources_read(params: Dict[str, Any], session: MCPSession) -> Dict[str, Any]:
@@ -1133,7 +1133,7 @@ async def handle_resources_templates_list(params: Dict[str, Any], session: MCPSe
         },
     ]
 
-    return {"resourceTemplates": templates, "nextCursor": None}
+    return {"resourceTemplates": templates}
 
 
 async def handle_completion_complete(params: Dict[str, Any], session: MCPSession) -> Dict[str, Any]:
@@ -1754,7 +1754,7 @@ async def handle_tools_list(params: Dict[str, Any], session: MCPSession) -> Dict
     ]
 
     # Pagination support per MCP spec
-    return {"tools": tools, "nextCursor": None}  # No more tools
+    return {"tools": tools}  # No more tools
 
 
 async def handle_tools_call(params: Dict[str, Any], session: MCPSession) -> Dict[str, Any]:
