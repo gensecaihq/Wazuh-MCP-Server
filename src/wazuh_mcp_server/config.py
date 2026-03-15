@@ -28,7 +28,7 @@ def validate_positive_int(value: str, name: str, max_val: Optional[int] = None) 
         num = int(value)
         if num < 1:
             raise ConfigurationError(f"{name} must be positive, got {num}")
-        if max_val and num > max_val:
+        if max_val is not None and num > max_val:
             raise ConfigurationError(f"{name} must be <= {max_val}, got {num}")
         return num
     except ValueError:
@@ -114,7 +114,7 @@ class WazuhConfig:
                 value = int(env_value)
                 if value < min_val:
                     raise ValueError(f"{key} must be >= {min_val}")
-                if max_val and value > max_val:
+                if max_val is not None and value > max_val:
                     raise ValueError(f"{key} must be <= {max_val}")
                 return value
             except (ValueError, TypeError) as e:

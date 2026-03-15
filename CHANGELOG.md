@@ -5,6 +5,23 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [4.1.1] - 2026-03-15
+
+### Security
+- **OAuth revocation timing attack fix**: `/oauth/revoke` now uses `secrets.compare_digest` for constant-time client secret comparison
+- **Security middleware false positives fix**: Header scanning now skips standard HTTP/transport headers (Content-Type, Authorization, etc.) that legitimately contain semicolons and special characters
+
+### Fixed
+- **`get_top_security_threats` crash on default params**: `validate_limit(None, max_val=50)` returned 100 which exceeded max, causing `ToolValidationError` when `limit` was omitted. Added `default` parameter to `validate_limit` with automatic clamping to valid range
+- **`analyze_alert_patterns` wrong default**: `min_frequency` defaulted to 100 instead of schema-declared 5
+- **`get_wazuh_critical_vulnerabilities` wrong default**: `limit` defaulted to 100 instead of schema-declared 50
+- **`/mcp` endpoint metrics accuracy**: `REQUEST_COUNT` now records actual status code in `finally` block instead of always recording 200 before processing
+- **`/sse` endpoint session validation**: Now returns 404 for invalid/expired session IDs, consistent with `/mcp` endpoint and MCP spec
+- **Test suite `jose` import**: Updated `test_dependencies` to import `jwt` (PyJWT) instead of `jose` (python-jose), which was removed in v4.1.0
+- **`BulkheadIsolation.get_semaphore` dead code**: Removed redundant nested condition that was always True
+- **`validate_positive_int` truthiness bug**: `max_val=0` check now uses `is not None` instead of falsy evaluation
+- **`compose.dev.yml` broken**: Changed build target from `builder` (wrong WORKDIR, no CMD, no PYTHONPATH) to `production`; updated stale branch references
+
 ## [4.1.0] - 2026-03-11
 
 ### Security

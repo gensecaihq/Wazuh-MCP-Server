@@ -279,13 +279,9 @@ class BulkheadIsolation:
 
     def get_semaphore(self, resource_type: str) -> asyncio.Semaphore:
         """Get semaphore for resource type (synchronous, returns semaphore for use in async with)."""
-        if resource_type in self.resource_pools:
-            return self.resource_pools[resource_type]
-        else:
-            # Create and cache fallback semaphore to avoid creating new ones each time
-            if resource_type not in self.resource_pools:
-                self.resource_pools[resource_type] = asyncio.Semaphore(FALLBACK_SEMAPHORE_LIMIT)
-            return self.resource_pools[resource_type]
+        if resource_type not in self.resource_pools:
+            self.resource_pools[resource_type] = asyncio.Semaphore(FALLBACK_SEMAPHORE_LIMIT)
+        return self.resource_pools[resource_type]
 
 
 class HealthRecovery:

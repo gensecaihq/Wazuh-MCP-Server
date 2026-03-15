@@ -1834,7 +1834,7 @@ async def handle_tools_call(params: Dict[str, Any], session: MCPSession) -> Dict
         elif tool_name == "analyze_alert_patterns":
             time_range = validate_time_range(arguments.get("time_range"))
             min_frequency = validate_limit(
-                arguments.get("min_frequency"), min_val=1, max_val=1000, param_name="min_frequency"
+                arguments.get("min_frequency"), min_val=1, max_val=1000, default=5, param_name="min_frequency"
             )
             result = await wazuh_client.analyze_alert_patterns(time_range, min_frequency)
             _success = True
@@ -1921,7 +1921,7 @@ async def handle_tools_call(params: Dict[str, Any], session: MCPSession) -> Dict
             }
 
         elif tool_name == "get_wazuh_critical_vulnerabilities":
-            limit = validate_limit(arguments.get("limit"), max_val=500, param_name="limit")
+            limit = validate_limit(arguments.get("limit"), max_val=500, default=50, param_name="limit")
             compact = validate_boolean(arguments.get("compact"), default=True, param_name="compact")
 
             result = await wazuh_client.get_critical_vulnerabilities(limit)
@@ -1967,7 +1967,7 @@ async def handle_tools_call(params: Dict[str, Any], session: MCPSession) -> Dict
             return {"content": [{"type": "text", "text": f"Risk Assessment:\n{json.dumps(result, indent=2)}"}]}
 
         elif tool_name == "get_top_security_threats":
-            limit = validate_limit(arguments.get("limit"), min_val=1, max_val=50)
+            limit = validate_limit(arguments.get("limit"), min_val=1, max_val=50, default=10)
             time_range = validate_time_range(arguments.get("time_range"))
 
             result = await wazuh_client.get_top_security_threats(limit, time_range)
@@ -2636,8 +2636,16 @@ async def mcp_sse_endpoint(
     ACTIVE_CONNECTIONS.inc()
 
     try:
-        # Get or create session
-        session = await get_or_create_session(mcp_session_id, origin)
+        # Session validation: if client provides session ID but session doesn't exist, return 404
+        if mcp_session_id:
+            existing_session = await sessions.get(mcp_session_id)
+            if not existing_session:
+                raise HTTPException(status_code=404, detail="Session not found")
+            session = existing_session
+            session.update_activity()
+            await sessions.set(mcp_session_id, session)
+        else:
+            session = await get_or_create_session(None, origin)
         session.authenticated = True  # Mark as authenticated via bearer token
 
         # Track metrics on successful setup
@@ -2704,10 +2712,10 @@ async def mcp_streamable_http_endpoint(
         headers = {"Retry-After": str(retry_after)} if retry_after else {}
         raise HTTPException(status_code=429, detail="Rate limit exceeded", headers=headers)
 
-    # Track metrics
-    REQUEST_COUNT.labels(method=request.method, endpoint="/mcp", status_code=200).inc()
+    # Track active connections (metrics tracked after processing)
     ACTIVE_CONNECTIONS.inc()
     _sse_returned = False  # Track if SSE stream was returned (generator handles decrement)
+    _status_code = 200  # Track actual status code for metrics
 
     try:
         # Session validation per MCP Streamable HTTP spec:
@@ -2872,13 +2880,16 @@ async def mcp_streamable_http_endpoint(
         else:
             raise HTTPException(status_code=405, detail="Method not allowed")
 
-    except HTTPException:
+    except HTTPException as exc:
+        _status_code = exc.status_code
         raise
     except Exception as e:
+        _status_code = 500
         logger.error(f"MCP endpoint error: {e}")
         raise HTTPException(status_code=500, detail="Internal server error")
 
     finally:
+        REQUEST_COUNT.labels(method=request.method, endpoint="/mcp", status_code=_status_code).inc()
         # Only decrement for non-SSE responses; SSE generator handles its own decrement
         if not _sse_returned:
             ACTIVE_CONNECTIONS.dec()

@@ -572,7 +572,7 @@ def create_oauth_router(oauth_manager: OAuthManager) -> APIRouter:
         # Validate client credentials per RFC 7009
         if client_id:
             client = oauth_manager.clients.get(client_id)
-            if not client or (client.client_secret and client.client_secret != client_secret):
+            if not client or (client.client_secret and not secrets.compare_digest(client.client_secret, client_secret or "")):
                 return JSONResponse({"error": "invalid_client"}, status_code=401)
 
         oauth_manager.revoke_token(token)

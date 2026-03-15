@@ -141,7 +141,7 @@ def test_docker_compatibility():
 
 def test_dependencies():
     """Test all required dependencies are importable."""
-    dependencies = ["httpx", "pydantic", "fastapi", "uvicorn", "jose", "tenacity"]
+    dependencies = ["httpx", "pydantic", "fastapi", "uvicorn", "jwt", "tenacity"]
 
     for dep in dependencies:
         module = __import__(dep.replace("-", "_"))

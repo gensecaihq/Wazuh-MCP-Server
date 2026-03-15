@@ -56,10 +56,13 @@ HASH_PATTERN = re.compile(r"^[a-fA-F0-9]{32,128}$")  # MD5 to SHA-512
 DOMAIN_PATTERN = re.compile(r"^[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?(\.[a-zA-Z]{2,})+$")
 
 
-def validate_limit(value: Any, min_val: int = 1, max_val: int = 1000, param_name: str = "limit") -> int:
+def validate_limit(
+    value: Any, min_val: int = 1, max_val: int = 1000, default: int = 100, param_name: str = "limit"
+) -> int:
     """Validate and convert limit parameter."""
     if value is None:
-        return 100  # Default
+        # Clamp the default to the allowed range to prevent crashes
+        return max(min_val, min(default, max_val))
 
     try:
         limit = int(value)
@@ -643,8 +646,19 @@ class SecurityValidator:
         if body and len(body) > self.max_payload_size:
             return False, "Payload too large"
 
-        # Check for suspicious patterns in headers
+        # Check for suspicious patterns in user-controlled headers only
+        # Skip standard framework/transport headers that legitimately contain semicolons, $, etc.
+        _skip_headers = {
+            "accept", "accept-encoding", "accept-language", "authorization",
+            "content-type", "content-length", "connection", "host", "origin",
+            "referer", "user-agent", "cookie", "cache-control", "pragma",
+            "if-none-match", "if-modified-since", "x-forwarded-for", "x-real-ip",
+            "x-forwarded-proto", "x-request-id", "mcp-session-id", "mcp-protocol-version",
+            "last-event-id", "sec-websocket-key", "sec-websocket-version", "upgrade",
+        }
         for header_name, header_value in request.headers.items():
+            if header_name.lower() in _skip_headers:
+                continue
             if self._contains_suspicious_pattern(header_value):
                 return False, f"Suspicious pattern in header {header_name}"
 
