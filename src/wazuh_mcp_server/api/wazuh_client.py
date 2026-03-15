@@ -916,7 +916,7 @@ class WazuhClient:
         """Block IP via firewall-drop active response."""
         ip_address = self._sanitize_ar_argument(ip_address, "ip_address")
         data = {
-            "command": "firewall-drop0",
+            "command": "!firewall-drop",
             "agent_list": [agent_id] if agent_id else ["all"],
             "arguments": [f"-srcip {ip_address}"],
             "alert": {"data": {"srcip": ip_address}},
@@ -925,24 +925,24 @@ class WazuhClient:
 
     async def isolate_host(self, agent_id: str) -> Dict[str, Any]:
         """Isolate host from network via active response."""
-        data = {"command": "host-isolation0", "agent_list": [agent_id], "arguments": []}
+        data = {"command": "!host-isolation", "agent_list": [agent_id], "arguments": []}
         return await self.execute_active_response(data)
 
     async def kill_process(self, agent_id: str, process_id: int) -> Dict[str, Any]:
         """Kill process on agent via active response."""
-        data = {"command": "kill-process0", "agent_list": [agent_id], "arguments": [str(int(process_id))]}
+        data = {"command": "!kill-process", "agent_list": [agent_id], "arguments": [str(int(process_id))]}
         return await self.execute_active_response(data)
 
     async def disable_user(self, agent_id: str, username: str) -> Dict[str, Any]:
         """Disable user account on agent via active response."""
         username = self._sanitize_ar_argument(username, "username")
-        data = {"command": "disable-account0", "agent_list": [agent_id], "arguments": [username]}
+        data = {"command": "!disable-account", "agent_list": [agent_id], "arguments": [username]}
         return await self.execute_active_response(data)
 
     async def quarantine_file(self, agent_id: str, file_path: str) -> Dict[str, Any]:
         """Quarantine file on agent via active response."""
         file_path = self._sanitize_ar_argument(file_path, "file_path")
-        data = {"command": "quarantine0", "agent_list": [agent_id], "arguments": [file_path]}
+        data = {"command": "!quarantine", "agent_list": [agent_id], "arguments": [file_path]}
         return await self.execute_active_response(data)
 
     async def run_active_response(self, agent_id: str, command: str, parameters: dict = None) -> Dict[str, Any]:
@@ -957,7 +957,7 @@ class WazuhClient:
         """Add firewall drop rule via active response."""
         src_ip = self._sanitize_ar_argument(src_ip, "src_ip")
         data = {
-            "command": "firewall-drop0",
+            "command": "!firewall-drop",
             "agent_list": [agent_id],
             "arguments": [f"-srcip {src_ip}"],
             "alert": {"data": {"srcip": src_ip}},
@@ -968,7 +968,7 @@ class WazuhClient:
         """Add hosts.deny entry via active response."""
         src_ip = self._sanitize_ar_argument(src_ip, "src_ip")
         data = {
-            "command": "host-deny0",
+            "command": "!host-deny",
             "agent_list": [agent_id],
             "arguments": [f"-srcip {src_ip}"],
             "alert": {"data": {"srcip": src_ip}},
@@ -1075,26 +1075,26 @@ class WazuhClient:
 
     async def unisolate_host(self, agent_id: str) -> Dict[str, Any]:
         """Remove host isolation via active response."""
-        data = {"command": "host-isolation0", "agent_list": [agent_id], "arguments": ["undo"]}
+        data = {"command": "!host-isolation", "agent_list": [agent_id], "arguments": ["undo"]}
         return await self.execute_active_response(data)
 
     async def enable_user(self, agent_id: str, username: str) -> Dict[str, Any]:
         """Re-enable user account via active response."""
         username = self._sanitize_ar_argument(username, "username")
-        data = {"command": "enable-account0", "agent_list": [agent_id], "arguments": [username]}
+        data = {"command": "!enable-account", "agent_list": [agent_id], "arguments": [username]}
         return await self.execute_active_response(data)
 
     async def restore_file(self, agent_id: str, file_path: str) -> Dict[str, Any]:
         """Restore a quarantined file via active response."""
         file_path = self._sanitize_ar_argument(file_path, "file_path")
-        data = {"command": "quarantine0", "agent_list": [agent_id], "arguments": ["restore", file_path]}
+        data = {"command": "!quarantine", "agent_list": [agent_id], "arguments": ["restore", file_path]}
         return await self.execute_active_response(data)
 
     async def firewall_allow(self, agent_id: str, src_ip: str) -> Dict[str, Any]:
         """Remove firewall drop rule via active response."""
         src_ip = self._sanitize_ar_argument(src_ip, "src_ip")
         data = {
-            "command": "firewall-drop0",
+            "command": "!firewall-drop",
             "agent_list": [agent_id],
             "arguments": [f"-srcip {src_ip}", "delete"],
         }
@@ -1104,7 +1104,7 @@ class WazuhClient:
         """Remove hosts.deny entry via active response."""
         src_ip = self._sanitize_ar_argument(src_ip, "src_ip")
         data = {
-            "command": "host-deny0",
+            "command": "!host-deny",
             "agent_list": [agent_id],
             "arguments": [f"-srcip {src_ip}", "delete"],
         }
