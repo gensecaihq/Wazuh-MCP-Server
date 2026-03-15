@@ -277,7 +277,7 @@ class WazuhClient:
         params = {}
         if agents_list:
             # Filter out "all" — Wazuh 4.x requires numeric agent IDs only
-            numeric_agents = [a for a in (agents_list if isinstance(agents_list, list) else [agents_list]) if a != "all"]
+            numeric_agents = [str(a) for a in (agents_list if isinstance(agents_list, list) else [agents_list]) if str(a) != "all"]
             if numeric_agents:
                 params["agents_list"] = ",".join(numeric_agents)
             # If only "all" was specified, omit agents_list to target all agents
@@ -302,7 +302,7 @@ class WazuhClient:
             error_detail = "; ".join(errors) if errors else "no agents affected"
             raise ValueError(
                 f"Active response command failed on all agents "
-                f"(0/{total_failed} succeeded): {error_detail}"
+                f"(0 succeeded, {total_failed} failed): {error_detail}"
             )
 
         # Log partial failures as warnings but still return success
@@ -915,38 +915,65 @@ class WazuhClient:
     async def block_ip(self, ip_address: str, duration: int = 0, agent_id: str = None) -> Dict[str, Any]:
         """Block IP via firewall-drop active response."""
         ip_address = self._sanitize_ar_argument(ip_address, "ip_address")
+        arguments = [f"-srcip {ip_address}"]
+        if duration and duration > 0:
+            arguments.append(f"-timeout {int(duration)}")
         data = {
             "command": "!firewall-drop",
             "agent_list": [agent_id] if agent_id else ["all"],
-            "arguments": [f"-srcip {ip_address}"],
+            "arguments": arguments,
             "alert": {"data": {"srcip": ip_address}},
         }
         return await self.execute_active_response(data)
 
     async def isolate_host(self, agent_id: str) -> Dict[str, Any]:
         """Isolate host from network via active response."""
+        if not agent_id:
+            raise ValueError("agent_id is required for host isolation")
         data = {"command": "!host-isolation", "agent_list": [agent_id], "arguments": []}
         return await self.execute_active_response(data)
 
     async def kill_process(self, agent_id: str, process_id: int) -> Dict[str, Any]:
         """Kill process on agent via active response."""
-        data = {"command": "!kill-process", "agent_list": [agent_id], "arguments": [str(int(process_id))]}
+        if not agent_id:
+            raise ValueError("agent_id is required for kill_process")
+        try:
+            pid = int(process_id)
+        except (ValueError, TypeError):
+            raise ValueError(f"process_id must be numeric, got: {process_id}")
+        data = {"command": "!kill-process", "agent_list": [agent_id], "arguments": [str(pid)]}
         return await self.execute_active_response(data)
 
     async def disable_user(self, agent_id: str, username: str) -> Dict[str, Any]:
         """Disable user account on agent via active response."""
+        if not agent_id:
+            raise ValueError("agent_id is required for disable_user")
         username = self._sanitize_ar_argument(username, "username")
         data = {"command": "!disable-account", "agent_list": [agent_id], "arguments": [username]}
         return await self.execute_active_response(data)
 
     async def quarantine_file(self, agent_id: str, file_path: str) -> Dict[str, Any]:
         """Quarantine file on agent via active response."""
+        if not agent_id:
+            raise ValueError("agent_id is required for quarantine_file")
         file_path = self._sanitize_ar_argument(file_path, "file_path")
         data = {"command": "!quarantine", "agent_list": [agent_id], "arguments": [file_path]}
         return await self.execute_active_response(data)
 
+    # Known Wazuh active response commands (with ! prefix for stateful execution)
+    ALLOWED_AR_COMMANDS = frozenset([
+        "!firewall-drop", "!host-isolation", "!kill-process",
+        "!disable-account", "!enable-account", "!quarantine",
+        "!host-deny", "!restart-wazuh",
+    ])
+
     async def run_active_response(self, agent_id: str, command: str, parameters: dict = None) -> Dict[str, Any]:
         """Execute generic active response command."""
+        if command not in self.ALLOWED_AR_COMMANDS:
+            raise ValueError(
+                f"Unknown active response command: {command}. "
+                f"Allowed commands: {', '.join(sorted(self.ALLOWED_AR_COMMANDS))}"
+            )
         args = []
         if parameters:
             args = [self._sanitize_ar_argument(f"{k}={v}", f"parameter:{k}") for k, v in parameters.items()]
@@ -956,10 +983,13 @@ class WazuhClient:
     async def firewall_drop(self, agent_id: str, src_ip: str, duration: int = 0) -> Dict[str, Any]:
         """Add firewall drop rule via active response."""
         src_ip = self._sanitize_ar_argument(src_ip, "src_ip")
+        arguments = [f"-srcip {src_ip}"]
+        if duration and duration > 0:
+            arguments.append(f"-timeout {int(duration)}")
         data = {
             "command": "!firewall-drop",
             "agent_list": [agent_id],
-            "arguments": [f"-srcip {src_ip}"],
+            "arguments": arguments,
             "alert": {"data": {"srcip": src_ip}},
         }
         return await self.execute_active_response(data)
