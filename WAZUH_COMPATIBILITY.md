@@ -10,7 +10,8 @@ This document details the compatibility of Wazuh MCP Server with different Wazuh
 
 | Wazuh Version | Support Status | Recommendation | Notes |
 |---------------|----------------|----------------|-------|
-| **4.14.3** | ✅ **Fully Supported** | **RECOMMENDED** | Latest stable release (Feb 2026) |
+| **4.14.4** | ✅ **Fully Supported** | **RECOMMENDED** | Latest stable release (Mar 2026) |
+| **4.14.3** | ✅ **Fully Supported** | Recommended | Stable release |
 | **4.14.2** | ✅ **Fully Supported** | Recommended | Stable release |
 | **4.14.1** | ✅ **Fully Supported** | Recommended | Previous stable release |
 | **4.14.0** | ✅ **Fully Supported** | Recommended | Stable release |
@@ -27,9 +28,24 @@ This document details the compatibility of Wazuh MCP Server with different Wazuh
 
 ## 🎯 **Version-Specific Features**
 
-### **Wazuh 4.14.3 (Latest - February 2026)**
+### **Wazuh 4.14.4 (Latest - March 2026)**
 
-**New Enhancements:**
+**Bug Fixes:**
+- ✅ Fixed timestamps in `/agents/upgrade_result` endpoint to return proper UTC time
+- ✅ Resolved API login race condition
+- ✅ Improved cluster file synchronization path handling
+- ✅ Unified date formats in Active Response logs (now consistent `YYYY/MM/DD HH:MM:SS`)
+- ✅ Fixed Windows OS edition detection and Windows 11 detection post-upgrade
+- ✅ Resolved macOS crash during Syscollector reload
+- ✅ Fixed heap-based null write buffer underflows
+
+**API Compatibility:** ✅ No breaking changes from 4.14.x series
+
+**MCP Server Support:** Fully compatible — no code changes required
+
+### **Wazuh 4.14.3**
+
+**Enhancements:**
 - ✅ All 4.14.x improvements included
 - ✅ Enhanced stability and bug fixes
 - ✅ Performance optimizations for large-scale deployments
@@ -139,7 +155,7 @@ This document details the compatibility of Wazuh MCP Server with different Wazuh
 
 ## 🔧 **Configuration by Version**
 
-### **For Wazuh 4.8.0 - 4.14.3 (Recommended)**
+### **For Wazuh 4.8.0 - 4.14.4 (Recommended)**
 
 ```bash
 # .env configuration
@@ -179,7 +195,7 @@ USE_INDEXER_FOR_VULNERABILITIES=false
 
 ## 📊 **API Endpoint Compatibility Matrix**
 
-| Endpoint | 4.8-4.14.3 | 4.0-4.7.x | Notes |
+| Endpoint | 4.8-4.14.4 | 4.0-4.7.x | Notes |
 |----------|------------|-----------|-------|
 | `/agents` | ✅ | ✅ | Fully compatible across all versions |
 | `/alerts` | ✅ | ✅ | Fully compatible |
@@ -232,7 +248,7 @@ USE_INDEXER_FOR_VULNERABILITIES=false
    - Removed: `custom` parameter
    - Impact: MCP Server filters this parameter automatically
 
-### **No Breaking Changes in 4.9.0 - 4.14.1**
+### **No Breaking Changes in 4.9.0 - 4.14.4**
 - All API endpoints remain compatible
 - New features are additive only
 - Backward compatibility maintained
@@ -337,4 +353,4 @@ curl -X POST http://localhost:3000/mcp \
 - ✅ **Keep both updated** (Wazuh + MCP Server)
 
 **Compatibility Guarantee:**
-This MCP Server is **fully tested and verified** with Wazuh versions 4.8.0 through 4.14.3, with ongoing support for future 4.x releases.
+This MCP Server is **fully tested and verified** with Wazuh versions 4.8.0 through 4.14.4, with ongoing support for future 4.x releases.

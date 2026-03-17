@@ -1,6 +1,6 @@
 # Configuration Guide
 
-Complete configuration reference for Wazuh MCP Server v4.0.9.
+Complete configuration reference for Wazuh MCP Server v4.1.1.
 
 ## 📋 Configuration Overview
 
@@ -128,7 +128,7 @@ CACHE_MAX_SIZE=1000                      # Maximum cache entries
 # Transport Settings
 MCP_TRANSPORT=streamable-http            # Transport type (streamable-http)
 MCP_SERVER_NAME=Wazuh MCP Server         # Server name
-MCP_SERVER_VERSION=4.0.9                 # Server version
+MCP_SERVER_VERSION=4.1.1                 # Server version
 
 # Tool Configuration
 ENABLE_SECURITY_TOOLS=true               # Enable security analysis tools

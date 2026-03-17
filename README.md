@@ -7,7 +7,7 @@
 
 **Production-ready MCP server connecting AI assistants to Wazuh SIEM.**
 
-> **Version 4.1.1** | Wazuh 4.8.0 - 4.14.3 | [Full Changelog](CHANGELOG.md)
+> **Version 4.1.1** | Wazuh 4.8.0 - 4.14.4 | [Full Changelog](CHANGELOG.md)
 
 ---
 
@@ -84,7 +84,7 @@ Agentic SOC:     Alert → AI triages → Seconds later → Response ready for a
 ### Prerequisites
 
 - Docker 20.10+ with Compose v2.20+
-- Wazuh 4.8.0 - 4.14.3 with API access
+- Wazuh 4.8.0 - 4.14.4 with API access
 
 ### 1. Clone and Configure
 
