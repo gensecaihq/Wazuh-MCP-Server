@@ -159,11 +159,11 @@ class TimeoutManager:
 
 
 def _is_retryable(exception):
-    """Only retry on transient errors (5xx, connection, timeout)."""
+    """Only retry on transient errors (5xx, 429 rate-limit, connection, timeout)."""
     if isinstance(exception, httpx.RequestError):
         return True  # Connection/timeout errors
     if isinstance(exception, httpx.HTTPStatusError):
-        return exception.response.status_code >= 500
+        return exception.response.status_code == 429 or exception.response.status_code >= 500
     return False
 
 

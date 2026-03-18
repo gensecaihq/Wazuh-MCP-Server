@@ -182,7 +182,7 @@ def build_and_deploy():
 
     # Set build metadata
     os.environ['BUILD_DATE'] = datetime.utcnow().strftime('%Y-%m-%dT%H:%M:%SZ')
-    os.environ['VERSION'] = os.environ.get('VERSION', '4.0.7')
+    os.environ['VERSION'] = os.environ.get('VERSION', '4.1.1')
     os.environ['PYTHON_VERSION'] = os.environ.get('PYTHON_VERSION', '3.13')
 
     # Build with Docker Compose
@@ -324,7 +324,7 @@ def show_status():
     print(f"\n{Colors.CYAN}Resource Usage:{Colors.NC}")
     run_command(['docker', 'stats', '--no-stream', '--format',
                  'table {{.Name}}\t{{.CPUPerc}}\t{{.MemUsage}}\t{{.NetIO}}',
-                 'wazuh-mcp-remote-server'])
+                 'wazuh-main-server'])
 
 
 def cleanup():

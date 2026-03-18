@@ -35,7 +35,7 @@ jobs:
       run: pip install -e .
     
     - name: Run safety check
-      continue-on-error: true
+      continue-on-error: false
       run: |
         safety check --json --output safety-report.json
         if [ -f safety-report.json ]; then
@@ -46,7 +46,7 @@ jobs:
         fi
 
     - name: Run pip-audit
-      continue-on-error: true
+      continue-on-error: false
       run: |
         pip-audit --format json --output pip-audit-report.json
         if [ -f pip-audit-report.json ]; then
@@ -78,7 +78,7 @@ jobs:
         python-version: '3.13'
     
     - name: Run Bandit
-      continue-on-error: true
+      continue-on-error: false
       run: |
         pip install bandit
         bandit -r src/ -f json -o bandit-report.json
@@ -91,7 +91,7 @@ jobs:
       uses: semgrep/semgrep-action@v1
       with:
         config: auto
-      continue-on-error: true
+      continue-on-error: false
     
     - name: Upload code security reports
       uses: actions/upload-artifact@v4
@@ -115,7 +115,7 @@ jobs:
         scan-ref: '.'
         format: 'sarif'
         output: 'trivy-results.sarif'
-      continue-on-error: true
+      continue-on-error: false
     
     - name: Upload Trivy results to GitHub Security tab
       uses: github/codeql-action/upload-sarif@v3
@@ -129,7 +129,7 @@ jobs:
         dockerfile: Dockerfile
         format: json
         output-file: hadolint-report.json
-      continue-on-error: true
+      continue-on-error: false
     
     - name: Upload Docker security reports
       uses: actions/upload-artifact@v4
@@ -154,7 +154,7 @@ jobs:
       with:
         path: ./
         extra_args: --only-verified
-      continue-on-error: true
+      continue-on-error: false
 
     - name: Gitleaks (manual)
       run: |
@@ -170,4 +170,4 @@ jobs:
         else
           echo "No secrets detected" >> $GITHUB_STEP_SUMMARY
         fi
-      continue-on-error: true
+      continue-on-error: false

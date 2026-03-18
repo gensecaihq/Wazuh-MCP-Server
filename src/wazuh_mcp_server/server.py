@@ -1797,6 +1797,14 @@ async def handle_tools_call(params: Dict[str, Any], session: MCPSession) -> Dict
 
     from wazuh_mcp_server.monitoring import record_tool_execution
 
+    def _tool_result(text: str) -> dict:
+        """Return MCP-compliant tool success response with isError field."""
+        return {"content": [{"type": "text", "text": text}], "isError": False}
+
+    def _tool_error(text: str) -> dict:
+        """Return MCP-compliant tool error response with isError field."""
+        return {"content": [{"type": "text", "text": text}], "isError": True}
+
     _start_time = _time.time()
     _success = False
 
@@ -1834,11 +1842,7 @@ async def handle_tools_call(params: Dict[str, Any], session: MCPSession) -> Dict
             if compact:
                 result = _compact_alerts_result(result)
             _success = True
-            return {
-                "content": [
-                    {"type": "text", "text": f"Wazuh Alerts:\n{json.dumps(result, indent=2 if not compact else None)}"}
-                ]
-            }
+            return _tool_result(f"Wazuh Alerts:\n{json.dumps(result, indent=2 if not compact else None)}")
 
         elif tool_name == "get_wazuh_alert_summary":
             time_range = validate_time_range(arguments.get("time_range"))
@@ -1853,7 +1857,7 @@ async def handle_tools_call(params: Dict[str, Any], session: MCPSession) -> Dict
                 )
             result = await wazuh_client.get_alert_summary(time_range, group_by)
             _success = True
-            return {"content": [{"type": "text", "text": f"Alert Summary:\n{json.dumps(result, indent=2)}"}]}
+            return _tool_result(f"Alert Summary:\n{json.dumps(result, indent=2)}")
 
         elif tool_name == "analyze_alert_patterns":
             time_range = validate_time_range(arguments.get("time_range"))
@@ -1862,7 +1866,7 @@ async def handle_tools_call(params: Dict[str, Any], session: MCPSession) -> Dict
             )
             result = await wazuh_client.analyze_alert_patterns(time_range, min_frequency)
             _success = True
-            return {"content": [{"type": "text", "text": f"Alert Patterns:\n{json.dumps(result, indent=2)}"}]}
+            return _tool_result(f"Alert Patterns:\n{json.dumps(result, indent=2)}")
 
         elif tool_name == "search_security_events":
             query = validate_query(arguments.get("query"), required=True)
@@ -1874,14 +1878,7 @@ async def handle_tools_call(params: Dict[str, Any], session: MCPSession) -> Dict
             if compact:
                 result = _compact_alerts_result(result)
             _success = True
-            return {
-                "content": [
-                    {
-                        "type": "text",
-                        "text": f"Security Events:\n{json.dumps(result, indent=2 if not compact else None)}",
-                    }
-                ]
-            }
+            return _tool_result(f"Security Events:\n{json.dumps(result, indent=2 if not compact else None)}")
 
         # Agent Management Tools
         elif tool_name == "get_wazuh_agents":
@@ -1891,38 +1888,38 @@ async def handle_tools_call(params: Dict[str, Any], session: MCPSession) -> Dict
 
             result = await wazuh_client.get_agents(agent_id=agent_id, status=status, limit=limit)
             _success = True
-            return {"content": [{"type": "text", "text": f"Wazuh Agents:\n{json.dumps(result, indent=2)}"}]}
+            return _tool_result(f"Wazuh Agents:\n{json.dumps(result, indent=2)}")
 
         elif tool_name == "get_wazuh_running_agents":
             result = await wazuh_client.get_running_agents()
             _success = True
-            return {"content": [{"type": "text", "text": f"Running Agents:\n{json.dumps(result, indent=2)}"}]}
+            return _tool_result(f"Running Agents:\n{json.dumps(result, indent=2)}")
 
         elif tool_name == "check_agent_health":
             agent_id = validate_agent_id(arguments.get("agent_id"), required=True)
             result = await wazuh_client.check_agent_health(agent_id)
             _success = True
-            return {"content": [{"type": "text", "text": f"Agent Health:\n{json.dumps(result, indent=2)}"}]}
+            return _tool_result(f"Agent Health:\n{json.dumps(result, indent=2)}")
 
         elif tool_name == "get_agent_processes":
             agent_id = validate_agent_id(arguments.get("agent_id"), required=True)
             limit = validate_limit(arguments.get("limit"), max_val=1000)
             result = await wazuh_client.get_agent_processes(agent_id, limit)
             _success = True
-            return {"content": [{"type": "text", "text": f"Agent Processes:\n{json.dumps(result, indent=2)}"}]}
+            return _tool_result(f"Agent Processes:\n{json.dumps(result, indent=2)}")
 
         elif tool_name == "get_agent_ports":
             agent_id = validate_agent_id(arguments.get("agent_id"), required=True)
             limit = validate_limit(arguments.get("limit"), max_val=1000)
             result = await wazuh_client.get_agent_ports(agent_id, limit)
             _success = True
-            return {"content": [{"type": "text", "text": f"Agent Ports:\n{json.dumps(result, indent=2)}"}]}
+            return _tool_result(f"Agent Ports:\n{json.dumps(result, indent=2)}")
 
         elif tool_name == "get_agent_configuration":
             agent_id = validate_agent_id(arguments.get("agent_id"), required=True)
             result = await wazuh_client.get_agent_configuration(agent_id)
             _success = True
-            return {"content": [{"type": "text", "text": f"Agent Configuration:\n{json.dumps(result, indent=2)}"}]}
+            return _tool_result(f"Agent Configuration:\n{json.dumps(result, indent=2)}")
 
         # Vulnerability Management Tools
         elif tool_name == "get_wazuh_vulnerabilities":
@@ -1935,14 +1932,7 @@ async def handle_tools_call(params: Dict[str, Any], session: MCPSession) -> Dict
             if compact:
                 result = _compact_vulns_result(result)
             _success = True
-            return {
-                "content": [
-                    {
-                        "type": "text",
-                        "text": f"Vulnerabilities:\n{json.dumps(result, indent=2 if not compact else None)}",
-                    }
-                ]
-            }
+            return _tool_result(f"Vulnerabilities:\n{json.dumps(result, indent=2 if not compact else None)}")
 
         elif tool_name == "get_wazuh_critical_vulnerabilities":
             limit = validate_limit(arguments.get("limit"), max_val=500, default=50, param_name="limit")
@@ -1952,20 +1942,13 @@ async def handle_tools_call(params: Dict[str, Any], session: MCPSession) -> Dict
             if compact:
                 result = _compact_vulns_result(result)
             _success = True
-            return {
-                "content": [
-                    {
-                        "type": "text",
-                        "text": f"Critical Vulnerabilities:\n{json.dumps(result, indent=2 if not compact else None)}",
-                    }
-                ]
-            }
+            return _tool_result(f"Critical Vulnerabilities:\n{json.dumps(result, indent=2 if not compact else None)}")
 
         elif tool_name == "get_wazuh_vulnerability_summary":
             time_range = validate_time_range(arguments.get("time_range"))
             result = await wazuh_client.get_vulnerability_summary(time_range)
             _success = True
-            return {"content": [{"type": "text", "text": f"Vulnerability Summary:\n{json.dumps(result, indent=2)}"}]}
+            return _tool_result(f"Vulnerability Summary:\n{json.dumps(result, indent=2)}")
 
         # Security Analysis Tools
         elif tool_name == "analyze_security_threat":
@@ -1974,7 +1957,7 @@ async def handle_tools_call(params: Dict[str, Any], session: MCPSession) -> Dict
 
             result = await wazuh_client.analyze_security_threat(indicator, indicator_type)
             _success = True
-            return {"content": [{"type": "text", "text": f"Threat Analysis:\n{json.dumps(result, indent=2)}"}]}
+            return _tool_result(f"Threat Analysis:\n{json.dumps(result, indent=2)}")
 
         elif tool_name == "check_ioc_reputation":
             indicator_type = validate_indicator_type(arguments.get("indicator_type"))
@@ -1982,13 +1965,13 @@ async def handle_tools_call(params: Dict[str, Any], session: MCPSession) -> Dict
 
             result = await wazuh_client.check_ioc_reputation(indicator, indicator_type)
             _success = True
-            return {"content": [{"type": "text", "text": f"IoC Reputation:\n{json.dumps(result, indent=2)}"}]}
+            return _tool_result(f"IoC Reputation:\n{json.dumps(result, indent=2)}")
 
         elif tool_name == "perform_risk_assessment":
             agent_id = validate_agent_id(arguments.get("agent_id"))
             result = await wazuh_client.perform_risk_assessment(agent_id)
             _success = True
-            return {"content": [{"type": "text", "text": f"Risk Assessment:\n{json.dumps(result, indent=2)}"}]}
+            return _tool_result(f"Risk Assessment:\n{json.dumps(result, indent=2)}")
 
         elif tool_name == "get_top_security_threats":
             limit = validate_limit(arguments.get("limit"), min_val=1, max_val=50, default=10)
@@ -1996,7 +1979,7 @@ async def handle_tools_call(params: Dict[str, Any], session: MCPSession) -> Dict
 
             result = await wazuh_client.get_top_security_threats(limit, time_range)
             _success = True
-            return {"content": [{"type": "text", "text": f"Top Security Threats:\n{json.dumps(result, indent=2)}"}]}
+            return _tool_result(f"Top Security Threats:\n{json.dumps(result, indent=2)}")
 
         elif tool_name == "generate_security_report":
             report_type = validate_report_type(arguments.get("report_type"))
@@ -2006,7 +1989,7 @@ async def handle_tools_call(params: Dict[str, Any], session: MCPSession) -> Dict
 
             result = await wazuh_client.generate_security_report(report_type, include_recommendations)
             _success = True
-            return {"content": [{"type": "text", "text": f"Security Report:\n{json.dumps(result, indent=2)}"}]}
+            return _tool_result(f"Security Report:\n{json.dumps(result, indent=2)}")
 
         elif tool_name == "run_compliance_check":
             framework = validate_compliance_framework(arguments.get("framework"))
@@ -2014,43 +1997,43 @@ async def handle_tools_call(params: Dict[str, Any], session: MCPSession) -> Dict
 
             result = await wazuh_client.run_compliance_check(framework, agent_id)
             _success = True
-            return {"content": [{"type": "text", "text": f"Compliance Check:\n{json.dumps(result, indent=2)}"}]}
+            return _tool_result(f"Compliance Check:\n{json.dumps(result, indent=2)}")
 
         # System Monitoring Tools
         elif tool_name == "get_wazuh_statistics":
             result = await wazuh_client.get_wazuh_statistics()
             _success = True
-            return {"content": [{"type": "text", "text": f"Wazuh Statistics:\n{json.dumps(result, indent=2)}"}]}
+            return _tool_result(f"Wazuh Statistics:\n{json.dumps(result, indent=2)}")
 
         elif tool_name == "get_wazuh_weekly_stats":
             result = await wazuh_client.get_weekly_stats()
             _success = True
-            return {"content": [{"type": "text", "text": f"Weekly Statistics:\n{json.dumps(result, indent=2)}"}]}
+            return _tool_result(f"Weekly Statistics:\n{json.dumps(result, indent=2)}")
 
         elif tool_name == "get_wazuh_cluster_health":
             result = await wazuh_client.get_cluster_health()
             _success = True
-            return {"content": [{"type": "text", "text": f"Cluster Health:\n{json.dumps(result, indent=2)}"}]}
+            return _tool_result(f"Cluster Health:\n{json.dumps(result, indent=2)}")
 
         elif tool_name == "get_wazuh_cluster_nodes":
             result = await wazuh_client.get_cluster_nodes()
             _success = True
-            return {"content": [{"type": "text", "text": f"Cluster Nodes:\n{json.dumps(result, indent=2)}"}]}
+            return _tool_result(f"Cluster Nodes:\n{json.dumps(result, indent=2)}")
 
         elif tool_name == "get_wazuh_rules_summary":
             result = await wazuh_client.get_rules_summary()
             _success = True
-            return {"content": [{"type": "text", "text": f"Rules Summary:\n{json.dumps(result, indent=2)}"}]}
+            return _tool_result(f"Rules Summary:\n{json.dumps(result, indent=2)}")
 
         elif tool_name == "get_wazuh_remoted_stats":
             result = await wazuh_client.get_remoted_stats()
             _success = True
-            return {"content": [{"type": "text", "text": f"Remoted Statistics:\n{json.dumps(result, indent=2)}"}]}
+            return _tool_result(f"Remoted Statistics:\n{json.dumps(result, indent=2)}")
 
         elif tool_name == "get_wazuh_log_collector_stats":
             result = await wazuh_client.get_log_collector_stats()
             _success = True
-            return {"content": [{"type": "text", "text": f"Log Collector Statistics:\n{json.dumps(result, indent=2)}"}]}
+            return _tool_result(f"Log Collector Statistics:\n{json.dumps(result, indent=2)}")
 
         elif tool_name == "search_wazuh_manager_logs":
             query = validate_query(arguments.get("query"), required=True)
@@ -2058,18 +2041,18 @@ async def handle_tools_call(params: Dict[str, Any], session: MCPSession) -> Dict
 
             result = await wazuh_client.search_manager_logs(query, limit)
             _success = True
-            return {"content": [{"type": "text", "text": f"Manager Logs:\n{json.dumps(result, indent=2)}"}]}
+            return _tool_result(f"Manager Logs:\n{json.dumps(result, indent=2)}")
 
         elif tool_name == "get_wazuh_manager_error_logs":
             limit = validate_limit(arguments.get("limit"), max_val=1000)
             result = await wazuh_client.get_manager_error_logs(limit)
             _success = True
-            return {"content": [{"type": "text", "text": f"Manager Error Logs:\n{json.dumps(result, indent=2)}"}]}
+            return _tool_result(f"Manager Error Logs:\n{json.dumps(result, indent=2)}")
 
         elif tool_name == "validate_wazuh_connection":
             result = await wazuh_client.validate_connection()
             _success = True
-            return {"content": [{"type": "text", "text": f"Connection Validation:\n{json.dumps(result, indent=2)}"}]}
+            return _tool_result(f"Connection Validation:\n{json.dumps(result, indent=2)}")
 
         # Active Response / Action Tools
         elif tool_name == "wazuh_block_ip":
@@ -2082,13 +2065,13 @@ async def handle_tools_call(params: Dict[str, Any], session: MCPSession) -> Dict
             agent_id = validate_agent_id(arguments.get("agent_id"))
             result = await wazuh_client.block_ip(ip_address, duration, agent_id)
             _success = True
-            return {"content": [{"type": "text", "text": f"Block IP Result:\n{json.dumps(result, indent=2)}"}]}
+            return _tool_result(f"Block IP Result:\n{json.dumps(result, indent=2)}")
 
         elif tool_name == "wazuh_isolate_host":
             agent_id = validate_agent_id(arguments.get("agent_id"), required=True)
             result = await wazuh_client.isolate_host(agent_id)
             _success = True
-            return {"content": [{"type": "text", "text": f"Isolate Host Result:\n{json.dumps(result, indent=2)}"}]}
+            return _tool_result(f"Isolate Host Result:\n{json.dumps(result, indent=2)}")
 
         elif tool_name == "wazuh_kill_process":
             agent_id = validate_agent_id(arguments.get("agent_id"), required=True)
@@ -2098,21 +2081,21 @@ async def handle_tools_call(params: Dict[str, Any], session: MCPSession) -> Dict
             process_id = validate_limit(process_id, min_val=1, max_val=999999, param_name="process_id")
             result = await wazuh_client.kill_process(agent_id, process_id)
             _success = True
-            return {"content": [{"type": "text", "text": f"Kill Process Result:\n{json.dumps(result, indent=2)}"}]}
+            return _tool_result(f"Kill Process Result:\n{json.dumps(result, indent=2)}")
 
         elif tool_name == "wazuh_disable_user":
             agent_id = validate_agent_id(arguments.get("agent_id"), required=True)
             username = validate_username(arguments.get("username"), required=True)
             result = await wazuh_client.disable_user(agent_id, username)
             _success = True
-            return {"content": [{"type": "text", "text": f"Disable User Result:\n{json.dumps(result, indent=2)}"}]}
+            return _tool_result(f"Disable User Result:\n{json.dumps(result, indent=2)}")
 
         elif tool_name == "wazuh_quarantine_file":
             agent_id = validate_agent_id(arguments.get("agent_id"), required=True)
             file_path = validate_file_path(arguments.get("file_path"), required=True)
             result = await wazuh_client.quarantine_file(agent_id, file_path)
             _success = True
-            return {"content": [{"type": "text", "text": f"Quarantine File Result:\n{json.dumps(result, indent=2)}"}]}
+            return _tool_result(f"Quarantine File Result:\n{json.dumps(result, indent=2)}")
 
         elif tool_name == "wazuh_active_response":
             agent_id = validate_agent_id(arguments.get("agent_id"), required=True)
@@ -2120,7 +2103,7 @@ async def handle_tools_call(params: Dict[str, Any], session: MCPSession) -> Dict
             parameters = arguments.get("parameters")
             result = await wazuh_client.run_active_response(agent_id, command, parameters)
             _success = True
-            return {"content": [{"type": "text", "text": f"Active Response Result:\n{json.dumps(result, indent=2)}"}]}
+            return _tool_result(f"Active Response Result:\n{json.dumps(result, indent=2)}")
 
         elif tool_name == "wazuh_firewall_drop":
             agent_id = validate_agent_id(arguments.get("agent_id"), required=True)
@@ -2132,14 +2115,14 @@ async def handle_tools_call(params: Dict[str, Any], session: MCPSession) -> Dict
             )
             result = await wazuh_client.firewall_drop(agent_id, src_ip, duration)
             _success = True
-            return {"content": [{"type": "text", "text": f"Firewall Drop Result:\n{json.dumps(result, indent=2)}"}]}
+            return _tool_result(f"Firewall Drop Result:\n{json.dumps(result, indent=2)}")
 
         elif tool_name == "wazuh_host_deny":
             agent_id = validate_agent_id(arguments.get("agent_id"), required=True)
             src_ip = validate_ip_address(arguments.get("src_ip"), required=True, param_name="src_ip")
             result = await wazuh_client.host_deny(agent_id, src_ip)
             _success = True
-            return {"content": [{"type": "text", "text": f"Host Deny Result:\n{json.dumps(result, indent=2)}"}]}
+            return _tool_result(f"Host Deny Result:\n{json.dumps(result, indent=2)}")
 
         elif tool_name == "wazuh_restart":
             target = arguments.get("target", "").strip()
@@ -2149,7 +2132,7 @@ async def handle_tools_call(params: Dict[str, Any], session: MCPSession) -> Dict
                 validate_agent_id(target, required=True, param_name="target")
             result = await wazuh_client.restart_service(target)
             _success = True
-            return {"content": [{"type": "text", "text": f"Restart Result:\n{json.dumps(result, indent=2)}"}]}
+            return _tool_result(f"Restart Result:\n{json.dumps(result, indent=2)}")
 
         # Verification Tools
         elif tool_name == "wazuh_check_blocked_ip":
@@ -2157,13 +2140,13 @@ async def handle_tools_call(params: Dict[str, Any], session: MCPSession) -> Dict
             agent_id = validate_agent_id(arguments.get("agent_id"))
             result = await wazuh_client.check_blocked_ip(ip_address, agent_id)
             _success = True
-            return {"content": [{"type": "text", "text": f"Blocked IP Check:\n{json.dumps(result, indent=2)}"}]}
+            return _tool_result(f"Blocked IP Check:\n{json.dumps(result, indent=2)}")
 
         elif tool_name == "wazuh_check_agent_isolation":
             agent_id = validate_agent_id(arguments.get("agent_id"), required=True)
             result = await wazuh_client.check_agent_isolation(agent_id)
             _success = True
-            return {"content": [{"type": "text", "text": f"Agent Isolation Check:\n{json.dumps(result, indent=2)}"}]}
+            return _tool_result(f"Agent Isolation Check:\n{json.dumps(result, indent=2)}")
 
         elif tool_name == "wazuh_check_process":
             agent_id = validate_agent_id(arguments.get("agent_id"), required=True)
@@ -2173,78 +2156,78 @@ async def handle_tools_call(params: Dict[str, Any], session: MCPSession) -> Dict
             process_id = validate_limit(process_id, min_val=1, max_val=999999, param_name="process_id")
             result = await wazuh_client.check_process(agent_id, process_id)
             _success = True
-            return {"content": [{"type": "text", "text": f"Process Check:\n{json.dumps(result, indent=2)}"}]}
+            return _tool_result(f"Process Check:\n{json.dumps(result, indent=2)}")
 
         elif tool_name == "wazuh_check_user_status":
             agent_id = validate_agent_id(arguments.get("agent_id"), required=True)
             username = validate_username(arguments.get("username"), required=True)
             result = await wazuh_client.check_user_status(agent_id, username)
             _success = True
-            return {"content": [{"type": "text", "text": f"User Status Check:\n{json.dumps(result, indent=2)}"}]}
+            return _tool_result(f"User Status Check:\n{json.dumps(result, indent=2)}")
 
         elif tool_name == "wazuh_check_file_quarantine":
             agent_id = validate_agent_id(arguments.get("agent_id"), required=True)
             file_path = validate_file_path(arguments.get("file_path"), required=True)
             result = await wazuh_client.check_file_quarantine(agent_id, file_path)
             _success = True
-            return {"content": [{"type": "text", "text": f"File Quarantine Check:\n{json.dumps(result, indent=2)}"}]}
+            return _tool_result(f"File Quarantine Check:\n{json.dumps(result, indent=2)}")
 
         # Rollback Tools
         elif tool_name == "wazuh_unisolate_host":
             agent_id = validate_agent_id(arguments.get("agent_id"), required=True)
             result = await wazuh_client.unisolate_host(agent_id)
             _success = True
-            return {"content": [{"type": "text", "text": f"Unisolate Host Result:\n{json.dumps(result, indent=2)}"}]}
+            return _tool_result(f"Unisolate Host Result:\n{json.dumps(result, indent=2)}")
 
         elif tool_name == "wazuh_enable_user":
             agent_id = validate_agent_id(arguments.get("agent_id"), required=True)
             username = validate_username(arguments.get("username"), required=True)
             result = await wazuh_client.enable_user(agent_id, username)
             _success = True
-            return {"content": [{"type": "text", "text": f"Enable User Result:\n{json.dumps(result, indent=2)}"}]}
+            return _tool_result(f"Enable User Result:\n{json.dumps(result, indent=2)}")
 
         elif tool_name == "wazuh_restore_file":
             agent_id = validate_agent_id(arguments.get("agent_id"), required=True)
             file_path = validate_file_path(arguments.get("file_path"), required=True)
             result = await wazuh_client.restore_file(agent_id, file_path)
             _success = True
-            return {"content": [{"type": "text", "text": f"Restore File Result:\n{json.dumps(result, indent=2)}"}]}
+            return _tool_result(f"Restore File Result:\n{json.dumps(result, indent=2)}")
 
         elif tool_name == "wazuh_firewall_allow":
             agent_id = validate_agent_id(arguments.get("agent_id"), required=True)
             src_ip = validate_ip_address(arguments.get("src_ip"), required=True, param_name="src_ip")
             result = await wazuh_client.firewall_allow(agent_id, src_ip)
             _success = True
-            return {"content": [{"type": "text", "text": f"Firewall Allow Result:\n{json.dumps(result, indent=2)}"}]}
+            return _tool_result(f"Firewall Allow Result:\n{json.dumps(result, indent=2)}")
 
         elif tool_name == "wazuh_host_allow":
             agent_id = validate_agent_id(arguments.get("agent_id"), required=True)
             src_ip = validate_ip_address(arguments.get("src_ip"), required=True, param_name="src_ip")
             result = await wazuh_client.host_allow(agent_id, src_ip)
             _success = True
-            return {"content": [{"type": "text", "text": f"Host Allow Result:\n{json.dumps(result, indent=2)}"}]}
+            return _tool_result(f"Host Allow Result:\n{json.dumps(result, indent=2)}")
 
         else:
             raise ValueError(f"Unknown tool: {tool_name}. Use 'tools/list' to see available tools.")
 
     except ToolValidationError as e:
-        # Parameter validation errors - provide actionable guidance
+        # Parameter validation errors - return tool-level error with actionable guidance
         logger.warning(f"Tool validation error in {tool_name}: {e}")
-        raise ValueError(str(e))
+        return _tool_error(str(e))
 
     except IndexerNotConfiguredError as e:
         # Provide helpful error for vulnerability tools when indexer is not configured
         logger.warning(f"Indexer not configured for tool {tool_name}: {e}")
-        raise ValueError(str(e))
+        return _tool_error(str(e))
 
     except ConnectionError as e:
         # Network/connection errors - provide retry guidance
         logger.error(f"Connection error in tool {tool_name}: {e}")
-        raise ValueError(f"Connection failed: {str(e)}. Check Wazuh server connectivity and try again.")
+        return _tool_error(f"Connection failed: {str(e)}. Check Wazuh server connectivity and try again.")
 
     except Exception as e:
         logger.error(f"Tool execution error in {tool_name}: {e}", exc_info=True)
-        raise ValueError(f"Tool execution failed: {str(e)}")
+        return _tool_error(f"Tool execution failed: {str(e)}")
 
     finally:
         # Record tool execution metrics
@@ -2450,6 +2433,12 @@ async def mcp_endpoint(
             if not existing_session:
                 raise HTTPException(
                     status_code=404, detail="Session not found. Please start a new session with InitializeRequest."
+                )
+            if existing_session.is_expired():
+                await sessions.delete(mcp_session_id)
+                _initialized_sessions.pop(mcp_session_id, None)
+                raise HTTPException(
+                    status_code=404, detail="Session expired. Please start a new session with InitializeRequest."
                 )
             session = existing_session
             session.update_activity()
@@ -2749,6 +2738,12 @@ async def mcp_streamable_http_endpoint(
             if not existing_session:
                 raise HTTPException(
                     status_code=404, detail="Session not found. Please start a new session with InitializeRequest."
+                )
+            if existing_session.is_expired():
+                await sessions.delete(mcp_session_id)
+                _initialized_sessions.pop(mcp_session_id, None)
+                raise HTTPException(
+                    status_code=404, detail="Session expired. Please start a new session with InitializeRequest."
                 )
             session = existing_session
             session.update_activity()

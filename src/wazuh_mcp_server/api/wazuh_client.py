@@ -504,18 +504,31 @@ class WazuhClient:
                 except (httpx.ConnectError, httpx.TimeoutException) as retry_err:
                     logger.error(f"Connection lost during re-auth retry for {endpoint}: {retry_err}")
                     raise
+            elif e.response.status_code == 429:
+                # Wazuh-side rate limiting: wait per Retry-After and let retry logic handle it
+                retry_after = int(e.response.headers.get("Retry-After", "30"))
+                logger.warning(f"Wazuh API rate-limited on {endpoint}. Waiting {retry_after}s...")
+                await asyncio.sleep(min(retry_after, 60))  # Cap at 60s to prevent abuse
+                raise  # Let tenacity/circuit breaker handle the retry
             elif e.response.status_code >= 500:
                 # Server errors: let them propagate as httpx exceptions so tenacity
                 # retry logic can see them and retry (via _is_retryable)
-                logger.error(f"Wazuh API server error: {e.response.status_code} - {e.response.text}")
+                logger.error(f"Wazuh API server error: {e.response.status_code}")
                 raise
             else:
                 # Client errors (4xx except 401): not retryable, wrap as ValueError
-                logger.error(f"Wazuh API request failed: {e.response.status_code} - {e.response.text}")
-                # Audit fix H8: Don't leak raw Wazuh API response in error messages
+                logger.error(f"Wazuh API request failed: {endpoint} returned HTTP {e.response.status_code}")
                 raise ValueError(f"Wazuh API request failed: {endpoint} returned HTTP {e.response.status_code}")
-        except httpx.ConnectError:
-            # Let connection errors propagate for retry logic
+        except httpx.ConnectError as e:
+            # Distinguish SSL errors from generic connection failures
+            err_str = str(e).lower()
+            if "ssl" in err_str or "certificate" in err_str or "verify" in err_str:
+                logger.error(f"SSL certificate validation failed for {self.config.wazuh_host}")
+                raise ConnectionError(
+                    f"SSL certificate validation failed for {self.config.wazuh_host}. "
+                    "Set WAZUH_VERIFY_SSL=false for self-signed certificates."
+                )
+            # Let other connection errors propagate for retry logic
             logger.error(f"Lost connection to Wazuh server at {self.config.wazuh_host}")
             raise
         except httpx.TimeoutException:
