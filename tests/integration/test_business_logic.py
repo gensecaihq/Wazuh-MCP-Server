@@ -438,7 +438,11 @@ class TestCommandInjectionPrevention:
         assert WazuhClient._sanitize_ar_argument("192.168.1.1", "ip") == "192.168.1.1"
         assert WazuhClient._sanitize_ar_argument("admin_user", "username") == "admin_user"
         assert WazuhClient._sanitize_ar_argument("/var/log/test.log", "path") == "/var/log/test.log"
-        assert WazuhClient._sanitize_ar_argument("-srcip 10.0.0.1", "arg") == "-srcip 10.0.0.1"
+        # Dash-prefixed values are allowed for parameter: keys (used in generic AR commands)
+        assert WazuhClient._sanitize_ar_argument("-srcip=10.0.0.1", "parameter:srcip") == "-srcip=10.0.0.1"
+        # Standalone values must NOT start with dash (flag injection prevention)
+        with pytest.raises(ValueError):
+            WazuhClient._sanitize_ar_argument("-srcip 10.0.0.1", "arg")
 
     def test_sanitize_rejects_empty(self):
         from wazuh_mcp_server.api.wazuh_client import WazuhClient
