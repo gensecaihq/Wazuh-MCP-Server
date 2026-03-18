@@ -4,7 +4,7 @@ import asyncio
 import json
 import logging
 import time
-from collections import deque
+from collections import OrderedDict, deque
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, Optional, Tuple
 
@@ -54,8 +54,8 @@ class WazuhClient:
         self._request_times: deque = deque(maxlen=200)  # Pre-sized deque for efficiency
         self._max_requests_per_minute = getattr(config, "max_requests_per_minute", 100)
         self._rate_limit_enabled = True
-        # Response caching for static data (bounded to prevent memory growth)
-        self._cache: Dict[str, Tuple[float, Dict[str, Any]]] = {}
+        # Response caching for static data (bounded OrderedDict for O(1) eviction)
+        self._cache: OrderedDict[str, Tuple[float, Dict[str, Any]]] = OrderedDict()
         self._cache_ttl = 300  # 5 minutes for static data
         self._cache_max_size = 100
 
@@ -90,7 +90,14 @@ class WazuhClient:
 
     async def initialize(self):
         """Initialize the HTTP client and authenticate."""
-        self.client = httpx.AsyncClient(verify=self.config.verify_ssl, timeout=self.config.request_timeout_seconds)
+        self.client = httpx.AsyncClient(
+            verify=self.config.verify_ssl,
+            timeout=self.config.request_timeout_seconds,
+            limits=httpx.Limits(
+                max_connections=self.config.max_connections,
+                max_keepalive_connections=max(5, self.config.max_connections // 2),
+            ),
+        )
         await self._authenticate()
 
         # Initialize indexer client if configured
@@ -234,6 +241,7 @@ class WazuhClient:
             cached_time, cached_data = self._cache[cache_key]
             if current_time - cached_time < self._cache_ttl:
                 record_cache_access("wazuh_api", hit=True)
+                self._cache.move_to_end(cache_key)  # LRU: mark as recently used
                 return cached_data
 
         record_cache_access("wazuh_api", hit=False)
@@ -241,11 +249,10 @@ class WazuhClient:
         # Fetch from API
         result = await self._request("GET", endpoint, **kwargs)
 
-        # Cache the result, evicting oldest if at capacity
+        # Cache the result, evicting oldest if at capacity (O(1) eviction)
         self._cache[cache_key] = (current_time, result)
         if len(self._cache) > self._cache_max_size:
-            oldest_key = min(self._cache, key=lambda k: self._cache[k][0])
-            del self._cache[oldest_key]
+            self._cache.popitem(last=False)
 
         return result
 
@@ -383,6 +390,12 @@ class WazuhClient:
 
     async def get_agent_stats(self, agent_id: str, component: str = "logcollector") -> Dict[str, Any]:
         """Get agent component statistics."""
+        # Audit fix H6: Validate agent_id is numeric to prevent path traversal
+        if not agent_id or not str(agent_id).isdigit():
+            raise ValueError(f"agent_id must be numeric, got: {agent_id}")
+        # Audit fix: Validate component to prevent path traversal
+        if not component.isalnum():
+            raise ValueError(f"component must be alphanumeric, got: {component}")
         return await self._request("GET", f"/agents/{agent_id}/stats/{component}")
 
     async def _rate_limit_check(self) -> None:
@@ -414,17 +427,29 @@ class WazuhClient:
         self._request_times.append(current_time)
 
     async def _request(self, method: str, endpoint: str, **kwargs) -> Dict[str, Any]:
-        """Make authenticated request to Wazuh API with rate limiting, circuit breaker, and retry logic."""
+        """Make authenticated request to Wazuh API with rate limiting, circuit breaker, and retry logic.
+
+        GET requests use retry + circuit breaker. PUT/DELETE requests use circuit breaker
+        only (no retry) because active response commands are not idempotent — retrying a
+        PUT that already executed could double-isolate an agent or double-block an IP.
+        """
         # Apply rate limiting
         async with self._rate_limiter:
             await self._rate_limit_check()
 
-            # Apply circuit breaker and retry logic
+            if method.upper() in ("PUT", "DELETE"):
+                # Non-idempotent: circuit breaker only, no retry
+                return await self._request_no_retry(method, endpoint, **kwargs)
+            # Idempotent (GET, POST for auth): retry + circuit breaker
             return await self._request_with_resilience(method, endpoint, **kwargs)
 
     @RetryConfig.WAZUH_API_RETRY
     async def _request_with_resilience(self, method: str, endpoint: str, **kwargs) -> Dict[str, Any]:
-        """Execute request with circuit breaker and retry logic."""
+        """Execute request with circuit breaker and retry logic (idempotent methods only)."""
+        return await self._circuit_breaker._call(self._execute_request, method, endpoint, **kwargs)
+
+    async def _request_no_retry(self, method: str, endpoint: str, **kwargs) -> Dict[str, Any]:
+        """Execute request with circuit breaker but NO retry (non-idempotent methods)."""
         return await self._circuit_breaker._call(self._execute_request, method, endpoint, **kwargs)
 
     async def _execute_request(self, method: str, endpoint: str, **kwargs) -> Dict[str, Any]:
@@ -464,12 +489,21 @@ class WazuhClient:
                         await self._authenticate()
                 # Retry the request once with refreshed token
                 headers = {"Authorization": f"Bearer {self.token}"}
-                response = await self.client.request(method, url, headers=headers, **kwargs)
-                response.raise_for_status()
                 try:
-                    return response.json()
-                except (json.JSONDecodeError, ValueError):
-                    raise ValueError(f"Invalid JSON response from Wazuh API after re-auth: {endpoint}")
+                    response = await self.client.request(method, url, headers=headers, **kwargs)
+                    response.raise_for_status()
+                    try:
+                        return response.json()
+                    except (json.JSONDecodeError, ValueError):
+                        raise ValueError(f"Invalid JSON response from Wazuh API after re-auth: {endpoint}")
+                except httpx.HTTPStatusError as retry_err:
+                    logger.error(f"Wazuh API request failed after re-auth: {retry_err.response.status_code}")
+                    raise ValueError(
+                        f"Wazuh API error after re-auth for {endpoint}: {retry_err.response.status_code}"
+                    )
+                except (httpx.ConnectError, httpx.TimeoutException) as retry_err:
+                    logger.error(f"Connection lost during re-auth retry for {endpoint}: {retry_err}")
+                    raise
             elif e.response.status_code >= 500:
                 # Server errors: let them propagate as httpx exceptions so tenacity
                 # retry logic can see them and retry (via _is_retryable)
@@ -478,7 +512,8 @@ class WazuhClient:
             else:
                 # Client errors (4xx except 401): not retryable, wrap as ValueError
                 logger.error(f"Wazuh API request failed: {e.response.status_code} - {e.response.text}")
-                raise ValueError(f"Wazuh API request failed: {e.response.status_code} - {e.response.text}")
+                # Audit fix H8: Don't leak raw Wazuh API response in error messages
+                raise ValueError(f"Wazuh API request failed: {endpoint} returned HTTP {e.response.status_code}")
         except httpx.ConnectError:
             # Let connection errors propagate for retry logic
             logger.error(f"Lost connection to Wazuh server at {self.config.wazuh_host}")
@@ -800,9 +835,10 @@ class WazuhClient:
         if agent_id:
             try:
                 return await self._request("GET", f"/sca/{agent_id}")
-            except Exception:
-                return await self._request(
-                    "GET", "/agents", params={"agents_list": agent_id, "select": "id,name,status,group,configSum"}
+            except Exception as e:
+                raise ValueError(
+                    f"SCA data unavailable for agent {agent_id}: {e}. "
+                    "The /sca endpoint may not be supported on this agent or Wazuh version."
                 )
         agents_result = await self._request(
             "GET", "/agents", params={"status": "active", "limit": 10, "select": "id,name"}
@@ -910,10 +946,29 @@ class WazuhClient:
         # Block shell metacharacters and control chars
         if re.search(r'[;&|`$(){}\[\]<>!\\\'"\n\r\t]', value):
             raise ValueError(f"{param_name} contains invalid characters")
+        # Audit fix M6: Block flag injection for standalone values
+        if not param_name.startswith("parameter:") and value.startswith("-"):
+            raise ValueError(f"{param_name} must not start with '-'")
         return value
+
+    @staticmethod
+    def _validate_ip(ip_address: str, param_name: str = "ip_address") -> str:
+        """Validate IPv4 or IPv6 address format."""
+        import re
+        ip_address = ip_address.strip()
+        # IPv4
+        if re.match(r'^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$', ip_address):
+            octets = ip_address.split('.')
+            if all(0 <= int(o) <= 255 for o in octets):
+                return ip_address
+        # IPv6 (simplified check)
+        if ':' in ip_address and re.match(r'^[0-9a-fA-F:]+$', ip_address):
+            return ip_address
+        raise ValueError(f"Invalid IP address format for {param_name}: {ip_address}")
 
     async def block_ip(self, ip_address: str, duration: int = 0, agent_id: str = None) -> Dict[str, Any]:
         """Block IP via firewall-drop active response."""
+        ip_address = self._validate_ip(ip_address)
         ip_address = self._sanitize_ar_argument(ip_address, "ip_address")
         arguments = [f"-srcip {ip_address}"]
         if duration and duration > 0:
@@ -982,6 +1037,7 @@ class WazuhClient:
 
     async def firewall_drop(self, agent_id: str, src_ip: str, duration: int = 0) -> Dict[str, Any]:
         """Add firewall drop rule via active response."""
+        src_ip = self._validate_ip(src_ip, "src_ip")
         src_ip = self._sanitize_ar_argument(src_ip, "src_ip")
         arguments = [f"-srcip {src_ip}"]
         if duration and duration > 0:
@@ -996,6 +1052,7 @@ class WazuhClient:
 
     async def host_deny(self, agent_id: str, src_ip: str) -> Dict[str, Any]:
         """Add hosts.deny entry via active response."""
+        src_ip = self._validate_ip(src_ip, "src_ip")
         src_ip = self._sanitize_ar_argument(src_ip, "src_ip")
         data = {
             "command": "!host-deny",

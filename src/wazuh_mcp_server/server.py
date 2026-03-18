@@ -14,6 +14,7 @@ import time
 import uuid
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone
+from collections import OrderedDict
 from typing import Any, Dict, List, Optional, Union
 from urllib.parse import urlparse
 
@@ -418,6 +419,23 @@ async def lifespan(app: FastAPI):
                 logger.info("   Set MCP_API_KEY environment variable in production")
                 logger.info("=" * 60)
 
+    # Start background session cleanup task (runs every 5 minutes regardless of traffic)
+    async def _background_session_cleanup():
+        while True:
+            await asyncio.sleep(300)
+            try:
+                expired = await sessions.cleanup_expired()
+                if expired > 0:
+                    logger.debug(f"Background cleanup: removed {expired} expired sessions")
+                    active = await sessions.get_all()
+                    stale = [k for k in _initialized_sessions if k not in active]
+                    for k in stale:
+                        _initialized_sessions.pop(k, None)
+            except Exception as e:
+                logger.error(f"Background session cleanup error: {e}")
+
+    _cleanup_task = asyncio.create_task(_background_session_cleanup())
+
     # Initialize Wazuh client (will be available after yield)
     logger.info("✅ Server startup complete with high availability features enabled")
 
@@ -425,6 +443,13 @@ async def lifespan(app: FastAPI):
 
     # === SHUTDOWN ===
     logger.info("🛑 Wazuh MCP Server initiating graceful shutdown...")
+
+    # Cancel background session cleanup
+    _cleanup_task.cancel()
+    try:
+        await _cleanup_task
+    except asyncio.CancelledError:
+        pass
 
     try:
         # Initiate graceful shutdown (waits for active connections)
@@ -683,8 +708,8 @@ def validate_protocol_version(version: Optional[str], strict: bool = False) -> s
     return "2025-03-26"
 
 
-# Track initialized sessions (for notifications/initialized handling)
-_initialized_sessions: Dict[str, bool] = {}
+# Track initialized sessions (OrderedDict for O(1) eviction of oldest entries)
+_initialized_sessions: OrderedDict[str, bool] = OrderedDict()
 
 # Current log level for logging/setLevel
 _current_log_level: str = "info"
@@ -805,10 +830,9 @@ async def handle_initialize(params: Dict[str, Any], session: MCPSession) -> Dict
 
     # Mark session as awaiting initialized notification (cap to prevent unbounded growth)
     if len(_initialized_sessions) > 10000:
-        # Evict oldest entries to prevent memory leak
-        to_remove = list(_initialized_sessions.keys())[: len(_initialized_sessions) - 5000]
-        for k in to_remove:
-            _initialized_sessions.pop(k, None)
+        # Evict oldest entries in O(1) per removal
+        for _ in range(len(_initialized_sessions) - 5000):
+            _initialized_sessions.popitem(last=False)
     _initialized_sessions[session.session_id] = False
 
     return {
@@ -1638,7 +1662,7 @@ async def handle_tools_list(params: Dict[str, Any], session: MCPSession) -> Dict
         # Verification Tools (5 tools)
         {
             "name": "wazuh_check_blocked_ip",
-            "description": "Check if an IP address is currently blocked via firewall-drop",
+            "description": "Check if an IP was blocked by searching active response alert history (not live firewall state)",
             "inputSchema": {
                 "type": "object",
                 "properties": {
@@ -1650,7 +1674,7 @@ async def handle_tools_list(params: Dict[str, Any], session: MCPSession) -> Dict
         },
         {
             "name": "wazuh_check_agent_isolation",
-            "description": "Check if an agent is currently isolated from the network",
+            "description": "Check agent isolation status via connectivity and active response alert history (not live network state)",
             "inputSchema": {
                 "type": "object",
                 "properties": {"agent_id": {"type": "string", "description": "ID of the agent to check"}},
@@ -1671,7 +1695,7 @@ async def handle_tools_list(params: Dict[str, Any], session: MCPSession) -> Dict
         },
         {
             "name": "wazuh_check_user_status",
-            "description": "Check if a user account is disabled on an agent",
+            "description": "Check if a user account was disabled by searching active response alert history (not live OS state)",
             "inputSchema": {
                 "type": "object",
                 "properties": {

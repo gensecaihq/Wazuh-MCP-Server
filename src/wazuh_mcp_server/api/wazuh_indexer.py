@@ -48,6 +48,7 @@ class WazuhIndexerClient:
         self.client: Optional[httpx.AsyncClient] = None
         self._initialized = False
         self._init_lock = asyncio.Lock()
+        self._circuit_breaker = None  # Initialized lazily to avoid import-time fastapi dependency
 
     @staticmethod
     def _normalize_host(host: str) -> str:
@@ -66,7 +67,7 @@ class WazuhIndexerClient:
         return f"https://{self.host}:{self.port}"
 
     async def initialize(self):
-        """Initialize the HTTP client."""
+        """Initialize the HTTP client and circuit breaker."""
         # Close existing client to prevent resource leak on re-initialization
         if self.client:
             try:
@@ -78,7 +79,30 @@ class WazuhIndexerClient:
         if self.username and self.password:
             auth = (self.username, self.password)
 
-        self.client = httpx.AsyncClient(verify=self.verify_ssl, timeout=self.timeout, auth=auth)
+        self.client = httpx.AsyncClient(
+            verify=self.verify_ssl,
+            timeout=self.timeout,
+            auth=auth,
+            limits=httpx.Limits(max_connections=20, max_keepalive_connections=10),
+        )
+
+        # Initialize circuit breaker (deferred to avoid import-time fastapi dependency)
+        if self._circuit_breaker is None:
+            from wazuh_mcp_server.resilience import CircuitBreaker, CircuitBreakerConfig
+
+            self._circuit_breaker = CircuitBreaker(
+                CircuitBreakerConfig(
+                    failure_threshold=5,
+                    recovery_timeout=60,
+                    expected_exception=(
+                        ConnectionError,
+                        httpx.ConnectError,
+                        httpx.TimeoutException,
+                        httpx.HTTPStatusError,
+                    ),
+                )
+            )
+
         self._initialized = True
         logger.info(f"WazuhIndexerClient initialized for {self.host}:{self.port}")
 
@@ -108,7 +132,7 @@ class WazuhIndexerClient:
         self, index: str, query: Dict[str, Any], size: int = 100, sort: Optional[list] = None
     ) -> Dict[str, Any]:
         """
-        Execute a search query against the Wazuh Indexer.
+        Execute a search query against the Wazuh Indexer with retry + circuit breaker.
 
         Args:
             index: Index pattern to search
@@ -119,6 +143,15 @@ class WazuhIndexerClient:
         Returns:
             Search results from the indexer
         """
+        if self._circuit_breaker is not None:
+            return await self._circuit_breaker._call(self._execute_search, index, query, size, sort)
+        # Fallback if circuit breaker not yet initialized (shouldn't happen in normal flow)
+        return await self._execute_search(index, query, size, sort)
+
+    async def _execute_search(
+        self, index: str, query: Dict[str, Any], size: int = 100, sort: Optional[list] = None
+    ) -> Dict[str, Any]:
+        """Execute the actual search request (called within circuit breaker)."""
         await self._ensure_initialized()
 
         url = f"{self.base_url}/{index}/_search"

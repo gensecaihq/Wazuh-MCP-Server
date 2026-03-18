@@ -144,12 +144,12 @@ This document details the compatibility of Wazuh MCP Server with different Wazuh
 ### **Wazuh 4.0.0 - 4.7.x (Limited Support)**
 
 **Limitations:**
-- ⚠️ No Wazuh Indexer support
-- ⚠️ Uses deprecated `/vulnerability` endpoint
-- ⚠️ Limited vulnerability detection capabilities
+- ❌ No Wazuh Indexer support — **alert and vulnerability tools will not work**
+- ⚠️ Only agent management, system monitoring, and active response tools are functional
+- ⚠️ Uses deprecated `/vulnerability` endpoint (not supported by this MCP server)
 - ⚠️ Older API structure
 
-**Recommendation:** Upgrade to 4.8.0 or higher
+**Recommendation:** Upgrade to 4.8.0 or higher for full functionality
 
 ---
 
@@ -198,7 +198,7 @@ USE_INDEXER_FOR_VULNERABILITIES=false
 | Endpoint | 4.8-4.14.4 | 4.0-4.7.x | Notes |
 |----------|------------|-----------|-------|
 | `/agents` | ✅ | ✅ | Fully compatible across all versions |
-| `/alerts` | ✅ | ✅ | Fully compatible |
+| `/alerts` (via Indexer) | ✅ | ❌ | Requires Wazuh Indexer (4.8.0+) |
 | `/vulnerability/agents` | ✅ | ❌ | Added in 4.8.0 |
 | `/vulnerability` | ❌ | ⚠️ | Removed in 4.8.0, deprecated in 4.7.0 |
 | `/vulnerability/cti/{cve}` | ✅ | ❌ | Added in 4.12.0 |

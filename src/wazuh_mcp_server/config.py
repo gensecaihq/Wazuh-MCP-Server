@@ -179,7 +179,7 @@ class ServerConfig:
     OAUTH_AUTHORIZATION_CODE_TTL: int = 600  # 10 minutes
 
     # CORS settings
-    ALLOWED_ORIGINS: str = "https://claude.ai,http://localhost:*"
+    ALLOWED_ORIGINS: str = "https://claude.ai,http://localhost:3000"
 
     # Wazuh connection settings
     WAZUH_HOST: str = ""
@@ -238,7 +238,7 @@ class ServerConfig:
             OAUTH_AUTHORIZATION_CODE_TTL=validate_positive_int(
                 os.getenv("OAUTH_AUTHORIZATION_CODE_TTL", "600"), "OAUTH_AUTHORIZATION_CODE_TTL"
             ),
-            ALLOWED_ORIGINS=os.getenv("ALLOWED_ORIGINS", "https://claude.ai,http://localhost:*"),
+            ALLOWED_ORIGINS=os.getenv("ALLOWED_ORIGINS", "https://claude.ai,http://localhost:3000"),
             WAZUH_HOST=normalize_host(os.getenv("WAZUH_HOST", "")),
             WAZUH_USER=os.getenv("WAZUH_USER", ""),
             WAZUH_PASS=os.getenv("WAZUH_PASS", ""),
