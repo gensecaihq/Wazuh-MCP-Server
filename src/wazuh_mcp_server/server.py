@@ -748,7 +748,7 @@ def _compact_alert(alert: dict) -> dict:
         sc = alert["syscheck"]
         compact["syscheck"] = {"path": sc.get("path", ""), "event": sc.get("event", "")}
     if alert.get("full_log"):
-        log = alert["full_log"]
+        log = str(alert["full_log"])
         compact["full_log"] = (log[:300] + "...") if len(log) > 300 else log
     return compact
 
@@ -769,8 +769,8 @@ def _compact_vulnerability(vuln: dict) -> dict:
             compact[key] = vuln[key]
     if "id" in vuln:
         compact["cve"] = vuln["id"]
-    if "description" in vuln:
-        desc = vuln["description"]
+    if vuln.get("description"):
+        desc = str(vuln["description"])
         compact["description"] = (desc[:120] + "...") if len(desc) > 120 else desc
     if "reference" in vuln:
         compact["reference"] = vuln["reference"]

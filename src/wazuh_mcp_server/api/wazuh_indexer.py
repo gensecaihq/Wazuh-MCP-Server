@@ -348,7 +348,36 @@ class WazuhIndexerClient:
         """
         await self._ensure_initialized()
 
-        # Aggregation query for severity counts
+        # Aggregation query via _search (inherits retry + circuit breaker)
+        agg_query = {"match_all": {}}
+        # Use _execute_search_raw for aggregation (needs custom body with size=0)
+        if self._circuit_breaker is not None:
+            result = await self._circuit_breaker._call(self._execute_agg_search)
+        else:
+            result = await self._execute_agg_search()
+
+        # Parse aggregations
+        aggs = result.get("aggregations", {})
+        severity_buckets = aggs.get("by_severity", {}).get("buckets", [])
+
+        severity_counts = {}
+        for bucket in severity_buckets:
+            severity_counts[bucket.get("key", "unknown")] = bucket.get("doc_count", 0)
+
+        return {
+            "data": {
+                "total_vulnerabilities": aggs.get("total_vulnerabilities", {}).get("value", 0),
+                "affected_agents": aggs.get("by_agent", {}).get("value", 0),
+                "by_severity": severity_counts,
+                "critical": severity_counts.get("Critical", 0),
+                "high": severity_counts.get("High", 0),
+                "medium": severity_counts.get("Medium", 0),
+                "low": severity_counts.get("Low", 0),
+            }
+        }
+
+    async def _execute_agg_search(self) -> Dict[str, Any]:
+        """Execute vulnerability aggregation query (called within circuit breaker)."""
         url = f"{self.base_url}/{VULNERABILITY_INDEX}/_search"
         body = {
             "size": 0,
@@ -362,30 +391,11 @@ class WazuhIndexerClient:
         try:
             response = await self.client.post(url, json=body, headers={"Content-Type": "application/json"})
             response.raise_for_status()
-            result = response.json()
-
-            # Parse aggregations
-            aggs = result.get("aggregations", {})
-            severity_buckets = aggs.get("by_severity", {}).get("buckets", [])
-
-            severity_counts = {}
-            for bucket in severity_buckets:
-                severity_counts[bucket.get("key", "unknown")] = bucket.get("doc_count", 0)
-
-            return {
-                "data": {
-                    "total_vulnerabilities": aggs.get("total_vulnerabilities", {}).get("value", 0),
-                    "affected_agents": aggs.get("by_agent", {}).get("value", 0),
-                    "by_severity": severity_counts,
-                    "critical": severity_counts.get("Critical", 0),
-                    "high": severity_counts.get("High", 0),
-                    "medium": severity_counts.get("Medium", 0),
-                    "low": severity_counts.get("Low", 0),
-                }
-            }
-
+            return response.json()
         except httpx.HTTPStatusError as e:
             logger.error(f"Vulnerability summary query failed: {e.response.status_code}")
+            if e.response.status_code >= 500:
+                raise  # Let circuit breaker track server errors
             raise ValueError(f"Vulnerability summary query failed: {e.response.status_code}")
         except httpx.ConnectError:
             raise ConnectionError(f"Cannot connect to Wazuh Indexer at {self.host}:{self.port}")

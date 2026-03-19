@@ -898,7 +898,7 @@ class WazuhClient:
         level_counts: Dict[int, int] = {}
         group_counts: Dict[str, int] = {}
         for rule in rules:
-            level = rule.get("level", 0)
+            level = int(rule.get("level", 0))
             level_counts[level] = level_counts.get(level, 0) + 1
             for group in rule.get("groups", []):
                 group_counts[group] = group_counts.get(group, 0) + 1
