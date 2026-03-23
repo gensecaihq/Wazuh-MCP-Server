@@ -598,20 +598,47 @@ class WazuhClient:
             }
         }
 
-    async def search_security_events(self, query: str, time_range: str, limit: int) -> Dict[str, Any]:
-        """Search security events via the Wazuh Indexer with query filtering."""
+    async def search_security_events(
+        self,
+        query: str,
+        time_range: str,
+        limit: int,
+        rule_id: Optional[str] = None,
+        agent_id: Optional[str] = None,
+        level: Optional[str] = None,
+        srcip: Optional[str] = None,
+        dstip: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Search security events via the Wazuh Indexer with Elasticsearch query_string and field filters.
+
+        Args:
+            query: Free-text search query (passed to Elasticsearch query_string DSL).
+                   Supports Lucene syntax: AND, OR, NOT, field:value, wildcards, quoted phrases.
+            time_range: Time window string (e.g., '24h', '7d').
+            limit: Maximum number of results to return.
+            rule_id: Optional filter by Wazuh rule ID (e.g., '5710').
+            agent_id: Optional filter by Wazuh agent ID (e.g., '001').
+            level: Optional minimum rule severity level (e.g., '10' for level >= 10).
+            srcip: Optional filter by source IP address.
+            dstip: Optional filter by destination IP address.
+
+        Returns:
+            Alert data in standard Wazuh format with affected_items and total counts.
+        """
         if not self._indexer_client:
             raise IndexerNotConfiguredError()
         start = self._time_range_to_start(time_range)
-        # Fetch a larger batch from the indexer, then filter by query
-        fetch_limit = min(limit * 5, 2000)
-        result = await self._indexer_client.get_alerts(limit=fetch_limit, timestamp_start=start)
-        if query:
-            alerts = result.get("data", {}).get("affected_items", [])
-            query_lower = query.lower()
-            filtered = [a for a in alerts if _dict_contains_text(a, query_lower)]
-            result["data"]["affected_items"] = filtered[:limit]
-            result["data"]["total_affected_items"] = len(filtered)
+        # Pass all filters directly to Elasticsearch — no local Python filtering needed
+        result = await self._indexer_client.get_alerts(
+            limit=limit,
+            timestamp_start=start,
+            query_text=query if query else None,
+            rule_id=rule_id,
+            agent_id=agent_id,
+            level=level,
+            srcip=srcip,
+            dstip=dstip,
+        )
         return result
 
     async def get_running_agents(self) -> Dict[str, Any]:

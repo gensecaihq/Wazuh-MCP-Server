@@ -1258,13 +1258,18 @@ async def handle_tools_list(params: Dict[str, Any], session: MCPSession) -> Dict
         },
         {
             "name": "search_security_events",
-            "description": "Search for specific security events across all Wazuh data",
+            "description": "Search for specific security events across all Wazuh data. Supports free-text search (Lucene syntax: AND, OR, NOT, field:value, wildcards, quoted phrases) and structured field filters. All filters are combined with AND logic.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
-                    "query": {"type": "string", "description": "Search query or pattern"},
+                    "query": {"type": "string", "description": "Free-text search query (Lucene syntax: AND, OR, NOT, field:value, wildcards, quoted phrases). Searched across all alert fields via Elasticsearch query_string."},
                     "time_range": {"type": "string", "enum": ["1h", "6h", "24h", "7d"], "default": "24h"},
-                    "limit": {"type": "integer", "minimum": 1, "maximum": 1000, "default": 100},
+                    "limit": {"type": "integer", "minimum": 1, "maximum": 10000, "default": 100},
+                    "rule_id": {"type": "string", "description": "Filter by Wazuh rule ID (e.g., '5710', '100002')"},
+                    "agent_id": {"type": "string", "description": "Filter by Wazuh agent ID (e.g., '001', '1234')"},
+                    "level": {"type": "string", "description": "Minimum rule severity level (e.g., '10' for level >= 10, '12+' for level >= 12)"},
+                    "srcip": {"type": "string", "description": "Filter by source IP address (data.srcip)"},
+                    "dstip": {"type": "string", "description": "Filter by destination IP address (data.dstip)"},
                     "compact": {
                         "type": "boolean",
                         "default": True,
@@ -1871,10 +1876,30 @@ async def handle_tools_call(params: Dict[str, Any], session: MCPSession) -> Dict
         elif tool_name == "search_security_events":
             query = validate_query(arguments.get("query"), required=True)
             time_range = validate_time_range(arguments.get("time_range"))
-            limit = validate_limit(arguments.get("limit"), max_val=1000)
+            limit = validate_limit(arguments.get("limit"), max_val=10000)
             compact = validate_boolean(arguments.get("compact"), default=True, param_name="compact")
+            rule_id = validate_rule_id(arguments.get("rule_id"))
+            agent_id = validate_agent_id(arguments.get("agent_id"))
+            srcip = validate_ip_address(arguments.get("srcip"), param_name="srcip")
+            dstip = validate_ip_address(arguments.get("dstip"), param_name="dstip")
+            # Level is a string like "10" or "12+" — validate as simple numeric
+            level_raw = arguments.get("level")
+            level = None
+            if level_raw is not None:
+                level_str = str(level_raw).strip().rstrip("+")
+                try:
+                    int(level_str)
+                    level = str(level_raw).strip()
+                except (ValueError, TypeError):
+                    raise ToolValidationError(
+                        "level", f"must be a numeric value, got '{level_raw}'", "Use a number like '10' or '12+'"
+                    )
 
-            result = await wazuh_client.search_security_events(query, time_range, limit)
+            result = await wazuh_client.search_security_events(
+                query, time_range, limit,
+                rule_id=rule_id, agent_id=agent_id, level=level,
+                srcip=srcip, dstip=dstip,
+            )
             if compact:
                 result = _compact_alerts_result(result)
             _success = True

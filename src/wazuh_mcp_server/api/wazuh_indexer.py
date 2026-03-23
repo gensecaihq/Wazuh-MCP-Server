@@ -188,6 +188,9 @@ class WazuhIndexerClient:
         agent_id: Optional[str] = None,
         timestamp_start: Optional[str] = None,
         timestamp_end: Optional[str] = None,
+        query_text: Optional[str] = None,
+        srcip: Optional[str] = None,
+        dstip: Optional[str] = None,
     ) -> Dict[str, Any]:
         """
         Get alerts from the Wazuh Indexer (wazuh-alerts-* index).
@@ -199,6 +202,9 @@ class WazuhIndexerClient:
             agent_id: Filter by agent ID
             timestamp_start: Start of time range (ISO 8601)
             timestamp_end: End of time range (ISO 8601)
+            query_text: Free-text search via Elasticsearch query_string (searches all fields)
+            srcip: Filter by source IP (data.srcip)
+            dstip: Filter by destination IP (data.dstip)
 
         Returns:
             Alert data in standard Wazuh format
@@ -220,6 +226,12 @@ class WazuhIndexerClient:
             except (ValueError, AttributeError):
                 pass
 
+        if srcip:
+            must_clauses.append({"match": {"data.srcip": srcip}})
+
+        if dstip:
+            must_clauses.append({"match": {"data.dstip": dstip}})
+
         if timestamp_start or timestamp_end:
             time_range: Dict[str, str] = {}
             if timestamp_start:
@@ -227,6 +239,24 @@ class WazuhIndexerClient:
             if timestamp_end:
                 time_range["lte"] = timestamp_end
             must_clauses.append({"range": {"timestamp": time_range}})
+
+        if query_text:
+            # Use query_string for free-text search across all fields.
+            # Wrap bare terms in wildcards for substring matching.
+            # Preserve explicit Lucene operators (AND, OR, NOT, quotes, field:value).
+            qt = query_text.strip()
+            has_operators = any(op in qt for op in ("AND", "OR", "NOT", ":", '"', "*", "?"))
+            if not has_operators:
+                # Bare term — wrap in wildcards for substring matching
+                qt = f"*{qt}*"
+            must_clauses.append({
+                "query_string": {
+                    "query": qt,
+                    "default_operator": "AND",
+                    "analyze_wildcard": True,
+                    "lenient": True,
+                }
+            })
 
         if must_clauses:
             query = {"bool": {"must": must_clauses}}
