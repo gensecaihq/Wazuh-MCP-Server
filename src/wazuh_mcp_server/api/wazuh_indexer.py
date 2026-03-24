@@ -378,9 +378,7 @@ class WazuhIndexerClient:
         """
         await self._ensure_initialized()
 
-        # Aggregation query via _search (inherits retry + circuit breaker)
-        agg_query = {"match_all": {}}
-        # Use _execute_search_raw for aggregation (needs custom body with size=0)
+        # Use aggregation query via circuit breaker (custom body with size=0)
         if self._circuit_breaker is not None:
             result = await self._circuit_breaker._call(self._execute_agg_search)
         else:

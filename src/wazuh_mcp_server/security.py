@@ -10,7 +10,6 @@ import os
 import re
 import time
 from collections import defaultdict, deque
-from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional, Set
@@ -681,52 +680,6 @@ class SecurityValidator:
         return False
 
 
-class CircuitBreaker:
-    """Circuit breaker for external dependencies."""
-
-    def __init__(self, failure_threshold: int = 5, recovery_timeout: int = 60):
-        self.failure_threshold = failure_threshold
-        self.recovery_timeout = recovery_timeout
-        self.failure_count = 0
-        self.last_failure_time = None
-        self.state = "CLOSED"  # CLOSED, OPEN, HALF_OPEN
-
-    @asynccontextmanager
-    async def call(self):
-        """Context manager for circuit breaker calls."""
-        if self.state == "OPEN":
-            if self._should_attempt_reset():
-                self.state = "HALF_OPEN"
-            else:
-                raise HTTPException(status_code=503, detail="Service temporarily unavailable")
-
-        try:
-            yield
-            self._on_success()
-        except Exception:
-            self._on_failure()
-            raise
-
-    def _should_attempt_reset(self) -> bool:
-        """Check if enough time has passed to attempt reset."""
-        if self.last_failure_time is None:
-            return True
-        return time.time() - self.last_failure_time > self.recovery_timeout
-
-    def _on_success(self):
-        """Handle successful call."""
-        self.failure_count = 0
-        self.state = "CLOSED"
-
-    def _on_failure(self):
-        """Handle failed call."""
-        self.failure_count += 1
-        self.last_failure_time = time.time()
-
-        if self.failure_count >= self.failure_threshold:
-            self.state = "OPEN"
-
-
 class SecurityManager:
     """Centralized security management."""
 
@@ -737,7 +690,6 @@ class SecurityManager:
             window_seconds=int(os.getenv("RATE_LIMIT_WINDOW", "60")),
         )
         self.validator = SecurityValidator()
-        self.circuit_breaker = CircuitBreaker()
         self.trusted_proxies = {p.strip() for p in os.getenv("TRUSTED_PROXIES", "").split(",") if p.strip()}
 
     def get_client_ip(self, request: Request) -> str:

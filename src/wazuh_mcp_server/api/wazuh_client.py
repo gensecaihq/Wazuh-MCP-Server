@@ -743,37 +743,34 @@ class WazuhClient:
         return await self._indexer_client.get_vulnerability_summary()
 
     async def analyze_security_threat(self, indicator: str, indicator_type: str) -> Dict[str, Any]:
-        """Analyze security threat by searching alerts for the indicator."""
+        """Analyze security threat by searching alerts for the indicator via Elasticsearch."""
         if not self._indexer_client:
             raise IndexerNotConfiguredError()
-        result = await self._indexer_client.get_alerts(limit=100)
+        # Use Elasticsearch query_string for efficient server-side search
+        result = await self._indexer_client.get_alerts(limit=100, query_text=indicator)
         alerts = result.get("data", {}).get("affected_items", [])
-        indicator_lower = indicator.lower()
-        matches = [a for a in alerts if _dict_contains_text(a, indicator_lower)]
         return {
             "data": {
                 "indicator": indicator,
                 "type": indicator_type,
-                "matching_alerts": len(matches),
-                "alerts": matches[:20],
+                "matching_alerts": len(alerts),
+                "alerts": alerts[:20],
             }
         }
 
     async def check_ioc_reputation(self, indicator: str, indicator_type: str) -> Dict[str, Any]:
-        """Check IoC reputation by searching alert history."""
+        """Check IoC reputation by searching alert history via Elasticsearch."""
         if not self._indexer_client:
             raise IndexerNotConfiguredError()
-        result = await self._indexer_client.get_alerts(limit=500)
+        # Use Elasticsearch query_string for server-side search
+        result = await self._indexer_client.get_alerts(limit=500, query_text=indicator)
         alerts = result.get("data", {}).get("affected_items", [])
-        occurrences = 0
+        occurrences = len(alerts)
         max_level = 0
-        indicator_lower = indicator.lower()
         for alert in alerts:
-            if _dict_contains_text(alert, indicator_lower):
-                occurrences += 1
-                level = alert.get("rule", {}).get("level", 0)
-                if isinstance(level, int) and level > max_level:
-                    max_level = level
+            level = alert.get("rule", {}).get("level", 0)
+            if isinstance(level, int) and level > max_level:
+                max_level = level
         risk = "high" if max_level >= 10 else "medium" if max_level >= 5 else "low"
         return {
             "data": {
@@ -1113,13 +1110,14 @@ class WazuhClient:
     # =========================================================================
 
     async def check_blocked_ip(self, ip_address: str, agent_id: str = None) -> Dict[str, Any]:
-        """Check if IP is blocked by searching active response alerts."""
+        """Check if IP is blocked by searching active response alerts via Elasticsearch."""
         if not self._indexer_client:
             raise IndexerNotConfiguredError()
-        result = await self._indexer_client.get_alerts(limit=50)
+        # Use Elasticsearch query_string to search for both the IP and firewall-drop
+        query = f'"{ip_address}" AND "firewall-drop"'
+        result = await self._indexer_client.get_alerts(limit=50, query_text=query)
         alerts = result.get("data", {}).get("affected_items", [])
-        matches = [a for a in alerts if _dict_contains_text(a, ip_address) and _dict_contains_text(a, "firewall-drop")]
-        return {"data": {"ip_address": ip_address, "blocked": len(matches) > 0, "matching_alerts": len(matches)}}
+        return {"data": {"ip_address": ip_address, "blocked": len(alerts) > 0, "matching_alerts": len(alerts)}}
 
     async def check_agent_isolation(self, agent_id: str) -> Dict[str, Any]:
         """Check agent isolation status by examining agent connectivity and alert history."""
@@ -1133,11 +1131,10 @@ class WazuhClient:
         isolation_confirmed = False
         if self._indexer_client and status == "disconnected":
             try:
-                alerts = await self._indexer_client.get_alerts(limit=20)
+                query = f'"host-isolation" AND "{agent_id}"'
+                alerts = await self._indexer_client.get_alerts(limit=5, query_text=query)
                 items = alerts.get("data", {}).get("affected_items", [])
-                isolation_confirmed = any(
-                    _dict_contains_text(a, "host-isolation") and _dict_contains_text(a, agent_id) for a in items
-                )
+                isolation_confirmed = len(items) > 0
             except Exception:
                 pass
         return {
@@ -1160,20 +1157,20 @@ class WazuhClient:
         return {"data": {"agent_id": agent_id, "process_id": process_id, "running": running}}
 
     async def check_user_status(self, agent_id: str, username: str) -> Dict[str, Any]:
-        """Check user account status by searching active response alerts and agent logs."""
-        # Search for disable-account active response alerts
+        """Check user account status by searching active response alerts via Elasticsearch."""
         disable_evidence = False
         enable_evidence = False
         if self._indexer_client:
             try:
-                alerts = await self._indexer_client.get_alerts(limit=50)
-                items = alerts.get("data", {}).get("affected_items", [])
-                for alert in items:
-                    if _dict_contains_text(alert, username) and _dict_contains_text(alert, agent_id):
-                        if _dict_contains_text(alert, "disable-account"):
-                            disable_evidence = True
-                        if _dict_contains_text(alert, "enable-account"):
-                            enable_evidence = True
+                # Search for disable-account events for this user and agent
+                disable_query = f'"disable-account" AND "{username}" AND "{agent_id}"'
+                disable_result = await self._indexer_client.get_alerts(limit=5, query_text=disable_query)
+                disable_evidence = len(disable_result.get("data", {}).get("affected_items", [])) > 0
+
+                # Search for enable-account events
+                enable_query = f'"enable-account" AND "{username}" AND "{agent_id}"'
+                enable_result = await self._indexer_client.get_alerts(limit=5, query_text=enable_query)
+                enable_evidence = len(enable_result.get("data", {}).get("affected_items", [])) > 0
             except Exception:
                 pass
         # Most recent action takes precedence
@@ -1238,8 +1235,11 @@ class WazuhClient:
         return await self.execute_active_response(data)
 
     async def close(self):
-        """Close the HTTP client and indexer client."""
+        """Close the HTTP client and indexer client, releasing all connections."""
         if self.client:
             await self.client.aclose()
+            self.client = None
         if self._indexer_client:
             await self._indexer_client.close()
+        self.token = None
+        self._cache.clear()

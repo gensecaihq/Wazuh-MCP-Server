@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "wazuh-mcp-server"
-version = "4.1.1"
+version = "4.2.0"
 description = "Production-grade MCP remote server for Wazuh SIEM integration with SSE transport"
 readme = "README.md"
 license = {text = "MIT"}
@@ -95,3 +95,4 @@ src_paths = ["src", "tests"]
 minversion = "7.0"
 testpaths = ["tests"]
 python_files = ["test_*.py"]
+asyncio_mode = "auto"

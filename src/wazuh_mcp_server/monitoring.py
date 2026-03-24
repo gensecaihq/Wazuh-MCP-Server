@@ -75,7 +75,7 @@ structured_logger = StructuredLogger(__name__)
 REGISTRY = CollectorRegistry()
 
 # Known endpoints for metric label normalization (prevents unbounded cardinality)
-_KNOWN_ENDPOINTS = {"/", "/mcp", "/health", "/metrics"}
+_KNOWN_ENDPOINTS = {"/", "/mcp", "/sse", "/health", "/metrics", "/docs", "/openapi.json"}
 
 
 def _normalize_endpoint(path: str) -> str:

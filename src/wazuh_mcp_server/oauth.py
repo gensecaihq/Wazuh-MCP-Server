@@ -12,9 +12,9 @@ from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional
 from urllib.parse import urlencode
 
+import jwt
 from fastapi import APIRouter, Form, Query, Request
 from fastapi.responses import JSONResponse, RedirectResponse
-import jwt
 from jwt.exceptions import PyJWTError as JWTError
 
 logger = logging.getLogger(__name__)

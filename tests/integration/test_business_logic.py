@@ -577,5 +577,115 @@ class TestSanitizingLogFilter:
         assert result is True
 
 
+class TestMCPResponseFalsyResults:
+    """Tests for MCPResponse handling of falsy but valid results."""
+
+    def test_result_empty_dict(self):
+        """Empty dict result (e.g. from ping) should exclude error."""
+        from wazuh_mcp_server.server import MCPResponse
+
+        resp = MCPResponse(id=1, result={})
+        d = resp.model_dump()
+        assert "result" in d
+        assert d["result"] == {}
+        assert "error" not in d
+
+    def test_result_zero(self):
+        """result=0 is a valid JSON-RPC result."""
+        from wazuh_mcp_server.server import MCPResponse
+
+        resp = MCPResponse(id=1, result=0)
+        d = resp.model_dump()
+        assert "result" in d
+        assert d["result"] == 0
+        assert "error" not in d
+
+    def test_result_empty_string(self):
+        """result='' is a valid JSON-RPC result."""
+        from wazuh_mcp_server.server import MCPResponse
+
+        resp = MCPResponse(id=1, result="")
+        d = resp.model_dump()
+        assert "result" in d
+        assert d["result"] == ""
+        assert "error" not in d
+
+    def test_result_empty_list(self):
+        """result=[] is a valid JSON-RPC result."""
+        from wazuh_mcp_server.server import MCPResponse
+
+        resp = MCPResponse(id=1, result=[])
+        d = resp.model_dump()
+        assert "result" in d
+        assert d["result"] == []
+        assert "error" not in d
+
+    def test_result_none_no_error(self):
+        """result=None with no error should still exclude error."""
+        from wazuh_mcp_server.server import MCPResponse
+
+        resp = MCPResponse(id=1, result=None)
+        d = resp.model_dump()
+        assert "result" in d
+        assert "error" not in d
+
+
+class TestKnownEndpoints:
+    """Tests for metric endpoint normalization."""
+
+    def test_sse_endpoint_is_known(self):
+        from wazuh_mcp_server.monitoring import _KNOWN_ENDPOINTS
+
+        assert "/sse" in _KNOWN_ENDPOINTS
+
+    def test_mcp_endpoint_is_known(self):
+        from wazuh_mcp_server.monitoring import _KNOWN_ENDPOINTS
+
+        assert "/mcp" in _KNOWN_ENDPOINTS
+
+    def test_unknown_endpoint_normalizes(self):
+        from wazuh_mcp_server.monitoring import _normalize_endpoint
+
+        assert _normalize_endpoint("/unknown/path") == "other"
+        assert _normalize_endpoint("/mcp") == "/mcp"
+        assert _normalize_endpoint("/sse") == "/sse"
+
+
+class TestTimeRangeEnumCompleteness:
+    """Tests for time_range enum completeness in tool schemas."""
+
+    def test_all_valid_ranges_accepted(self):
+        from wazuh_mcp_server.security import VALID_TIME_RANGES, validate_time_range
+
+        for tr in VALID_TIME_RANGES:
+            assert validate_time_range(tr) == tr
+
+    def test_all_valid_ranges_in_client_mapping(self):
+        from wazuh_mcp_server.api.wazuh_client import _TIME_RANGE_HOURS
+        from wazuh_mcp_server.security import VALID_TIME_RANGES
+
+        for tr in VALID_TIME_RANGES:
+            assert tr in _TIME_RANGE_HOURS, f"{tr} missing from _TIME_RANGE_HOURS"
+
+
+class TestWazuhClientClose:
+    """Tests for WazuhClient.close() cleanup."""
+
+    async def test_close_clears_state(self):
+        from wazuh_mcp_server.api.wazuh_client import WazuhClient
+        from wazuh_mcp_server.config import WazuhConfig
+
+        config = WazuhConfig(
+            wazuh_host="localhost", wazuh_user="test", wazuh_pass="test", wazuh_port=55000, verify_ssl=False
+        )
+        client = WazuhClient(config)
+        # Simulate some cached data
+        client._cache["test_key"] = (0.0, {"data": "test"})
+        await client.close()
+        assert client.client is None
+        assert client.token is None
+        assert len(client._cache) == 0
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

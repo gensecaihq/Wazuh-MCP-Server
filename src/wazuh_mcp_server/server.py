@@ -12,9 +12,9 @@ import os
 import threading
 import time
 import uuid
+from collections import OrderedDict
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone
-from collections import OrderedDict
 from typing import Any, Dict, List, Optional, Union
 from urllib.parse import urlparse
 
@@ -28,7 +28,7 @@ from wazuh_mcp_server.api.wazuh_client import WazuhClient
 from wazuh_mcp_server.api.wazuh_indexer import IndexerNotConfiguredError
 from wazuh_mcp_server.auth import create_access_token
 from wazuh_mcp_server.config import WazuhConfig, get_config
-from wazuh_mcp_server.monitoring import ACTIVE_CONNECTIONS, REQUEST_COUNT, setup_monitoring_middleware
+from wazuh_mcp_server.monitoring import ACTIVE_CONNECTIONS, setup_monitoring_middleware
 from wazuh_mcp_server.resilience import GracefulShutdown
 from wazuh_mcp_server.security import (
     RateLimiter,
@@ -148,13 +148,14 @@ class MCPResponse(BaseModel):
         """
         d = super().model_dump(*args, **kwargs)
 
-        # Remove error field on success (when result is present and error is None)
-        if d.get("result") is not None and d.get("error") is None:
-            d.pop("error", None)
-
-        # Remove result field on error (when error is present)
-        elif d.get("error") is not None:
+        # Determine which field was explicitly set.
+        # error takes precedence: if error is set, this is an error response.
+        if d.get("error") is not None:
             d.pop("result", None)
+        else:
+            # Success response: result may be any JSON value including None, 0, "", [].
+            # Remove the error field since it's not an error response.
+            d.pop("error", None)
 
         return d
 
@@ -1238,7 +1239,7 @@ async def handle_tools_list(params: Dict[str, Any], session: MCPSession) -> Dict
             "inputSchema": {
                 "type": "object",
                 "properties": {
-                    "time_range": {"type": "string", "enum": ["1h", "6h", "24h", "7d"], "default": "24h"},
+                    "time_range": {"type": "string", "enum": ["1h", "6h", "12h", "1d", "24h", "7d", "30d"], "default": "24h"},
                     "group_by": {"type": "string", "default": "rule.level"},
                 },
                 "required": [],
@@ -1250,7 +1251,7 @@ async def handle_tools_list(params: Dict[str, Any], session: MCPSession) -> Dict
             "inputSchema": {
                 "type": "object",
                 "properties": {
-                    "time_range": {"type": "string", "enum": ["1h", "6h", "24h", "7d"], "default": "24h"},
+                    "time_range": {"type": "string", "enum": ["1h", "6h", "12h", "1d", "24h", "7d", "30d"], "default": "24h"},
                     "min_frequency": {"type": "integer", "minimum": 1, "default": 5},
                 },
                 "required": [],
@@ -1263,8 +1264,8 @@ async def handle_tools_list(params: Dict[str, Any], session: MCPSession) -> Dict
                 "type": "object",
                 "properties": {
                     "query": {"type": "string", "description": "Free-text search query (Lucene syntax: AND, OR, NOT, field:value, wildcards, quoted phrases). Searched across all alert fields via Elasticsearch query_string."},
-                    "time_range": {"type": "string", "enum": ["1h", "6h", "24h", "7d"], "default": "24h"},
-                    "limit": {"type": "integer", "minimum": 1, "maximum": 10000, "default": 100},
+                    "time_range": {"type": "string", "enum": ["1h", "6h", "12h", "1d", "24h", "7d", "30d"], "default": "24h"},
+                    "limit": {"type": "integer", "minimum": 1, "maximum": 1000, "default": 100},
                     "rule_id": {"type": "string", "description": "Filter by Wazuh rule ID (e.g., '5710', '100002')"},
                     "agent_id": {"type": "string", "description": "Filter by Wazuh agent ID (e.g., '001', '1234')"},
                     "level": {"type": "string", "description": "Minimum rule severity level (e.g., '10' for level >= 10, '12+' for level >= 12)"},
@@ -1441,7 +1442,7 @@ async def handle_tools_list(params: Dict[str, Any], session: MCPSession) -> Dict
                 "type": "object",
                 "properties": {
                     "limit": {"type": "integer", "minimum": 1, "maximum": 50, "default": 10},
-                    "time_range": {"type": "string", "enum": ["1h", "6h", "24h", "7d"], "default": "24h"},
+                    "time_range": {"type": "string", "enum": ["1h", "6h", "12h", "1d", "24h", "7d", "30d"], "default": "24h"},
                 },
                 "required": [],
             },
@@ -1876,7 +1877,7 @@ async def handle_tools_call(params: Dict[str, Any], session: MCPSession) -> Dict
         elif tool_name == "search_security_events":
             query = validate_query(arguments.get("query"), required=True)
             time_range = validate_time_range(arguments.get("time_range"))
-            limit = validate_limit(arguments.get("limit"), max_val=10000)
+            limit = validate_limit(arguments.get("limit"), max_val=1000)
             compact = validate_boolean(arguments.get("compact"), default=True, param_name="compact")
             rule_id = validate_rule_id(arguments.get("rule_id"))
             agent_id = validate_agent_id(arguments.get("agent_id"))
@@ -2686,9 +2687,6 @@ async def mcp_sse_endpoint(
             session = await get_or_create_session(None, origin)
         session.authenticated = True  # Mark as authenticated via bearer token
 
-        # Track metrics on successful setup
-        REQUEST_COUNT.labels(method="GET", endpoint="/sse", status_code=200).inc()
-
         # Return SSE stream (track_connection=True so ACTIVE_CONNECTIONS is
         # decremented when the stream actually closes, not when this function returns)
         response = StreamingResponse(
@@ -2705,7 +2703,6 @@ async def mcp_sse_endpoint(
 
     except Exception as e:
         ACTIVE_CONNECTIONS.dec()
-        REQUEST_COUNT.labels(method="GET", endpoint="/sse", status_code=500).inc()
         logger.error(f"SSE endpoint error: {e}")
         raise HTTPException(status_code=500, detail="SSE stream error")
 
@@ -2933,8 +2930,8 @@ async def mcp_streamable_http_endpoint(
         raise HTTPException(status_code=500, detail="Internal server error")
 
     finally:
-        REQUEST_COUNT.labels(method=request.method, endpoint="/mcp", status_code=_status_code).inc()
-        # Only decrement for non-SSE responses; SSE generator handles its own decrement
+        # REQUEST_COUNT is already tracked by the monitoring middleware — no need to duplicate here.
+        # Only decrement for non-SSE responses; SSE generator handles its own decrement.
         if not _sse_returned:
             ACTIVE_CONNECTIONS.dec()
 
