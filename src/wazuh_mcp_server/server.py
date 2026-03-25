@@ -9,6 +9,7 @@ import asyncio
 import json
 import logging
 import os
+import re as _re
 import threading
 import time
 import uuid
@@ -74,16 +75,27 @@ logger = logging.getLogger(__name__)
 _oauth_manager = None
 
 
-async def verify_authentication(authorization: Optional[str], config) -> bool:
+async def verify_authentication(authorization: Optional[str], config) -> Optional[Any]:
     """
     Verify authentication based on configured auth mode.
 
-    Returns True if authenticated, raises HTTPException if not.
+    Returns AuthToken if authenticated (None for authless mode).
+    Raises HTTPException if authentication fails.
     Supports: authless (none), bearer token, and OAuth modes.
     """
+    from wazuh_mcp_server.auth import AuthToken
+
     # Authless mode - no authentication required
     if config.is_authless:
-        return True
+        # Return a synthetic token with scopes based on AUTHLESS_ALLOW_WRITE
+        allow_write = os.getenv("AUTHLESS_ALLOW_WRITE", "false").lower() in ("true", "1", "yes")
+        scopes = ["wazuh:read", "wazuh:write"] if allow_write else ["wazuh:read"]
+        return AuthToken(
+            token="authless",
+            api_key_id="authless",
+            created_at=datetime.now(timezone.utc),
+            scopes=scopes,
+        )
 
     # Authentication required
     if not authorization:
@@ -98,7 +110,15 @@ async def verify_authentication(authorization: Optional[str], config) -> bool:
             token = authorization.replace("Bearer ", "") if authorization.startswith("Bearer ") else authorization
             token_obj = _oauth_manager.validate_access_token(token)
             if token_obj:
-                return True
+                # Return AuthToken with OAuth scopes
+                scope_str = getattr(token_obj, "scope", "wazuh:read wazuh:write")
+                scopes = scope_str.split() if scope_str else ["wazuh:read", "wazuh:write"]
+                return AuthToken(
+                    token=token,
+                    api_key_id="oauth",
+                    created_at=datetime.now(timezone.utc),
+                    scopes=scopes,
+                )
         raise HTTPException(
             status_code=401, detail="Invalid or expired OAuth token", headers={"WWW-Authenticate": "Bearer"}
         )
@@ -107,8 +127,7 @@ async def verify_authentication(authorization: Optional[str], config) -> bool:
     try:
         from wazuh_mcp_server.auth import verify_bearer_token
 
-        await verify_bearer_token(authorization)
-        return True
+        return await verify_bearer_token(authorization)
     except ValueError as e:
         raise HTTPException(status_code=401, detail=str(e), headers={"WWW-Authenticate": "Bearer"})
 
@@ -722,6 +741,22 @@ MAX_BATCH_SIZE = 100
 # MCP Protocol Handlers
 
 
+# Patterns to redact from output text (credentials, tokens, keys in log lines)
+_OUTPUT_REDACT_PATTERNS = [
+    _re.compile(r'(?i)(password|passwd|pwd)\s*[=:]\s*\S+'),
+    _re.compile(r'(?i)(api[_-]?key|secret|token)\s*[=:]\s*\S+'),
+    _re.compile(r'(?i)Authorization:\s*.+'),
+]
+
+
+def _sanitize_output_text(text: str) -> str:
+    """Redact credentials/tokens from log text before returning to MCP clients."""
+    for pattern in _OUTPUT_REDACT_PATTERNS:
+        text = pattern.sub(lambda m: m.group().split("=")[0] + "=[REDACTED]" if "=" in m.group()
+                           else m.group().split(":")[0] + ": [REDACTED]", text)
+    return text
+
+
 def _compact_alert(alert: dict) -> dict:
     """Strip a raw Wazuh alert to essential fields for MCP output."""
     compact = {}
@@ -750,7 +785,8 @@ def _compact_alert(alert: dict) -> dict:
         compact["syscheck"] = {"path": sc.get("path", ""), "event": sc.get("event", "")}
     if alert.get("full_log"):
         log = str(alert["full_log"])
-        compact["full_log"] = (log[:300] + "...") if len(log) > 300 else log
+        log = (log[:300] + "...") if len(log) > 300 else log
+        compact["full_log"] = _sanitize_output_text(log)
     return compact
 
 
@@ -759,6 +795,19 @@ def _compact_alerts_result(result: dict) -> dict:
     data = result.get("data", {})
     items = data.get("affected_items", [])
     data["affected_items"] = [_compact_alert(a) for a in items]
+    return result
+
+
+def _add_truncation_warning(result: dict, requested_limit: int) -> dict:
+    """Add a warning if results hit the requested limit (likely truncated)."""
+    data = result.get("data", {})
+    items = data.get("affected_items", [])
+    total = data.get("total_affected_items", len(items))
+    if total >= requested_limit:
+        result["_warning"] = (
+            f"Results may be truncated ({total} items returned, limit was {requested_limit}). "
+            f"Use more specific filters (time_range, agent_id, rule_id, level) or increase limit for complete results."
+        )
     return result
 
 
@@ -1207,8 +1256,37 @@ async def handle_completion_complete(params: Dict[str, Any], session: MCPSession
     }
 
 
+# Tool scope mapping: tools requiring write access (active response, rollback, restart)
+# All other tools only require wazuh:read
+WRITE_SCOPE_TOOLS = frozenset({
+    "wazuh_block_ip",
+    "wazuh_isolate_host",
+    "wazuh_kill_process",
+    "wazuh_disable_user",
+    "wazuh_quarantine_file",
+    "wazuh_active_response",
+    "wazuh_firewall_drop",
+    "wazuh_host_deny",
+    "wazuh_restart",
+    "wazuh_unisolate_host",
+    "wazuh_enable_user",
+    "wazuh_restore_file",
+    "wazuh_firewall_allow",
+    "wazuh_host_allow",
+})
+
+# Audit logger for destructive operations
+audit_logger = logging.getLogger("wazuh_mcp_server.audit")
+
+
+def _get_tool_scope(tool_name: str) -> str:
+    """Get the required scope for a tool."""
+    return "wazuh:write" if tool_name in WRITE_SCOPE_TOOLS else "wazuh:read"
+
+
 async def handle_tools_list(params: Dict[str, Any], session: MCPSession) -> Dict[str, Any]:
-    """Handle tools/list method - All 48 Wazuh Security Tools with pagination."""
+    """Handle tools/list method - All 48 Wazuh Security Tools with pagination.
+    Filters tools based on session token scopes."""
     _cursor = params.get("cursor")  # Reserved for future pagination
     tools = [
         # Alert Management Tools (4 tools)
@@ -1783,6 +1861,11 @@ async def handle_tools_list(params: Dict[str, Any], session: MCPSession) -> Dict
         },
     ]
 
+    # Filter tools by session scopes: hide write tools from read-only tokens
+    auth_token = getattr(session, "_auth_token", None)
+    if auth_token and not auth_token.has_scope("wazuh:write"):
+        tools = [t for t in tools if t["name"] not in WRITE_SCOPE_TOOLS]
+
     # Pagination support per MCP spec
     return {"tools": tools}  # No more tools
 
@@ -1797,6 +1880,24 @@ async def handle_tools_call(params: Dict[str, Any], session: MCPSession) -> Dict
 
     # Validate tool name
     validate_input(tool_name, max_length=100)
+
+    # Scope enforcement: check if the token has the required scope for this tool
+    auth_token = getattr(session, "_auth_token", None)
+    required_scope = _get_tool_scope(tool_name)
+    if auth_token and not auth_token.has_scope(required_scope):
+        raise ValueError(
+            f"Insufficient permissions: tool '{tool_name}' requires '{required_scope}' scope. "
+            f"Your token has scopes: {auth_token.scopes}. "
+            f"Request a token with '{required_scope}' scope to use this tool."
+        )
+
+    # Audit logging for destructive operations
+    if tool_name in WRITE_SCOPE_TOOLS:
+        client_id = auth_token.api_key_id if auth_token else "unknown"
+        audit_logger.warning(
+            f"AUDIT: tool={tool_name} client={client_id} session={session.session_id} "
+            f"args={json.dumps({k: v for k, v in arguments.items() if k != 'parameters'}, default=str)}"
+        )
 
     # Track tool execution for metrics
     import time as _time
@@ -1847,6 +1948,7 @@ async def handle_tools_call(params: Dict[str, Any], session: MCPSession) -> Dict
             )
             if compact:
                 result = _compact_alerts_result(result)
+            result = _add_truncation_warning(result, limit)
             _success = True
             return _tool_result(f"Wazuh Alerts:\n{json.dumps(result, indent=2 if not compact else None)}")
 
@@ -1903,6 +2005,7 @@ async def handle_tools_call(params: Dict[str, Any], session: MCPSession) -> Dict
             )
             if compact:
                 result = _compact_alerts_result(result)
+            result = _add_truncation_warning(result, limit)
             _success = True
             return _tool_result(f"Security Events:\n{json.dumps(result, indent=2 if not compact else None)}")
 
@@ -2436,7 +2539,7 @@ async def mcp_endpoint(
     POST: Handles JSON-RPC requests
     """
     # Verify authentication based on configured mode
-    await verify_authentication(authorization, config)
+    auth_token = await verify_authentication(authorization, config)
 
     # Track active connections (request counting handled by monitoring middleware)
     ACTIVE_CONNECTIONS.inc()
@@ -2471,6 +2574,8 @@ async def mcp_endpoint(
             await sessions.set(mcp_session_id, session)
         else:
             session = await get_or_create_session(None, origin)
+
+        session._auth_token = auth_token  # Store token for scope checks in tool handlers
 
         # Handle GET request (SSE)
         if request.method == "GET":
@@ -2659,7 +2764,7 @@ async def mcp_sse_endpoint(
     Supports authentication modes: bearer (default), oauth, none (authless)
     """
     # Verify authentication based on configured mode
-    await verify_authentication(authorization, config)
+    auth_token = await verify_authentication(authorization, config)
 
     # Origin validation per MCP 2025-11-25 spec
     validate_origin_header(origin, config.ALLOWED_ORIGINS)
@@ -2686,6 +2791,7 @@ async def mcp_sse_endpoint(
         else:
             session = await get_or_create_session(None, origin)
         session.authenticated = True  # Mark as authenticated via bearer token
+        session._auth_token = auth_token  # Store token for scope checks in tool handlers
 
         # Return SSE stream (track_connection=True so ACTIVE_CONNECTIONS is
         # decremented when the stream actually closes, not when this function returns)
@@ -2734,7 +2840,7 @@ async def mcp_streamable_http_endpoint(
     protocol_version = validate_protocol_version(mcp_protocol_version, strict=True)
 
     # Verify authentication based on configured mode
-    await verify_authentication(authorization, config)
+    auth_token = await verify_authentication(authorization, config)
 
     # Origin validation per 2025-11-25 spec
     # Only validate if Origin is present; if present and invalid, return 403
@@ -2775,6 +2881,7 @@ async def mcp_streamable_http_endpoint(
             session = await get_or_create_session(None, origin)
 
         session.authenticated = True  # Mark as authenticated
+        session._auth_token = auth_token  # Store token for scope checks in tool handlers
 
         # Common response headers
         response_headers = {

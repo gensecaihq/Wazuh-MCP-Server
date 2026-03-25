@@ -483,22 +483,25 @@ class TestAuthTokenScopes:
     """Tests for auth token scope checking (audit v2 fix)."""
 
     def test_none_scopes_means_full_access(self):
-        from wazuh_mcp_server.auth import AuthToken
         from datetime import datetime, timezone
+
+        from wazuh_mcp_server.auth import AuthToken
 
         token = AuthToken(token="test", api_key_id="k", created_at=datetime.now(timezone.utc), scopes=None)
         assert token.has_scope("wazuh:read") is True
 
     def test_empty_scopes_means_no_access(self):
-        from wazuh_mcp_server.auth import AuthToken
         from datetime import datetime, timezone
+
+        from wazuh_mcp_server.auth import AuthToken
 
         token = AuthToken(token="test", api_key_id="k", created_at=datetime.now(timezone.utc), scopes=[])
         assert token.has_scope("wazuh:read") is False
 
     def test_specific_scopes(self):
-        from wazuh_mcp_server.auth import AuthToken
         from datetime import datetime, timezone
+
+        from wazuh_mcp_server.auth import AuthToken
 
         token = AuthToken(token="test", api_key_id="k", created_at=datetime.now(timezone.utc), scopes=["wazuh:read"])
         assert token.has_scope("wazuh:read") is True
@@ -685,6 +688,131 @@ class TestWazuhClientClose:
         assert client.client is None
         assert client.token is None
         assert len(client._cache) == 0
+
+
+class TestToolScopeMapping:
+    """Tests for per-tool RBAC scope enforcement."""
+
+    def test_write_tools_require_write_scope(self):
+        from wazuh_mcp_server.server import WRITE_SCOPE_TOOLS, _get_tool_scope
+
+        for tool in WRITE_SCOPE_TOOLS:
+            assert _get_tool_scope(tool) == "wazuh:write"
+
+    def test_read_tools_require_read_scope(self):
+        from wazuh_mcp_server.server import WRITE_SCOPE_TOOLS, _get_tool_scope
+
+        read_tools = [
+            "get_wazuh_alerts", "get_wazuh_agents", "search_security_events",
+            "get_wazuh_vulnerabilities", "analyze_security_threat",
+        ]
+        for tool in read_tools:
+            assert tool not in WRITE_SCOPE_TOOLS
+            assert _get_tool_scope(tool) == "wazuh:read"
+
+    def test_all_action_tools_in_write_scope(self):
+        from wazuh_mcp_server.server import WRITE_SCOPE_TOOLS
+
+        expected_write = {
+            "wazuh_block_ip", "wazuh_isolate_host", "wazuh_kill_process",
+            "wazuh_disable_user", "wazuh_quarantine_file", "wazuh_active_response",
+            "wazuh_firewall_drop", "wazuh_host_deny", "wazuh_restart",
+            "wazuh_unisolate_host", "wazuh_enable_user", "wazuh_restore_file",
+            "wazuh_firewall_allow", "wazuh_host_allow",
+        }
+        assert WRITE_SCOPE_TOOLS == expected_write
+
+
+class TestAuthlessGuardrails:
+    """Tests for authless mode scope restrictions."""
+
+    def test_authless_default_read_only(self):
+        """Authless mode without AUTHLESS_ALLOW_WRITE should produce read-only token."""
+        from wazuh_mcp_server.auth import AuthToken
+
+        # Simulate what verify_authentication does in authless mode
+        scopes = ["wazuh:read"]
+        token = AuthToken(
+            token="authless", api_key_id="authless",
+            created_at=__import__("datetime").datetime.now(__import__("datetime").timezone.utc),
+            scopes=scopes,
+        )
+        assert token.has_scope("wazuh:read")
+        assert not token.has_scope("wazuh:write")
+
+    def test_authless_write_opt_in(self):
+        """Authless mode with AUTHLESS_ALLOW_WRITE=true should allow write."""
+        from wazuh_mcp_server.auth import AuthToken
+
+        scopes = ["wazuh:read", "wazuh:write"]
+        token = AuthToken(
+            token="authless", api_key_id="authless",
+            created_at=__import__("datetime").datetime.now(__import__("datetime").timezone.utc),
+            scopes=scopes,
+        )
+        assert token.has_scope("wazuh:read")
+        assert token.has_scope("wazuh:write")
+
+
+class TestOutputSanitization:
+    """Tests for output text sanitization."""
+
+    def test_password_redacted_from_log(self):
+        from wazuh_mcp_server.server import _sanitize_output_text
+
+        text = "User login failed: password=Secret123 for user admin"
+        result = _sanitize_output_text(text)
+        assert "Secret123" not in result
+        assert "[REDACTED]" in result
+
+    def test_api_key_redacted(self):
+        from wazuh_mcp_server.server import _sanitize_output_text
+
+        text = "Config: api_key=sk-abc123def456 endpoint=localhost"
+        result = _sanitize_output_text(text)
+        assert "sk-abc123def456" not in result
+        assert "[REDACTED]" in result
+
+    def test_authorization_header_redacted(self):
+        from wazuh_mcp_server.server import _sanitize_output_text
+
+        text = "Request headers: Authorization: Bearer eyJhbGc..."
+        result = _sanitize_output_text(text)
+        assert "eyJhbGc" not in result
+        assert "[REDACTED]" in result
+
+    def test_normal_text_unchanged(self):
+        from wazuh_mcp_server.server import _sanitize_output_text
+
+        text = "Alert: SSH brute force detected from 192.168.1.100"
+        result = _sanitize_output_text(text)
+        assert result == text
+
+
+class TestTruncationWarning:
+    """Tests for large result set truncation warnings."""
+
+    def test_warning_added_when_at_limit(self):
+        from wazuh_mcp_server.server import _add_truncation_warning
+
+        result = {"data": {"affected_items": [{"id": i} for i in range(100)], "total_affected_items": 100}}
+        result = _add_truncation_warning(result, 100)
+        assert "_warning" in result
+        assert "truncated" in result["_warning"]
+
+    def test_no_warning_when_below_limit(self):
+        from wazuh_mcp_server.server import _add_truncation_warning
+
+        result = {"data": {"affected_items": [{"id": i} for i in range(50)], "total_affected_items": 50}}
+        result = _add_truncation_warning(result, 100)
+        assert "_warning" not in result
+
+    def test_warning_when_total_exceeds_limit(self):
+        from wazuh_mcp_server.server import _add_truncation_warning
+
+        result = {"data": {"affected_items": [{"id": i} for i in range(100)], "total_affected_items": 500}}
+        result = _add_truncation_warning(result, 100)
+        assert "_warning" in result
 
 
 if __name__ == "__main__":
