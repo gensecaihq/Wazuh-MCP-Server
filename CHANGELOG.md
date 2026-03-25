@@ -5,6 +5,36 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [4.2.0] - 2026-03-25
+
+### Security
+- **Per-tool RBAC scope enforcement**: 14 active response/rollback tools now require `wazuh:write` scope; all other tools require `wazuh:read`. Scopes checked on every `tools/call` and `tools/list` filtered by token permissions
+- **Authless mode guardrails**: `AUTH_MODE=none` now defaults to read-only scopes. New `AUTHLESS_ALLOW_WRITE=true` env var required to enable destructive operations without authentication
+- **Output sanitization**: Passwords, API keys, tokens, and Authorization headers are redacted from alert `full_log` text before returning to MCP clients, preventing credential leakage to LLMs
+- **Audit logging for destructive operations**: All write-scope tool invocations logged with client ID, session ID, and arguments via dedicated `wazuh_mcp_server.audit` logger
+
+### Fixed
+- **MCPResponse.model_dump() for falsy results**: `result=0`, `""`, `[]` are now correctly serialized per JSON-RPC 2.0 spec
+- **Duplicate REQUEST_COUNT metrics**: `/mcp` and `/sse` endpoints no longer double-count requests already tracked by monitoring middleware
+- **Duplicate CircuitBreaker class**: Removed redundant class from `security.py` that shadowed the production version in `resilience.py`
+- **Unused variable and import lint issues**: Clean ruff pass across all source files
+
+### Performance
+- **Targeted Elasticsearch queries**: `analyze_security_threat`, `check_ioc_reputation`, `check_blocked_ip`, `check_agent_isolation`, and `check_user_status` now use `query_string` queries instead of fetching unfiltered alerts for client-side text matching
+- **search_security_events limit capped**: Reduced from 10,000 to 1,000 to prevent Elasticsearch `max_result_window` errors and MCP token overflows
+- **Result truncation warnings**: Results hitting the requested limit include a `_warning` field suggesting more specific filters
+
+### Changed
+- **Auth token propagation**: `verify_authentication()` now returns `AuthToken` (not bool), stored on session for downstream scope checks
+- **Time range enum sync**: All tool schemas now expose the full set of valid time ranges (`1h`, `6h`, `12h`, `1d`, `24h`, `7d`, `30d`)
+- **Metrics endpoint normalization**: Added `/sse`, `/docs`, `/openapi.json` to `_KNOWN_ENDPOINTS`
+- **WazuhClient.close() hardened**: Now clears client, token, and cache references
+- **pytest asyncio_mode**: Added `asyncio_mode = "auto"` to `pyproject.toml`
+- **Version bump**: 4.1.1 -> 4.2.0
+
+### Tests
+- **77 tests** (up from 54): Added coverage for RBAC scope mapping, authless guardrails, output sanitization, truncation warnings, falsy JSON-RPC results, metrics normalization, time range completeness, and close() cleanup
+
 ## [4.1.1] - 2026-03-15
 
 ### Security

@@ -1,6 +1,6 @@
 # Configuration Guide
 
-Complete configuration reference for Wazuh MCP Server v4.1.1.
+Complete configuration reference for Wazuh MCP Server v4.2.0.
 
 ## 📋 Configuration Overview
 
@@ -128,7 +128,7 @@ CACHE_MAX_SIZE=1000                      # Maximum cache entries
 # Transport Settings
 MCP_TRANSPORT=streamable-http            # Transport type (streamable-http)
 MCP_SERVER_NAME=Wazuh MCP Server         # Server name
-MCP_SERVER_VERSION=4.1.1                 # Server version
+MCP_SERVER_VERSION=4.2.0                 # Server version
 
 # Tool Configuration
 ENABLE_SECURITY_TOOLS=true               # Enable security analysis tools
@@ -453,7 +453,24 @@ curl -X POST https://your-server.com/auth/token \
 
 **Authless Mode (`AUTH_MODE=none`):**
 - No authentication required
+- **Read-only by default** — active response tools are disabled
+- Set `AUTHLESS_ALLOW_WRITE=true` to explicitly enable write operations
 - For development/testing only
+
+### Role-Based Access Control (RBAC)
+
+Tools are divided into two scopes:
+
+| Scope | Tools | Description |
+|-------|-------|-------------|
+| `wazuh:read` | 34 tools | Alerts, agents, vulnerabilities, analysis, system monitoring, verification |
+| `wazuh:write` | 14 tools | Active response (block IP, isolate host, kill process, etc.) and rollback tools |
+
+- **Scope enforcement**: Every `tools/call` checks the token's scopes before execution
+- **Filtered tool list**: `tools/list` only shows tools the token has permission to use
+- **Audit logging**: All `wazuh:write` tool calls are logged with client ID, session, and arguments
+- Default API keys and OAuth tokens include both `wazuh:read` and `wazuh:write` scopes
+- Create read-only API keys via the `API_KEYS` JSON env var with `"scopes": ["wazuh:read"]`
 
 ### Common Error
 

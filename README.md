@@ -7,7 +7,7 @@
 
 **Production-ready MCP server connecting AI assistants to Wazuh SIEM.**
 
-> **Version 4.1.1** | Wazuh 4.8.0 - 4.14.4 | [Full Changelog](CHANGELOG.md)
+> **Version 4.2.0** | Wazuh 4.8.0 - 4.14.4 | [Full Changelog](CHANGELOG.md)
 
 ---
 
@@ -60,9 +60,11 @@ Agentic SOC:     Alert → AI triages → Seconds later → Response ready for a
 | **MCP Protocol** | 100% compliant with MCP 2025-11-25, Streamable HTTP + Legacy SSE |
 | **Security Tools** | 48 specialized tools for alerts, agents, vulnerabilities, compliance, active response |
 | **Authentication** | OAuth 2.0 with DCR, Bearer tokens (JWT), or authless mode |
-| **Production Ready** | Circuit breakers, rate limiting, security & monitoring middleware, Prometheus metrics |
+| **RBAC** | Per-tool scope enforcement (`wazuh:read` / `wazuh:write`), authless mode read-only by default |
+| **Production Ready** | Circuit breakers, rate limiting, audit logging, security middleware, Prometheus metrics |
 | **Deployment** | Docker containerized, multi-platform (AMD64/ARM64), serverless-ready |
-| **Token Efficiency** | Compact output mode reduces responses by ~66% |
+| **LLM Safety** | Output sanitization redacts credentials from alert data before returning to AI clients |
+| **Token Efficiency** | Compact output mode reduces responses by ~66%, truncation warnings for large datasets |
 
 ### 48 Security Tools
 
@@ -144,6 +146,7 @@ curl http://localhost:3000/health
 | `MCP_PORT` | `3000` | Server port |
 | `AUTH_MODE` | `bearer` | `oauth`, `bearer`, or `none` |
 | `AUTH_SECRET_KEY` | auto | JWT signing key |
+| `AUTHLESS_ALLOW_WRITE` | `false` | Allow write tools in authless mode |
 | `ALLOWED_ORIGINS` | `https://claude.ai` | CORS origins |
 | `REDIS_URL` | - | Redis URL for serverless mode |
 
@@ -207,14 +210,18 @@ src/wazuh_mcp_server/
 ## Security
 
 - **Authentication**: JWT tokens, OAuth 2.0 with DCR, all endpoints protected
-- **Security Middleware**: Automatic security headers (X-Content-Type-Options, X-Frame-Options, CSP)
-- **Rate Limiting**: Per-client request throttling
-- **Input Validation**: Comprehensive parameter validation with SQL injection and XSS protection
-- **Container Security**: Non-root user, read-only filesystem
+- **RBAC**: Per-tool scope enforcement — read-only tokens cannot trigger active response tools. 14 write tools require `wazuh:write` scope. Authless mode defaults to read-only (`AUTHLESS_ALLOW_WRITE=true` to override)
+- **Audit Logging**: All destructive operations (block IP, isolate host, kill process, etc.) logged with client ID, session, and arguments
+- **Output Sanitization**: Credentials, tokens, and API keys are redacted from alert data before returning to LLM clients
+- **Log Sanitization**: Global `SanitizingLogFilter` redacts passwords, tokens, secrets from all server logs
+- **Security Middleware**: Automatic security headers (X-Content-Type-Options, X-Frame-Options, CSP, HSTS)
+- **Rate Limiting**: Per-client sliding window with escalating block duration
+- **Input Validation**: Comprehensive parameter validation — regex-based agent IDs, IP validation via `ipaddress` module, shell metacharacter blocking for active response, Elasticsearch Query DSL (no string interpolation)
+- **Container Security**: Non-root user, read-only filesystem, CAP_DROP ALL
 
 ```bash
 # Generate secure API key
-openssl rand -hex 32
+python -c "import secrets; print('wazuh_' + secrets.token_urlsafe(32))"
 
 # Set file permissions
 chmod 600 .env

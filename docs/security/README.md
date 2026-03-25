@@ -1,17 +1,21 @@
 # Security Configuration Guide
 
-Comprehensive security hardening guide for Wazuh MCP Server v4.1.1 production deployments.
+Comprehensive security hardening guide for Wazuh MCP Server v4.2.0 production deployments.
 
 ## 🔒 Security Overview
 
 Wazuh MCP Server implements multiple layers of security:
 - **Transport Security**: HTTPS with Streamable HTTP transport, CORS origin validation
 - **Authentication**: OAuth 2.0 with DCR, JWT bearer tokens, API key authentication on all endpoints
-- **Security Middleware**: Automatic security headers (X-Content-Type-Options, X-Frame-Options, CSP, etc.)
+- **RBAC**: Per-tool scope enforcement (`wazuh:read` / `wazuh:write`). 14 active response tools require write scope. Read-only tokens can only query data
+- **Authless Guardrails**: `AUTH_MODE=none` defaults to read-only. `AUTHLESS_ALLOW_WRITE=true` required for destructive operations
+- **Output Sanitization**: Credentials, tokens, and API keys are redacted from alert data before returning to LLM clients
+- **Log Sanitization**: Global `SanitizingLogFilter` redacts passwords, tokens, secrets from all server logs
+- **Security Middleware**: Automatic security headers (X-Content-Type-Options, X-Frame-Options, CSP, HSTS)
 - **Encryption**: TLS/SSL encryption for all API communications
-- **Input Validation**: Comprehensive parameter validation and sanitization with dedicated validators
-- **Rate Limiting**: Per-client request throttling to prevent abuse
-- **Audit Logging**: Complete audit trail for security events
+- **Input Validation**: Comprehensive parameter validation — regex-based IDs, `ipaddress` module for IPs, shell metacharacter blocking for active response, Elasticsearch Query DSL (no string interpolation)
+- **Rate Limiting**: Per-client sliding window with escalating block duration
+- **Audit Logging**: All destructive tool calls logged with client ID, session, and arguments via dedicated audit logger
 
 ## 🛡️ Security Architecture
 
@@ -30,8 +34,10 @@ Wazuh MCP Server implements multiple layers of security:
 - ✅ Man-in-the-middle attacks (TLS encryption, security headers)
 - ✅ Credential theft (constant-time hash comparison, secure storage practices)
 - ✅ Injection attacks (comprehensive input validation with regex patterns)
-- ✅ Privilege escalation (least privilege, scope-based access)
-- ✅ Brute force attacks (rate limiting per client)
+- ✅ Privilege escalation (per-tool RBAC scope enforcement, authless mode read-only by default)
+- ✅ Data leakage to LLMs (output sanitization redacts credentials from alert data)
+- ✅ Brute force attacks (rate limiting per client with escalating blocks)
+- ✅ Unauthorized active response (write tools require explicit `wazuh:write` scope with audit trail)
 - ✅ Clickjacking/XSS (security middleware headers)
 
 **Residual Risks:**
