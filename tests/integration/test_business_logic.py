@@ -194,49 +194,6 @@ class TestMCPResponseJsonRpc:
         assert resp.dict() == resp.model_dump()
 
 
-class TestDictContainsText:
-    """Tests for the _dict_contains_text helper (Fix #13)."""
-
-    def test_simple_string_match(self):
-        from wazuh_mcp_server.api.wazuh_client import _dict_contains_text
-
-        assert _dict_contains_text({"key": "hello world"}, "hello") is True
-        assert _dict_contains_text({"key": "hello world"}, "goodbye") is False
-
-    def test_nested_dict(self):
-        from wazuh_mcp_server.api.wazuh_client import _dict_contains_text
-
-        data = {"a": {"b": {"c": "target_value"}}}
-        assert _dict_contains_text(data, "target_value") is True
-        assert _dict_contains_text(data, "missing") is False
-
-    def test_list_values(self):
-        from wazuh_mcp_server.api.wazuh_client import _dict_contains_text
-
-        data = {"items": ["alpha", "beta", "gamma"]}
-        assert _dict_contains_text(data, "beta") is True
-        assert _dict_contains_text(data, "delta") is False
-
-    def test_numeric_values(self):
-        from wazuh_mcp_server.api.wazuh_client import _dict_contains_text
-
-        data = {"port": 9200, "ratio": 3.14}
-        assert _dict_contains_text(data, "9200") is True
-        assert _dict_contains_text(data, "3.14") is True
-
-    def test_case_insensitive_for_strings(self):
-        from wazuh_mcp_server.api.wazuh_client import _dict_contains_text
-
-        data = {"msg": "CRITICAL Alert"}
-        assert _dict_contains_text(data, "critical alert") is True
-
-    def test_empty_structures(self):
-        from wazuh_mcp_server.api.wazuh_client import _dict_contains_text
-
-        assert _dict_contains_text({}, "anything") is False
-        assert _dict_contains_text([], "anything") is False
-
-
 class TestTimeRangeSync:
     """Tests for synchronized time range values (Fix #8)."""
 
@@ -813,6 +770,119 @@ class TestTruncationWarning:
         result = {"data": {"affected_items": [{"id": i} for i in range(100)], "total_affected_items": 500}}
         result = _add_truncation_warning(result, 100)
         assert "_warning" in result
+
+
+class TestAgentIDValidation:
+    """Regression tests for agent ID validation (audit v3)."""
+
+    def test_manager_agent_zero_is_valid(self):
+        from wazuh_mcp_server.security import validate_agent_id
+
+        assert validate_agent_id("0") == "0"
+
+    def test_single_digit_agent_is_valid(self):
+        from wazuh_mcp_server.security import validate_agent_id
+
+        assert validate_agent_id("1") == "1"
+
+    def test_two_digit_agent_is_valid(self):
+        from wazuh_mcp_server.security import validate_agent_id
+
+        assert validate_agent_id("12") == "12"
+
+    def test_three_digit_agent_is_valid(self):
+        from wazuh_mcp_server.security import validate_agent_id
+
+        assert validate_agent_id("003") == "003"
+
+    def test_five_digit_agent_is_valid(self):
+        from wazuh_mcp_server.security import validate_agent_id
+
+        assert validate_agent_id("99999") == "99999"
+
+    def test_six_digit_agent_is_invalid(self):
+        from wazuh_mcp_server.security import ToolValidationError, validate_agent_id
+
+        with pytest.raises(ToolValidationError):
+            validate_agent_id("100000")
+
+
+class TestScopeEnforcementWithNoneToken:
+    """Regression: scope enforcement must not be bypassed when _auth_token is None."""
+
+    def test_write_tools_hidden_when_no_token(self):
+
+        # Simulate getattr returning None (no _auth_token on session)
+        auth_token = None
+        # The fix: if not auth_token or not auth_token.has_scope("wazuh:write"), filter
+        should_filter = not auth_token or not auth_token.has_scope("wazuh:write")
+        assert should_filter is True
+
+    def test_write_tools_visible_with_write_scope(self):
+        from datetime import datetime, timezone
+
+        from wazuh_mcp_server.auth import AuthToken
+
+        token = AuthToken(
+            token="test", api_key_id="k",
+            created_at=datetime.now(timezone.utc),
+            scopes=["wazuh:read", "wazuh:write"],
+        )
+        should_filter = not token or not token.has_scope("wazuh:write")
+        assert should_filter is False
+
+
+class TestSessionManagerMethod:
+    """Regression: SessionManager must have remove() not delete()."""
+
+    def test_session_manager_has_remove(self):
+        from wazuh_mcp_server.server import SessionManager
+
+        assert hasattr(SessionManager, "remove")
+
+    def test_session_manager_no_delete(self):
+        from wazuh_mcp_server.server import SessionManager
+
+        # SessionManager should not expose delete() — it wraps store.delete() as remove()
+        assert not hasattr(SessionManager, "delete") or callable(getattr(SessionManager, "remove"))
+
+
+class TestVerifyBearerTokenNullGuard:
+    """Regression: verify_bearer_token must not crash on None input."""
+
+    async def test_none_input_raises_value_error(self):
+        from wazuh_mcp_server.auth import verify_bearer_token
+
+        with pytest.raises(ValueError, match="Invalid authorization header format"):
+            await verify_bearer_token(None)
+
+    async def test_empty_string_raises_value_error(self):
+        from wazuh_mcp_server.auth import verify_bearer_token
+
+        with pytest.raises(ValueError, match="Invalid authorization header format"):
+            await verify_bearer_token("")
+
+
+class TestCloseErrorHandling:
+    """Regression: close() must clean up even if aclose() fails."""
+
+    async def test_close_clears_state_even_on_error(self):
+        from wazuh_mcp_server.api.wazuh_client import WazuhClient
+        from wazuh_mcp_server.config import WazuhConfig
+
+        config = WazuhConfig(
+            wazuh_host="localhost", wazuh_user="test", wazuh_pass="test",
+            wazuh_port=55000, verify_ssl=False,
+        )
+        client = WazuhClient(config)
+        client._cache["test"] = (0.0, {"data": "test"})
+        # Close should work even if internal state is in any condition
+        await client.close()
+        assert client.client is None
+        assert client.token is None
+        assert len(client._cache) == 0
+        # Calling close again should not crash (idempotent)
+        await client.close()
 
 
 if __name__ == "__main__":

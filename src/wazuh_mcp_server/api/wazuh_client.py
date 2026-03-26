@@ -20,26 +20,6 @@ logger = logging.getLogger(__name__)
 _TIME_RANGE_HOURS = {"1h": 1, "6h": 6, "12h": 12, "1d": 24, "24h": 24, "7d": 168, "30d": 720}
 
 
-def _dict_contains_text(d: Any, text: str) -> bool:
-    """Recursively check if any string value in a dict/list contains the given text.
-    Much faster than json.dumps() + string search for large nested dicts."""
-    if isinstance(d, dict):
-        for v in d.values():
-            if _dict_contains_text(v, text):
-                return True
-    elif isinstance(d, (list, tuple)):
-        for item in d:
-            if _dict_contains_text(item, text):
-                return True
-    elif isinstance(d, str):
-        if text in d.lower():
-            return True
-    elif isinstance(d, (int, float)):
-        if text in str(d):
-            return True
-    return False
-
-
 class WazuhClient:
     """Simplified Wazuh API client with rate limiting, circuit breaker, and retry logic."""
 
@@ -278,16 +258,21 @@ class WazuhClient:
         # Ensure data dict doesn't contain deprecated 'custom' parameter
         if "custom" in data:
             data = {k: v for k, v in data.items() if k != "custom"}
-        # Wazuh 4.x API: agent_list must be passed as query param 'agents_list', not in body
-        # Omit agents_list entirely to target all agents (Wazuh rejects "all" as non-numeric)
+        # Wazuh 4.x API: agent_list must be passed as query param 'agents_list'
         agents_list = data.pop("agent_list", None)
         params = {}
         if agents_list:
-            # Filter out "all" — Wazuh 4.x requires numeric agent IDs only
-            numeric_agents = [str(a) for a in (agents_list if isinstance(agents_list, list) else [agents_list]) if str(a) != "all"]
-            if numeric_agents:
-                params["agents_list"] = ",".join(numeric_agents)
-            # If only "all" was specified, omit agents_list to target all agents
+            agent_items = agents_list if isinstance(agents_list, list) else [agents_list]
+            # Check if targeting all agents
+            if any(str(a).lower() == "all" for a in agent_items):
+                # Wazuh 4.x API requires a valid agents_list; use "all" as a special keyword
+                # that the API accepts for targeting all agents
+                params["agents_list"] = "all"
+            else:
+                # Filter to numeric agent IDs only
+                numeric_agents = [str(a) for a in agent_items if str(a).isdigit()]
+                if numeric_agents:
+                    params["agents_list"] = ",".join(numeric_agents)
         result = await self._request("PUT", "/active-response", json=data, params=params)
 
         # Check for partial/total failures in the response body
@@ -807,8 +792,10 @@ class WazuhClient:
             risk_level = "critical"
         elif any(f["severity"] == "high" for f in risk_factors):
             risk_level = "high"
-        else:
+        elif risk_factors:
             risk_level = "medium"
+        else:
+            risk_level = "low"
         return {
             "data": {
                 "total_agents": len(items),
@@ -1216,6 +1203,7 @@ class WazuhClient:
 
     async def firewall_allow(self, agent_id: str, src_ip: str) -> Dict[str, Any]:
         """Remove firewall drop rule via active response."""
+        self._validate_ip(src_ip)
         src_ip = self._sanitize_ar_argument(src_ip, "src_ip")
         data = {
             "command": "!firewall-drop",
@@ -1226,6 +1214,7 @@ class WazuhClient:
 
     async def host_allow(self, agent_id: str, src_ip: str) -> Dict[str, Any]:
         """Remove hosts.deny entry via active response."""
+        self._validate_ip(src_ip)
         src_ip = self._sanitize_ar_argument(src_ip, "src_ip")
         data = {
             "command": "!host-deny",
@@ -1236,10 +1225,17 @@ class WazuhClient:
 
     async def close(self):
         """Close the HTTP client and indexer client, releasing all connections."""
-        if self.client:
-            await self.client.aclose()
+        try:
+            if self.client:
+                await self.client.aclose()
+        except Exception:
+            pass  # Best-effort close; connection may already be broken
+        finally:
             self.client = None
-        if self._indexer_client:
-            await self._indexer_client.close()
+        try:
+            if self._indexer_client:
+                await self._indexer_client.close()
+        except Exception:
+            pass
         self.token = None
         self._cache.clear()

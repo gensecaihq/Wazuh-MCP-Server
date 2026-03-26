@@ -1861,9 +1861,9 @@ async def handle_tools_list(params: Dict[str, Any], session: MCPSession) -> Dict
         },
     ]
 
-    # Filter tools by session scopes: hide write tools from read-only tokens
+    # Filter tools by session scopes: hide write tools from read-only or unknown tokens
     auth_token = getattr(session, "_auth_token", None)
-    if auth_token and not auth_token.has_scope("wazuh:write"):
+    if not auth_token or not auth_token.has_scope("wazuh:write"):
         tools = [t for t in tools if t["name"] not in WRITE_SCOPE_TOOLS]
 
     # Pagination support per MCP spec
@@ -1881,9 +1881,15 @@ async def handle_tools_call(params: Dict[str, Any], session: MCPSession) -> Dict
     # Validate tool name
     validate_input(tool_name, max_length=100)
 
-    # Scope enforcement: check if the token has the required scope for this tool
+    # Scope enforcement: check if the token has the required scope for this tool.
+    # If auth_token is missing (should not happen in normal flow), deny write tools by default.
     auth_token = getattr(session, "_auth_token", None)
     required_scope = _get_tool_scope(tool_name)
+    if required_scope == "wazuh:write" and not auth_token:
+        raise ValueError(
+            f"Insufficient permissions: tool '{tool_name}' requires '{required_scope}' scope. "
+            f"Authentication token not found on session."
+        )
     if auth_token and not auth_token.has_scope(required_scope):
         raise ValueError(
             f"Insufficient permissions: tool '{tool_name}' requires '{required_scope}' scope. "
@@ -2060,6 +2066,7 @@ async def handle_tools_call(params: Dict[str, Any], session: MCPSession) -> Dict
             result = await wazuh_client.get_vulnerabilities(agent_id=agent_id, severity=severity, limit=limit)
             if compact:
                 result = _compact_vulns_result(result)
+            result = _add_truncation_warning(result, limit)
             _success = True
             return _tool_result(f"Vulnerabilities:\n{json.dumps(result, indent=2 if not compact else None)}")
 
@@ -2070,6 +2077,7 @@ async def handle_tools_call(params: Dict[str, Any], session: MCPSession) -> Dict
             result = await wazuh_client.get_critical_vulnerabilities(limit)
             if compact:
                 result = _compact_vulns_result(result)
+            result = _add_truncation_warning(result, limit)
             _success = True
             return _tool_result(f"Critical Vulnerabilities:\n{json.dumps(result, indent=2 if not compact else None)}")
 
@@ -2564,7 +2572,7 @@ async def mcp_endpoint(
                     status_code=404, detail="Session not found. Please start a new session with InitializeRequest."
                 )
             if existing_session.is_expired():
-                await sessions.delete(mcp_session_id)
+                await sessions.remove(mcp_session_id)
                 _initialized_sessions.pop(mcp_session_id, None)
                 raise HTTPException(
                     status_code=404, detail="Session expired. Please start a new session with InitializeRequest."
@@ -2776,25 +2784,25 @@ async def mcp_sse_endpoint(
         headers = {"Retry-After": str(retry_after)} if retry_after else {}
         raise HTTPException(status_code=429, detail="Rate limit exceeded", headers=headers)
 
-    # Track active connections
+    # Session validation: if client provides session ID but session doesn't exist, return 404
+    # Done BEFORE incrementing ACTIVE_CONNECTIONS to avoid counter leak on early errors.
+    if mcp_session_id:
+        existing_session = await sessions.get(mcp_session_id)
+        if not existing_session:
+            raise HTTPException(status_code=404, detail="Session not found")
+        session = existing_session
+        session.update_activity()
+        await sessions.set(mcp_session_id, session)
+    else:
+        session = await get_or_create_session(None, origin)
+    session.authenticated = True  # Mark as authenticated via bearer token
+    session._auth_token = auth_token  # Store token for scope checks in tool handlers
+
+    # Track active connections — only after validation passes.
+    # The SSE generator will decrement when the stream closes (track_connection=True).
     ACTIVE_CONNECTIONS.inc()
 
     try:
-        # Session validation: if client provides session ID but session doesn't exist, return 404
-        if mcp_session_id:
-            existing_session = await sessions.get(mcp_session_id)
-            if not existing_session:
-                raise HTTPException(status_code=404, detail="Session not found")
-            session = existing_session
-            session.update_activity()
-            await sessions.set(mcp_session_id, session)
-        else:
-            session = await get_or_create_session(None, origin)
-        session.authenticated = True  # Mark as authenticated via bearer token
-        session._auth_token = auth_token  # Store token for scope checks in tool handlers
-
-        # Return SSE stream (track_connection=True so ACTIVE_CONNECTIONS is
-        # decremented when the stream actually closes, not when this function returns)
         response = StreamingResponse(
             generate_sse_events(session, track_connection=True),
             media_type="text/event-stream",
@@ -2868,7 +2876,7 @@ async def mcp_streamable_http_endpoint(
                     status_code=404, detail="Session not found. Please start a new session with InitializeRequest."
                 )
             if existing_session.is_expired():
-                await sessions.delete(mcp_session_id)
+                await sessions.remove(mcp_session_id)
                 _initialized_sessions.pop(mcp_session_id, None)
                 raise HTTPException(
                     status_code=404, detail="Session expired. Please start a new session with InitializeRequest."

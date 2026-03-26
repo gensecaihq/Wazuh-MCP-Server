@@ -430,7 +430,8 @@ def create_oauth_router(oauth_manager: OAuthManager) -> APIRouter:
 
         # Validate response_type
         if response_type != "code":
-            return RedirectResponse(f"{redirect_uri}?error=unsupported_response_type&state={state or ''}")
+            params = urlencode({"error": "unsupported_response_type", "state": state or ""})
+            return RedirectResponse(f"{redirect_uri}?{params}")
 
         # For MCP servers, we auto-approve (the user already chose to connect)
         # In production, you might show a consent screen here

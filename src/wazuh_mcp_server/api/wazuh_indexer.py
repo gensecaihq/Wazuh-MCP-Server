@@ -108,8 +108,13 @@ class WazuhIndexerClient:
 
     async def close(self):
         """Close the HTTP client."""
-        if self.client:
-            await self.client.aclose()
+        try:
+            if self.client:
+                await self.client.aclose()
+        except Exception:
+            pass  # Best-effort close
+        finally:
+            self.client = None
             self._initialized = False
 
     async def _ensure_initialized(self):
@@ -425,7 +430,7 @@ class WazuhIndexerClient:
             if e.response.status_code >= 500:
                 raise  # Let circuit breaker track server errors
             raise ValueError(f"Vulnerability summary query failed: {e.response.status_code}")
-        except httpx.ConnectError:
+        except (httpx.ConnectError, httpx.TimeoutException):
             raise ConnectionError(f"Cannot connect to Wazuh Indexer at {self.host}:{self.port}")
 
     async def health_check(self) -> Dict[str, Any]:

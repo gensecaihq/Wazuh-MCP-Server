@@ -46,7 +46,7 @@ VALID_REPORT_TYPES = {"daily", "weekly", "monthly", "incident"}
 VALID_COMPLIANCE_FRAMEWORKS = {"PCI-DSS", "HIPAA", "SOX", "GDPR", "NIST"}
 
 # Regex patterns for parameter validation
-AGENT_ID_PATTERN = re.compile(r"^[0-9]{3,5}$")  # Wazuh agent IDs are numeric
+AGENT_ID_PATTERN = re.compile(r"^[0-9]{1,5}$")  # Wazuh agent IDs: 0 (manager) through 99999
 RULE_ID_PATTERN = re.compile(r"^[0-9]{1,6}$")  # Rule IDs are numeric
 ISO_TIMESTAMP_PATTERN = re.compile(r"^\d{4}-\d{2}-\d{2}(T\d{2}:\d{2}:\d{2}(\.\d+)?(Z|[+-]\d{2}:?\d{2})?)?$")
 # Use ipaddress module for proper validation instead of regex
@@ -685,10 +685,15 @@ class SecurityManager:
 
     def __init__(self):
         self.metrics = SecurityMetrics()
-        self.rate_limiter = RateLimiter(
-            max_requests=int(os.getenv("RATE_LIMIT_REQUESTS", "100")),
-            window_seconds=int(os.getenv("RATE_LIMIT_WINDOW", "60")),
-        )
+        try:
+            max_req = int(os.getenv("RATE_LIMIT_REQUESTS", "100"))
+        except (ValueError, TypeError):
+            max_req = 100
+        try:
+            window = int(os.getenv("RATE_LIMIT_WINDOW", "60"))
+        except (ValueError, TypeError):
+            window = 60
+        self.rate_limiter = RateLimiter(max_requests=max_req, window_seconds=window)
         self.validator = SecurityValidator()
         self.trusted_proxies = {p.strip() for p in os.getenv("TRUSTED_PROXIES", "").split(",") if p.strip()}
 

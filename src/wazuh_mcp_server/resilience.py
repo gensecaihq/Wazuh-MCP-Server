@@ -54,6 +54,7 @@ class CircuitBreaker:
         self.last_failure_time: Optional[float] = None
         self.next_retry_time: Optional[float] = None
         self._lock = asyncio.Lock()
+        self._half_open_trial_in_progress = False  # Only allow one trial request in HALF_OPEN
 
     def __call__(self, func: Callable) -> Callable:
         """Decorator to apply circuit breaker to function."""
@@ -71,7 +72,13 @@ class CircuitBreaker:
         async with self._lock:
             if self.state == CircuitBreakerState.OPEN:
                 if self._should_attempt_reset():
+                    if self._half_open_trial_in_progress:
+                        # Another coroutine is already running the trial request — reject this one
+                        raise HTTPException(
+                            status_code=503, detail="Service temporarily unavailable - circuit breaker half-open trial in progress"
+                        )
                     self.state = CircuitBreakerState.HALF_OPEN
+                    self._half_open_trial_in_progress = True
                     logger.info(f"Circuit breaker {func.__name__} moved to HALF_OPEN")
                 else:
                     if self.config.fallback_function:
@@ -81,6 +88,11 @@ class CircuitBreaker:
                         raise HTTPException(
                             status_code=503, detail="Service temporarily unavailable - circuit breaker open"
                         )
+            elif self.state == CircuitBreakerState.HALF_OPEN and self._half_open_trial_in_progress:
+                # HALF_OPEN with a trial already running — reject concurrent requests
+                raise HTTPException(
+                    status_code=503, detail="Service temporarily unavailable - circuit breaker half-open trial in progress"
+                )
 
         try:
             result = await func(*args, **kwargs)
@@ -104,6 +116,7 @@ class CircuitBreaker:
     async def _on_success(self, func_name: str):
         """Handle successful execution."""
         async with self._lock:
+            self._half_open_trial_in_progress = False
             if self.state == CircuitBreakerState.HALF_OPEN:
                 self.state = CircuitBreakerState.CLOSED
                 logger.info(f"Circuit breaker {func_name} reset to CLOSED")
@@ -113,6 +126,7 @@ class CircuitBreaker:
     async def _on_failure(self, func_name: str, exception: Exception):
         """Handle failed execution."""
         async with self._lock:
+            self._half_open_trial_in_progress = False
             self.failure_count += 1
             self.last_failure_time = time.time()
             if self.failure_count >= self.config.failure_threshold:

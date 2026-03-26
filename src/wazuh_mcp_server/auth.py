@@ -65,7 +65,11 @@ class AuthManager:
 
     def __init__(self):
         self.secret_key = os.getenv("AUTH_SECRET_KEY", secrets.token_urlsafe(32))
-        self.token_lifetime = int(os.getenv("TOKEN_LIFETIME_HOURS", "24"))
+        try:
+            self.token_lifetime = int(os.getenv("TOKEN_LIFETIME_HOURS", "24"))
+        except (ValueError, TypeError):
+            logger.warning("Invalid TOKEN_LIFETIME_HOURS, defaulting to 24")
+            self.token_lifetime = 24
         self.api_keys: Dict[str, APIKey] = {}
         self.tokens: Dict[str, AuthToken] = {}
         self._default_api_key: Optional[str] = None  # Stores auto-generated key for display
@@ -295,7 +299,7 @@ async def verify_bearer_token(authorization: str) -> AuthToken:
     Raises:
         ValueError: If the token is invalid or expired
     """
-    if not authorization.startswith("Bearer "):
+    if not authorization or not authorization.startswith("Bearer "):
         raise ValueError("Invalid authorization header format")
 
     token = authorization[7:]  # Remove "Bearer " prefix

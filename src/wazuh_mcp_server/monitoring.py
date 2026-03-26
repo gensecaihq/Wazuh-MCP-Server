@@ -260,6 +260,9 @@ class MetricsCollector:
         self.collection_interval = 30  # seconds
         self.last_collection = 0
         self._collection_task = None
+        # Reuse a single Process instance so cpu_percent() measures delta between calls
+        # (psutil.Process.cpu_percent() returns 0.0 on the first call to a new instance)
+        self._process = psutil.Process()
 
     async def start_collection(self):
         """Start metrics collection task."""
@@ -292,12 +295,11 @@ class MetricsCollector:
         """Collect system-level metrics."""
         try:
             # Memory usage
-            process = psutil.Process()
-            memory_info = process.memory_info()
+            memory_info = self._process.memory_info()
             SYSTEM_MEMORY_USAGE.set(memory_info.rss)
 
-            # CPU usage
-            cpu_percent = process.cpu_percent()
+            # CPU usage (uses delta since last call on the persistent _process instance)
+            cpu_percent = self._process.cpu_percent()
             SYSTEM_CPU_USAGE.set(cpu_percent)
 
         except Exception as e:
