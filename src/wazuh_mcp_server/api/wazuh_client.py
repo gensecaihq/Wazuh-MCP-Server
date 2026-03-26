@@ -70,6 +70,12 @@ class WazuhClient:
 
     async def initialize(self):
         """Initialize the HTTP client and authenticate."""
+        # Close existing client to prevent connection pool leak on re-initialization
+        if self.client:
+            try:
+                await self.client.aclose()
+            except Exception:
+                pass
         self.client = httpx.AsyncClient(
             verify=self.config.verify_ssl,
             timeout=self.config.request_timeout_seconds,
@@ -478,9 +484,12 @@ class WazuhClient:
                     response = await self.client.request(method, url, headers=headers, **kwargs)
                     response.raise_for_status()
                     try:
-                        return response.json()
+                        data = response.json()
                     except (json.JSONDecodeError, ValueError):
                         raise ValueError(f"Invalid JSON response from Wazuh API after re-auth: {endpoint}")
+                    if "data" not in data:
+                        raise ValueError(f"Invalid response structure from Wazuh API after re-auth: {endpoint}")
+                    return data
                 except httpx.HTTPStatusError as retry_err:
                     logger.error(f"Wazuh API request failed after re-auth: {retry_err.response.status_code}")
                     raise ValueError(

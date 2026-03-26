@@ -312,6 +312,17 @@ class OAuthManager:
         if token_obj.client_id != client_id:
             raise ValueError("invalid_grant")
 
+        # Bound access_tokens to prevent unbounded memory growth
+        if len(self.access_tokens) > 5000:
+            expired = [k for k, v in self.access_tokens.items() if v.is_expired()]
+            for k in expired:
+                del self.access_tokens[k]
+            # If still too many, evict oldest
+            if len(self.access_tokens) > 5000:
+                oldest_keys = sorted(self.access_tokens, key=lambda k: self.access_tokens[k].created_at)
+                for k in oldest_keys[: len(oldest_keys) - 2500]:
+                    del self.access_tokens[k]
+
         # Generate new access token
         access_token = self._create_jwt_token(client_id, token_obj.scope, "access")
 

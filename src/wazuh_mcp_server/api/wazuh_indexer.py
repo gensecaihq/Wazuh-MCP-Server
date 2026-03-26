@@ -411,6 +411,7 @@ class WazuhIndexerClient:
 
     async def _execute_agg_search(self) -> Dict[str, Any]:
         """Execute vulnerability aggregation query (called within circuit breaker)."""
+        await self._ensure_initialized()
         url = f"{self.base_url}/{VULNERABILITY_INDEX}/_search"
         body = {
             "size": 0,

@@ -124,14 +124,18 @@ class SecretsManager:
     """Secure secrets management."""
 
     def __init__(self, master_key: Optional[str] = None):
-        if master_key:
-            self.cipher = Fernet(master_key.encode())
-        else:
-            # Generate master key from environment or create new
-            key = os.getenv("MASTER_KEY")
-            if not key:
-                key = Fernet.generate_key().decode()
-                logger.warning("Generated new master key - save MASTER_KEY environment variable")
+        try:
+            if master_key:
+                self.cipher = Fernet(master_key.encode())
+            else:
+                key = os.getenv("MASTER_KEY")
+                if not key:
+                    key = Fernet.generate_key().decode()
+                    logger.warning("Generated new master key - save MASTER_KEY environment variable")
+                self.cipher = Fernet(key.encode())
+        except Exception as e:
+            logger.warning(f"Invalid MASTER_KEY, generating new one: {e}")
+            key = Fernet.generate_key().decode()
             self.cipher = Fernet(key.encode())
 
     def encrypt_secret(self, secret: str) -> str:
@@ -184,9 +188,14 @@ class ConfigValidator:
 
         # Validate configurations
         try:
+            wazuh_port = int(os.getenv("WAZUH_PORT", "55000"))
+        except (ValueError, TypeError):
+            errors.append("WAZUH_PORT must be a valid integer")
+            wazuh_port = 55000
+        try:
             WazuhConfig(
                 host=os.getenv("WAZUH_HOST", ""),
-                port=int(os.getenv("WAZUH_PORT", "55000")),
+                port=wazuh_port,
                 user=os.getenv("WAZUH_USER", ""),
                 password=os.getenv("WAZUH_PASS", ""),
                 verify_ssl=os.getenv("WAZUH_VERIFY_SSL", "false").lower() == "true",
@@ -196,9 +205,14 @@ class ConfigValidator:
                 errors.append(f"Wazuh config error: {error['msg']}")
 
         try:
+            sse_port = int(os.getenv("SSE_PORT", "3000"))
+        except (ValueError, TypeError):
+            errors.append("SSE_PORT must be a valid integer")
+            sse_port = 3000
+        try:
             ServerConfig(
                 host=os.getenv("SSE_HOST", "0.0.0.0"),
-                port=int(os.getenv("SSE_PORT", "3000")),
+                port=sse_port,
                 log_level=os.getenv("LOG_LEVEL", "INFO"),
             )
         except ValidationError as e:
