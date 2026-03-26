@@ -1,4 +1,4 @@
-# Wazuh MCP Server v4.2.0 - Production Grade
+# Wazuh MCP Server v4.2.1 - Production Grade
 # MCP-compliant remote server with comprehensive monitoring
 # Updated: March 2026
 

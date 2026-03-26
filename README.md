@@ -7,7 +7,7 @@
 
 **Production-ready MCP server connecting AI assistants to Wazuh SIEM.**
 
-> **Version 4.2.0** | Wazuh 4.8.0 - 4.14.4 | [Full Changelog](CHANGELOG.md)
+> **Version 4.2.1** | Wazuh 4.8.0 - 4.14.4 | [Full Changelog](CHANGELOG.md)
 
 ---
 

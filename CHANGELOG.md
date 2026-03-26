@@ -5,6 +5,40 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [4.2.1] - 2026-03-26
+
+### Fixed
+- **Session delete crash**: `sessions.delete()` replaced with `sessions.remove()` — `SessionManager` exposes `remove()`, not `delete()`. Would crash with `AttributeError` on expired session cleanup.
+- **Scope enforcement bypass**: Write tools now denied when `_auth_token` is `None` on session, instead of silently skipping the scope check.
+- **Agent ID regex**: Changed `{3,5}` to `{1,5}` — Wazuh manager agent `"0"` and short IDs like `"1"`, `"12"` were incorrectly rejected.
+- **ACTIVE_CONNECTIONS counter leak**: `/sse` endpoint no longer leaks counter on early errors (session validation moved before counter increment).
+- **WazuhClient.close() error handling**: `aclose()` failures no longer prevent indexer and cache cleanup (wrapped in try/finally).
+- **verify_bearer_token null crash**: Added null guard — calling with `None` no longer raises `AttributeError`.
+- **block_ip without agent_id**: `"all"` is now passed through to Wazuh API instead of being filtered out, which caused a 400 error.
+- **config_validator Fernet crash**: Invalid `MASTER_KEY` env var no longer crashes server on import — falls back to generated key with warning.
+- **config_validator int() crash**: Non-numeric `WAZUH_PORT`/`SSE_PORT` now reports validation error instead of unhandled `ValueError`.
+- **Indexer agg_search null client**: `_execute_agg_search` now calls `_ensure_initialized()` — prevents `AttributeError` when `self.client` is `None` after close.
+- **json.dumps non-serializable crash**: Added `default=str` to all `json.dumps` calls in tool handlers and resources/read — Wazuh API responses containing datetime objects no longer crash serialization.
+- **WazuhClient.initialize() connection leak**: Now closes existing httpx client before creating new one on re-initialization.
+- **Re-auth retry response validation**: After 401 retry, response is now validated for `"data"` key, consistent with normal request path.
+- **OAuth refresh unbounded memory**: `refresh_access_token` now evicts expired tokens when `access_tokens` exceeds 5000 entries.
+- **Risk assessment default**: Zero risk factors now correctly returns `"low"` instead of `"medium"`.
+- **firewall_allow/host_allow IP validation**: Added missing `_validate_ip()` call before active response execution.
+- **OAuth state URL encoding**: `state` parameter in error redirect now properly URL-encoded via `urlencode()`.
+- **Indexer timeout handling**: `_execute_agg_search` now catches `httpx.TimeoutException` alongside `ConnectError`.
+- **Indexer close() cleanup**: Now sets `self.client = None` in finally block to prevent use-after-close.
+- **Module-level init safety**: `AuthManager` and `SecurityManager` now handle malformed env vars (`TOKEN_LIFETIME_HOURS`, `RATE_LIMIT_REQUESTS`, `RATE_LIMIT_WINDOW`) with try/except and sensible defaults.
+- **CPU metric**: `MetricsCollector` now reuses a persistent `psutil.Process()` instance — `cpu_percent()` no longer always returns 0.0.
+- **Circuit breaker HALF_OPEN race**: Added `_half_open_trial_in_progress` flag to allow only one concurrent trial request.
+- **Truncation warnings**: Added to vulnerability search tools (was only on alert tools).
+
+### Removed
+- **Dead code**: `_dict_contains_text` helper and its 6 tests removed (replaced by Elasticsearch query passthrough in v4.2.0).
+
+### Changed
+- **Version alignment**: Synchronized version across `__init__.py`, `pyproject.toml`, `Dockerfile`, `compose.yml`, and `requirements.txt`.
+- **Tests**: 84 tests (13 regression tests added, 6 dead-code tests removed).
+
 ## [4.2.0] - 2026-03-25
 
 ### Security
