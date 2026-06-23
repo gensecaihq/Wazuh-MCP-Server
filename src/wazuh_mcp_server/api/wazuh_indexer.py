@@ -202,6 +202,97 @@ class WazuhIndexerClient:
             # Let timeout errors propagate for retry
             raise
 
+    async def _execute_body(self, index: str, body: Dict[str, Any]) -> Dict[str, Any]:
+        """Execute a search with an arbitrary request body (e.g. aggregations).
+
+        Shares the same error handling as _execute_search so server errors propagate for
+        retry while client errors surface as ValueError. Call via the circuit breaker.
+        """
+        await self._ensure_initialized()
+
+        url = f"{self.base_url}/{index}/_search"
+        try:
+            response = await self.client.post(url, json=body, headers={"Content-Type": "application/json"})
+            response.raise_for_status()
+            try:
+                return response.json()
+            except (json.JSONDecodeError, ValueError):
+                raise ValueError(f"Invalid JSON response from Wazuh Indexer: {index}")
+        except httpx.HTTPStatusError as e:
+            logger.error(f"Indexer aggregation failed: {e.response.status_code} - {e.response.text}")
+            if e.response.status_code >= 500:
+                raise
+            raise ValueError(f"Indexer query failed: {e.response.status_code}")
+        except (httpx.ConnectError, httpx.TimeoutException):
+            raise
+
+    async def aggregate_alerts(
+        self,
+        timestamp_start: str = "now-24h",
+        timestamp_end: str = "now",
+        index: str = "wazuh-alerts-*",
+        top_rules: int = 50,
+        top_agents: int = 50,
+    ) -> Dict[str, Any]:
+        """Summarize alerts over a time range using aggregations (size=0, no document paging).
+
+        Unlike get_alerts, this is not bounded by a document limit — it returns the true
+        total match count plus the top rules, severity levels, and agents for the window.
+        Both ISO 8601 and OpenSearch date math (e.g. now-7d) are accepted for the bounds.
+        """
+        range_filter: Dict[str, str] = {}
+        if timestamp_start:
+            range_filter["gte"] = timestamp_start
+        if timestamp_end:
+            range_filter["lte"] = timestamp_end
+        query: Dict[str, Any] = (
+            {"bool": {"must": [{"range": {"timestamp": range_filter}}]}} if range_filter else {"match_all": {}}
+        )
+        body = {
+            "size": 0,
+            "track_total_hits": True,
+            "query": query,
+            "aggs": {
+                "by_rule": {
+                    "terms": {"field": "rule.id", "size": top_rules},
+                    "aggs": {"info": {"top_hits": {"size": 1, "_source": ["rule.description", "rule.level"]}}},
+                },
+                "by_level": {"terms": {"field": "rule.level", "size": 20}},
+                "by_agent": {"terms": {"field": "agent.name", "size": top_agents}},
+            },
+        }
+        if self._circuit_breaker is not None:
+            resp = await self._circuit_breaker._call(self._execute_body, index, body)
+        else:
+            resp = await self._execute_body(index, body)
+
+        aggs = resp.get("aggregations", {})
+
+        def _rule_row(bucket: Dict[str, Any]) -> Dict[str, Any]:
+            hits = bucket.get("info", {}).get("hits", {}).get("hits", [])
+            source = hits[0].get("_source", {}) if hits else {}
+            rule = source.get("rule", {}) if isinstance(source, dict) else {}
+            return {
+                "rule_id": bucket.get("key"),
+                "count": bucket.get("doc_count", 0),
+                "description": rule.get("description"),
+                "level": rule.get("level"),
+            }
+
+        return {
+            "time_range": {"gte": timestamp_start, "lte": timestamp_end},
+            "total_alerts": resp.get("hits", {}).get("total", {}).get("value", 0),
+            "top_rules": [_rule_row(b) for b in aggs.get("by_rule", {}).get("buckets", [])],
+            "by_level": [
+                {"level": b.get("key"), "count": b.get("doc_count", 0)}
+                for b in aggs.get("by_level", {}).get("buckets", [])
+            ],
+            "top_agents": [
+                {"agent": b.get("key"), "count": b.get("doc_count", 0)}
+                for b in aggs.get("by_agent", {}).get("buckets", [])
+            ],
+        }
+
     async def get_alerts(
         self,
         limit: int = 100,

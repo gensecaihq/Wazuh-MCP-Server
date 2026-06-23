@@ -1287,7 +1287,7 @@ def _get_tool_scope(tool_name: str) -> str:
 
 
 async def handle_tools_list(params: Dict[str, Any], session: MCPSession) -> Dict[str, Any]:
-    """Handle tools/list method - All 48 Wazuh Security Tools with pagination.
+    """Handle tools/list method - All 49 Wazuh Security Tools with pagination.
     Filters tools based on session token scopes."""
     _cursor = params.get("cursor")  # Reserved for future pagination
     tools = [
@@ -1333,6 +1333,20 @@ async def handle_tools_list(params: Dict[str, Any], session: MCPSession) -> Dict
                 "properties": {
                     "time_range": {"type": "string", "enum": ["1h", "6h", "12h", "1d", "24h", "7d", "30d"], "default": "24h"},
                     "min_frequency": {"type": "integer", "minimum": 1, "default": 5},
+                },
+                "required": [],
+            },
+        },
+        {
+            "name": "get_alerts_aggregated",
+            "description": "Summarize ALL alerts in a time window using indexer aggregations (no document limit). Returns the true total match count plus top rules, severity levels, and agents. Prefer this over get_wazuh_alerts/get_wazuh_alert_summary when the goal is a complete overview of a period rather than individual alert documents.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "timestamp_start": {"type": "string", "description": "Start of window — ISO 8601 or date math (e.g. now-24h, now-7d). Default now-24h.", "default": "now-24h"},
+                    "timestamp_end": {"type": "string", "description": "End of window — ISO 8601 or date math (e.g. now). Default now.", "default": "now"},
+                    "top_rules": {"type": "integer", "minimum": 1, "maximum": 500, "default": 50, "description": "How many top rules to return"},
+                    "top_agents": {"type": "integer", "minimum": 1, "maximum": 500, "default": 50, "description": "How many top agents to return"},
                 },
                 "required": [],
             },
@@ -1873,7 +1887,7 @@ async def handle_tools_list(params: Dict[str, Any], session: MCPSession) -> Dict
 
 
 async def handle_tools_call(params: Dict[str, Any], session: MCPSession) -> Dict[str, Any]:
-    """Handle tools/call method - All 48 Wazuh Security Tools with comprehensive validation."""
+    """Handle tools/call method - All 49 Wazuh Security Tools with comprehensive validation."""
     tool_name = params.get("name")
     arguments = params.get("arguments", {})
 
@@ -1983,6 +1997,24 @@ async def handle_tools_call(params: Dict[str, Any], session: MCPSession) -> Dict
             result = await wazuh_client.analyze_alert_patterns(time_range, min_frequency)
             _success = True
             return _tool_result(f"Alert Patterns:\n{json.dumps(result, indent=2, default=str)}")
+
+        elif tool_name == "get_alerts_aggregated":
+            timestamp_start = validate_timestamp(arguments.get("timestamp_start"), param_name="timestamp_start") or "now-24h"
+            timestamp_end = validate_timestamp(arguments.get("timestamp_end"), param_name="timestamp_end") or "now"
+            top_rules = validate_limit(
+                arguments.get("top_rules"), min_val=1, max_val=500, default=50, param_name="top_rules"
+            )
+            top_agents = validate_limit(
+                arguments.get("top_agents"), min_val=1, max_val=500, default=50, param_name="top_agents"
+            )
+            result = await wazuh_client.get_alerts_aggregated(
+                timestamp_start=timestamp_start,
+                timestamp_end=timestamp_end,
+                top_rules=top_rules,
+                top_agents=top_agents,
+            )
+            _success = True
+            return _tool_result(f"Aggregated Alerts:\n{json.dumps(result, indent=2, default=str)}")
 
         elif tool_name == "search_security_events":
             query = validate_query(arguments.get("query"), required=True)
