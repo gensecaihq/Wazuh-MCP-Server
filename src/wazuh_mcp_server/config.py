@@ -173,7 +173,7 @@ class ServerConfig:
 
     # OAuth settings (when AUTH_MODE=oauth)
     OAUTH_ISSUER_URL: str = ""  # Will be auto-set to server URL if not provided
-    OAUTH_ENABLE_DCR: bool = True  # Dynamic Client Registration
+    OAUTH_ENABLE_DCR: bool = False  # Dynamic Client Registration (off by default; unauthenticated)
     OAUTH_ACCESS_TOKEN_TTL: int = 3600  # 1 hour
     OAUTH_REFRESH_TOKEN_TTL: int = 86400  # 24 hours
     OAUTH_AUTHORIZATION_CODE_TTL: int = 600  # 10 minutes
@@ -199,20 +199,33 @@ class ServerConfig:
     # Logging
     LOG_LEVEL: str = "INFO"
 
+    # Deployment environment: "development" | "production"
+    ENVIRONMENT: str = "development"
+
     @classmethod
     def from_env(cls) -> "ServerConfig":
         """Create configuration from environment variables with validation."""
         import secrets
 
-        # Generate secure secret key if not provided
-        auth_secret = os.getenv("AUTH_SECRET_KEY", "")
-        if not auth_secret:
-            auth_secret = secrets.token_hex(32)
+        environment = os.getenv("ENVIRONMENT", "development").lower()
 
         # Validate auth mode
         auth_mode = os.getenv("AUTH_MODE", "bearer").lower()
         if auth_mode not in ("bearer", "oauth", "none"):
             auth_mode = "bearer"
+
+        # Signing secret. In production with auth enabled it MUST be provided — a random
+        # per-process key invalidates all tokens on restart and breaks multi-instance
+        # deployments. Auto-generate only outside production (developer convenience).
+        auth_secret = os.getenv("AUTH_SECRET_KEY", "").strip()
+        if not auth_secret:
+            if environment == "production" and auth_mode != "none":
+                raise ConfigurationError(
+                    "AUTH_SECRET_KEY is required when ENVIRONMENT=production and AUTH_MODE is not 'none'.\n"
+                    "Generate one with: openssl rand -hex 32\n"
+                    "Set it identically across all instances so tokens survive restarts and load balancing."
+                )
+            auth_secret = secrets.token_hex(32)
 
         # Validate log level
         log_level = os.getenv("LOG_LEVEL", "INFO").upper()
@@ -228,7 +241,7 @@ class ServerConfig:
             ),
             AUTH_MODE=auth_mode,
             OAUTH_ISSUER_URL=os.getenv("OAUTH_ISSUER_URL", ""),
-            OAUTH_ENABLE_DCR=os.getenv("OAUTH_ENABLE_DCR", "true").lower() == "true",
+            OAUTH_ENABLE_DCR=os.getenv("OAUTH_ENABLE_DCR", "false").lower() == "true",
             OAUTH_ACCESS_TOKEN_TTL=validate_positive_int(
                 os.getenv("OAUTH_ACCESS_TOKEN_TTL", "3600"), "OAUTH_ACCESS_TOKEN_TTL"
             ),
@@ -252,6 +265,7 @@ class ServerConfig:
             WAZUH_INDEXER_PASS=os.getenv("WAZUH_INDEXER_PASS", ""),
             WAZUH_INDEXER_VERIFY_SSL=os.getenv("WAZUH_INDEXER_VERIFY_SSL", "true").lower() == "true",
             LOG_LEVEL=log_level,
+            ENVIRONMENT=environment,
         )
 
     @property

@@ -10,7 +10,7 @@ import secrets
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional
-from urllib.parse import urlencode
+from urllib.parse import urlencode, urlparse
 
 import jwt
 from fastapi import APIRouter, Form, Query, Request
@@ -105,6 +105,9 @@ class OAuthManager:
         self.authorization_codes: Dict[str, AuthorizationCode] = {}
         self.access_tokens: Dict[str, OAuthToken] = {}
         self.refresh_tokens: Dict[str, OAuthToken] = {}
+        # Revocation denylist (token -> expiry) so revoked-but-unexpired tokens cannot
+        # slip back in via the stateless JWT fallback. Cleaned up alongside expired tokens.
+        self.revoked_tokens: Dict[str, datetime] = {}
 
         # Pre-register Claude as a known client
         self._register_claude_client()
@@ -149,9 +152,26 @@ class OAuthManager:
             "grant_types_supported": ["authorization_code", "refresh_token"],
             "token_endpoint_auth_methods_supported": ["client_secret_post", "client_secret_basic"],
             "scopes_supported": ["wazuh:read", "wazuh:write"],
-            "code_challenge_methods_supported": ["S256", "plain"],
+            "code_challenge_methods_supported": ["S256"],
             "service_documentation": f"{issuer}/docs",
         }
+
+    @staticmethod
+    def _validate_redirect_uri(uri: str) -> None:
+        """Reject redirect URIs that aren't https (loopback http allowed) or contain a fragment."""
+        try:
+            parsed = urlparse(uri)
+        except Exception:
+            raise ValueError(f"invalid redirect_uri: {uri}")
+        if parsed.fragment:
+            raise ValueError(f"redirect_uri must not contain a fragment: {uri}")
+        host = (parsed.hostname or "").lower()
+        is_loopback = host in ("localhost", "127.0.0.1", "::1")
+        if parsed.scheme == "https":
+            return
+        if parsed.scheme == "http" and is_loopback:
+            return
+        raise ValueError(f"redirect_uri must use https (http allowed only for loopback): {uri}")
 
     def register_client(self, request_data: Dict[str, Any]) -> OAuthClient:
         """Dynamic Client Registration (RFC 7591)."""
@@ -163,6 +183,10 @@ class OAuthManager:
 
         if not redirect_uris:
             raise ValueError("redirect_uris is required")
+
+        # Validate redirect URIs: https only (http allowed for loopback dev), no fragments.
+        for uri in redirect_uris:
+            self._validate_redirect_uri(uri)
 
         # Generate client credentials
         client_id = f"client_{secrets.token_urlsafe(16)}"
@@ -206,7 +230,11 @@ class OAuthManager:
         code_challenge: Optional[str] = None,
         code_challenge_method: Optional[str] = None,
     ) -> str:
-        """Create authorization code for OAuth flow."""
+        """Create authorization code for OAuth flow. PKCE with S256 is mandatory."""
+        if not code_challenge:
+            raise ValueError("invalid_request: code_challenge is required (PKCE)")
+        if code_challenge_method != "S256":
+            raise ValueError("invalid_request: code_challenge_method must be S256")
         code = secrets.token_urlsafe(32)
 
         auth_code = AuthorizationCode(
@@ -230,13 +258,13 @@ class OAuthManager:
         self, code: str, client_id: str, redirect_uri: str, code_verifier: Optional[str] = None
     ) -> Dict[str, Any]:
         """Exchange authorization code for access/refresh tokens."""
-        auth_code = self.authorization_codes.get(code)
+        # Atomically consume the code so a concurrent second exchange can't reuse it.
+        auth_code = self.authorization_codes.pop(code, None)
 
         if not auth_code:
             raise ValueError("invalid_grant")
 
         if auth_code.is_expired():
-            del self.authorization_codes[code]
             raise ValueError("invalid_grant")
 
         if auth_code.client_id != client_id:
@@ -245,21 +273,17 @@ class OAuthManager:
         if auth_code.redirect_uri != redirect_uri:
             raise ValueError("invalid_grant")
 
-        # Verify PKCE if used
-        if auth_code.code_challenge:
-            if not code_verifier:
-                raise ValueError("invalid_grant")
+        # PKCE is mandatory and S256-only (enforced at code creation; verify here).
+        if not auth_code.code_challenge or auth_code.code_challenge_method != "S256":
+            raise ValueError("invalid_grant")
+        if not code_verifier:
+            raise ValueError("invalid_grant")
+        import base64
 
-            if auth_code.code_challenge_method == "S256":
-                computed = hashlib.sha256(code_verifier.encode()).digest()
-                import base64
-
-                computed_challenge = base64.urlsafe_b64encode(computed).rstrip(b"=").decode()
-            else:  # plain
-                computed_challenge = code_verifier
-
-            if not secrets.compare_digest(auth_code.code_challenge, computed_challenge):
-                raise ValueError("invalid_grant")
+        computed = hashlib.sha256(code_verifier.encode()).digest()
+        computed_challenge = base64.urlsafe_b64encode(computed).rstrip(b"=").decode()
+        if not secrets.compare_digest(auth_code.code_challenge, computed_challenge):
+            raise ValueError("invalid_grant")
 
         # Generate tokens
         access_token = self._create_jwt_token(client_id, auth_code.scope, "access")
@@ -287,9 +311,7 @@ class OAuthManager:
             expires_at=datetime.now(timezone.utc) + timedelta(seconds=self.config.OAUTH_REFRESH_TOKEN_TTL),
         )
 
-        # Remove used authorization code
-        del self.authorization_codes[code]
-
+        # Authorization code was already consumed via pop() above (single-use).
         return {
             "access_token": access_token,
             "token_type": "Bearer",
@@ -299,14 +321,21 @@ class OAuthManager:
         }
 
     def refresh_access_token(self, refresh_token: str, client_id: str) -> Dict[str, Any]:
-        """Refresh access token using refresh token."""
-        token_obj = self.refresh_tokens.get(refresh_token)
+        """Refresh access token, rotating the refresh token and detecting replay."""
+        # Atomically consume the presented refresh token (rotation = one-time use).
+        token_obj = self.refresh_tokens.pop(refresh_token, None)
 
         if not token_obj:
+            # Replay: a syntactically-valid refresh token that's no longer in the store
+            # (already rotated/revoked). Revoke the whole grant for safety, per OAuth BCP.
+            if refresh_token in self.revoked_tokens:
+                self._revoke_client_tokens(client_id)
             raise ValueError("invalid_grant")
 
+        # Mark the consumed token as revoked so a later replay is detected above.
+        self.revoked_tokens[refresh_token] = token_obj.expires_at
+
         if token_obj.is_expired():
-            del self.refresh_tokens[refresh_token]
             raise ValueError("invalid_grant")
 
         if token_obj.client_id != client_id:
@@ -323,8 +352,9 @@ class OAuthManager:
                 for k in oldest_keys[: len(oldest_keys) - 2500]:
                     del self.access_tokens[k]
 
-        # Generate new access token
+        # Generate new access token AND a new refresh token (rotation).
         access_token = self._create_jwt_token(client_id, token_obj.scope, "access")
+        new_refresh_token = self._create_jwt_token(client_id, token_obj.scope, "refresh")
 
         self.access_tokens[access_token] = OAuthToken(
             token=access_token,
@@ -334,16 +364,29 @@ class OAuthManager:
             created_at=datetime.now(timezone.utc),
             expires_at=datetime.now(timezone.utc) + timedelta(seconds=self.config.OAUTH_ACCESS_TOKEN_TTL),
         )
+        self.refresh_tokens[new_refresh_token] = OAuthToken(
+            token=new_refresh_token,
+            token_type="refresh",
+            client_id=client_id,
+            scope=token_obj.scope,
+            created_at=datetime.now(timezone.utc),
+            expires_at=datetime.now(timezone.utc) + timedelta(seconds=self.config.OAUTH_REFRESH_TOKEN_TTL),
+        )
 
         return {
             "access_token": access_token,
             "token_type": "Bearer",
             "expires_in": self.config.OAUTH_ACCESS_TOKEN_TTL,
+            "refresh_token": new_refresh_token,
             "scope": token_obj.scope,
         }
 
     def validate_access_token(self, token: str) -> Optional[OAuthToken]:
         """Validate access token."""
+        # Revoked tokens are rejected even if otherwise valid / JWT-decodable.
+        if token in self.revoked_tokens:
+            return None
+
         # First check in-memory tokens
         token_obj = self.access_tokens.get(token)
         if token_obj and not token_obj.is_expired():
@@ -367,14 +410,30 @@ class OAuthManager:
         return None
 
     def revoke_token(self, token: str) -> bool:
-        """Revoke access or refresh token."""
-        if token in self.access_tokens:
-            del self.access_tokens[token]
-            return True
-        if token in self.refresh_tokens:
-            del self.refresh_tokens[token]
-            return True
-        return False
+        """Revoke an access or refresh token and add it to the denylist."""
+        revoked = False
+        for store in (self.access_tokens, self.refresh_tokens):
+            token_obj = store.pop(token, None)
+            if token_obj is not None:
+                self.revoked_tokens[token] = token_obj.expires_at
+                revoked = True
+        if not revoked:
+            # Not in store (e.g. stateless JWT) — still deny it going forward.
+            try:
+                payload = jwt.decode(token, self.secret_key, algorithms=["HS256"])
+                self.revoked_tokens[token] = datetime.fromtimestamp(payload.get("exp", 0), timezone.utc)
+                revoked = True
+            except JWTError:
+                pass
+        return revoked
+
+    def _revoke_client_tokens(self, client_id: str) -> None:
+        """Revoke all access and refresh tokens for a client (refresh-replay response)."""
+        for store in (self.access_tokens, self.refresh_tokens):
+            for tok, obj in list(store.items()):
+                if obj.client_id == client_id:
+                    self.revoked_tokens[tok] = obj.expires_at
+                    del store[tok]
 
     def delete_client(self, client_id: str) -> bool:
         """Delete a registered client and all its tokens."""
@@ -407,9 +466,12 @@ class OAuthManager:
 
     def cleanup_expired(self):
         """Clean up expired tokens and codes."""
+        now = datetime.now(timezone.utc)
         self.authorization_codes = {k: v for k, v in self.authorization_codes.items() if not v.is_expired()}
         self.access_tokens = {k: v for k, v in self.access_tokens.items() if not v.is_expired()}
         self.refresh_tokens = {k: v for k, v in self.refresh_tokens.items() if not v.is_expired()}
+        # A revoked token only needs to stay on the denylist until it would have expired.
+        self.revoked_tokens = {k: exp for k, exp in self.revoked_tokens.items() if exp and exp > now}
 
 
 def create_oauth_router(oauth_manager: OAuthManager) -> APIRouter:
@@ -444,17 +506,33 @@ def create_oauth_router(oauth_manager: OAuthManager) -> APIRouter:
             params = urlencode({"error": "unsupported_response_type", "state": state or ""})
             return RedirectResponse(f"{redirect_uri}?{params}")
 
+        # PKCE (S256) is mandatory — reject via a spec-compliant error redirect rather
+        # than 500ing on the ValueError from create_authorization_code.
+        if not code_challenge or code_challenge_method != "S256":
+            params = urlencode(
+                {
+                    "error": "invalid_request",
+                    "error_description": "PKCE required: send code_challenge with code_challenge_method=S256",
+                    "state": state or "",
+                }
+            )
+            return RedirectResponse(f"{redirect_uri}?{params}")
+
         # For MCP servers, we auto-approve (the user already chose to connect)
         # In production, you might show a consent screen here
 
         # Generate authorization code
-        code = oauth_manager.create_authorization_code(
-            client_id=client_id,
-            redirect_uri=redirect_uri,
-            scope=scope,
-            code_challenge=code_challenge,
-            code_challenge_method=code_challenge_method,
-        )
+        try:
+            code = oauth_manager.create_authorization_code(
+                client_id=client_id,
+                redirect_uri=redirect_uri,
+                scope=scope,
+                code_challenge=code_challenge,
+                code_challenge_method=code_challenge_method,
+            )
+        except ValueError as e:
+            params = urlencode({"error": "invalid_request", "error_description": str(e), "state": state or ""})
+            return RedirectResponse(f"{redirect_uri}?{params}")
 
         # Redirect back with code
         params = {"code": code}

@@ -110,9 +110,9 @@ async def verify_authentication(authorization: Optional[str], config) -> Optiona
             token = authorization.replace("Bearer ", "") if authorization.startswith("Bearer ") else authorization
             token_obj = _oauth_manager.validate_access_token(token)
             if token_obj:
-                # Return AuthToken with OAuth scopes
-                scope_str = getattr(token_obj, "scope", "wazuh:read wazuh:write")
-                scopes = scope_str.split() if scope_str else ["wazuh:read", "wazuh:write"]
+                # Return AuthToken with OAuth scopes (fail closed to read-only)
+                scope_str = getattr(token_obj, "scope", "") or ""
+                scopes = scope_str.split() if scope_str else ["wazuh:read"]
                 return AuthToken(
                     token=token,
                     api_key_id="oauth",
@@ -456,6 +456,15 @@ async def lifespan(app: FastAPI):
 
     _cleanup_task = asyncio.create_task(_background_session_cleanup())
 
+    # Start background system metrics collection (CPU/memory gauges for /metrics).
+    try:
+        from wazuh_mcp_server.monitoring import metrics_collector
+
+        await metrics_collector.start_collection()
+        logger.info("✅ System metrics collection started")
+    except Exception as e:
+        logger.error(f"Failed to start metrics collection: {e}")
+
     # Initialize Wazuh client (will be available after yield)
     logger.info("✅ Server startup complete with high availability features enabled")
 
@@ -470,6 +479,14 @@ async def lifespan(app: FastAPI):
         await _cleanup_task
     except asyncio.CancelledError:
         pass
+
+    # Stop metrics collection
+    try:
+        from wazuh_mcp_server.monitoring import metrics_collector
+
+        await metrics_collector.stop_collection()
+    except Exception as e:
+        logger.debug(f"Metrics collection stop error: {e}")
 
     try:
         # Initiate graceful shutdown (waits for active connections)
@@ -3209,15 +3226,18 @@ async def get_auth_token(request: Request):
         # Validate against auth_manager (handles MCP_API_KEY env var and auto-generated keys)
         from wazuh_mcp_server.auth import auth_manager
 
-        if not auth_manager.validate_api_key(api_key):
+        key_obj = auth_manager.validate_api_key(api_key)
+        if not key_obj:
             raise HTTPException(status_code=401, detail="Invalid API key")
 
-        # Create JWT token with safe payload (no API key exposure)
+        # Mint the JWT with the API key's actual scopes (fail closed to read-only),
+        # so a read-only key cannot be upgraded to write at token issuance.
+        granted_scopes = key_obj.scopes or ["wazuh:read"]
         token = create_access_token(
             data={
                 "sub": "wazuh_mcp_user",
                 "iat": datetime.now(timezone.utc).timestamp(),
-                "scope": "wazuh:read wazuh:write",
+                "scope": " ".join(granted_scopes),
             },
             secret_key=config.AUTH_SECRET_KEY,
         )

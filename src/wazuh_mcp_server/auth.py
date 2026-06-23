@@ -39,11 +39,9 @@ class AuthToken:
         return True
 
     def has_scope(self, scope: str) -> bool:
-        """Check if token has specific scope."""
-        if self.scopes is None:
-            return True  # None means scopes not configured (legacy tokens)
-        if not self.scopes:
-            return False  # Empty list means no permissions
+        """Check if token has specific scope. Fails closed: no configured scopes => no access."""
+        if not self.scopes:  # None or empty => no permissions
+            return False
         return scope in self.scopes
 
 
@@ -64,7 +62,12 @@ class AuthManager:
     """Manage authentication for MCP server."""
 
     def __init__(self):
-        self.secret_key = os.getenv("AUTH_SECRET_KEY", secrets.token_urlsafe(32))
+        # Single source of truth for the signing secret: the validated ServerConfig.
+        # This guarantees API-key hashing and JWT verification use the same key, and
+        # that production startup has already enforced AUTH_SECRET_KEY (see config.py).
+        from wazuh_mcp_server.config import get_config
+
+        self.secret_key = get_config().AUTH_SECRET_KEY
         try:
             self.token_lifetime = int(os.getenv("TOKEN_LIFETIME_HOURS", "24"))
         except (ValueError, TypeError):
@@ -85,6 +88,19 @@ class AuthManager:
         """
         return self._default_api_key
 
+    @staticmethod
+    def _configured_key_scopes() -> List[str]:
+        """Scopes for the env-configured API key. Read-only unless explicitly granted more.
+
+        Set MCP_API_KEY_SCOPES (space-separated, e.g. "wazuh:read wazuh:write") to grant
+        write access. Defaults to read-only so destructive tools are opt-in.
+        """
+        raw = os.getenv("MCP_API_KEY_SCOPES", "").strip()
+        if not raw:
+            return ["wazuh:read"]
+        scopes = [s for s in raw.split() if s in ("wazuh:read", "wazuh:write")]
+        return scopes or ["wazuh:read"]
+
     def _load_api_keys(self):
         """Load API keys from configuration.
 
@@ -103,10 +119,11 @@ class AuthManager:
                     name="MCP API Key (from environment)",
                     key_hash=self.hash_api_key(mcp_api_key),
                     created_at=datetime.now(timezone.utc),
-                    scopes=["wazuh:read", "wazuh:write"],
+                    # Write access is opt-in: read-only unless MCP_API_KEY_SCOPES grants more.
+                    scopes=self._configured_key_scopes(),
                 )
                 self.api_keys[key_id] = key_obj
-                logger.info("Loaded API key from MCP_API_KEY environment variable")
+                logger.info(f"Loaded API key from MCP_API_KEY environment variable (scopes: {' '.join(key_obj.scopes)})")
                 return
             else:
                 logger.warning(
@@ -127,9 +144,20 @@ class AuthManager:
             except (json.JSONDecodeError, TypeError, KeyError) as e:
                 logger.error(f"Error loading API keys from API_KEYS env: {e}")
 
-        # Create default API key if none configured
+        # Create default API key if none configured. In production this is a read-only
+        # key plus a loud warning — operators should set MCP_API_KEY explicitly. In
+        # development it grants write for convenience.
         if not self.api_keys:
-            default_key = self.create_api_key(name="Default API Key", scopes=["wazuh:read", "wazuh:write"])
+            is_prod = os.getenv("ENVIRONMENT", "development").lower() == "production"
+            if is_prod:
+                default_scopes = ["wazuh:read"]
+                logger.warning(
+                    "No MCP_API_KEY configured in production — generated a temporary READ-ONLY "
+                    "default key. Set MCP_API_KEY (and MCP_API_KEY_SCOPES for write) for a stable key."
+                )
+            else:
+                default_scopes = ["wazuh:read", "wazuh:write"]
+            default_key = self.create_api_key(name="Default API Key", scopes=default_scopes)
             # Store the raw key for display
             self._default_api_key = default_key
             logger.info("Created default API key - save this securely for client authentication")
@@ -334,9 +362,10 @@ async def verify_bearer_token(authorization: str) -> AuthToken:
         if iat_timestamp:
             created_at = datetime.fromtimestamp(iat_timestamp, tz=timezone.utc)
 
-        # Parse scopes from JWT payload
+        # Parse scopes from JWT payload. Fail closed: a token without an explicit
+        # scope claim gets read-only, never write.
         scope_string = payload.get("scope", "")
-        scopes = scope_string.split() if scope_string else ["wazuh:read", "wazuh:write"]
+        scopes = scope_string.split() if scope_string else ["wazuh:read"]
 
         # Create AuthToken object from JWT payload
         return AuthToken(

@@ -100,6 +100,14 @@ class CircuitBreaker:
             return result
 
         except self.config.expected_exception as e:
+            # A 429 is an upstream rate-limit (transient throttle), not a service outage —
+            # counting it would turn a soft throttle into a hard circuit-open. Re-raise
+            # for the retry layer without recording a circuit failure.
+            if isinstance(e, httpx.HTTPStatusError) and e.response.status_code == 429:
+                # Still release any half-open trial flag so we don't deadlock recovery.
+                async with self._lock:
+                    self._half_open_trial_in_progress = False
+                raise
             await self._on_failure(func.__name__, e)
             raise
         except Exception as e:

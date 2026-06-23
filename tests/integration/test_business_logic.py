@@ -439,13 +439,17 @@ class TestCircuitBreakerConfig:
 class TestAuthTokenScopes:
     """Tests for auth token scope checking (audit v2 fix)."""
 
-    def test_none_scopes_means_full_access(self):
+    def test_none_scopes_means_no_access(self):
+        # Fail closed: a token with no configured scopes is denied everything, including
+        # read. (Previously None meant full access — a privilege-escalation footgun that
+        # let unscoped tokens reach destructive write tools.)
         from datetime import datetime, timezone
 
         from wazuh_mcp_server.auth import AuthToken
 
         token = AuthToken(token="test", api_key_id="k", created_at=datetime.now(timezone.utc), scopes=None)
-        assert token.has_scope("wazuh:read") is True
+        assert token.has_scope("wazuh:read") is False
+        assert token.has_scope("wazuh:write") is False
 
     def test_empty_scopes_means_no_access(self):
         from datetime import datetime, timezone

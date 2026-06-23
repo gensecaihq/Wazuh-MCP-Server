@@ -36,7 +36,7 @@ class WazuhConfig(BaseModel):
     port: int = Field(default=55000, ge=1, le=65535)
     user: str = Field(..., min_length=1, max_length=64)
     password: str = Field(..., min_length=8)
-    verify_ssl: bool = Field(default=False)
+    verify_ssl: bool = Field(default=True)
     timeout: int = Field(default=30, ge=1, le=300)
 
     @validator("host")
@@ -198,7 +198,7 @@ class ConfigValidator:
                 port=wazuh_port,
                 user=os.getenv("WAZUH_USER", ""),
                 password=os.getenv("WAZUH_PASS", ""),
-                verify_ssl=os.getenv("WAZUH_VERIFY_SSL", "false").lower() == "true",
+                verify_ssl=os.getenv("WAZUH_VERIFY_SSL", "true").lower() == "true",
             )
         except ValidationError as e:
             for error in e.errors():
@@ -243,7 +243,7 @@ class ConfigValidator:
             if os.getenv("LOG_LEVEL", "INFO") == "DEBUG":
                 warnings.append("DEBUG logging enabled in production")
 
-            if os.getenv("WAZUH_VERIFY_SSL", "false").lower() == "false":
+            if os.getenv("WAZUH_VERIFY_SSL", "true").lower() == "false":
                 warnings.append("SSL verification disabled in production")
 
         return ValidationResult(
