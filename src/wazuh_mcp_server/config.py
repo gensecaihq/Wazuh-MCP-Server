@@ -74,6 +74,8 @@ class WazuhConfig:
     wazuh_indexer_port: int = 9200
     wazuh_indexer_user: Optional[str] = None
     wazuh_indexer_pass: Optional[str] = None
+    wazuh_indexer_ssl: bool = True  # Use HTTPS for the indexer (set False for plain-HTTP OpenSearch nodes)
+    wazuh_indexer_verify_ssl: bool = True  # Verify the indexer's TLS certificate
 
     # Transport settings
     mcp_transport: str = "http"  # Default to HTTP/SSE mode
@@ -194,6 +196,7 @@ class ServerConfig:
     WAZUH_INDEXER_PORT: int = 9200
     WAZUH_INDEXER_USER: str = ""
     WAZUH_INDEXER_PASS: str = ""
+    WAZUH_INDEXER_SSL: bool = True
     WAZUH_INDEXER_VERIFY_SSL: bool = True
 
     # Logging
@@ -218,6 +221,15 @@ class ServerConfig:
         log_level = os.getenv("LOG_LEVEL", "INFO").upper()
         if log_level not in ("DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"):
             log_level = "INFO"
+
+        # Indexer scheme: honor an explicit WAZUH_INDEXER_SSL, otherwise infer from the
+        # host prefix (http:// -> plain HTTP). Defaults to HTTPS when no scheme is given.
+        indexer_host_raw = os.getenv("WAZUH_INDEXER_HOST", "")
+        indexer_ssl_env = os.getenv("WAZUH_INDEXER_SSL")
+        if indexer_ssl_env is not None:
+            indexer_ssl = indexer_ssl_env.lower() == "true"
+        else:
+            indexer_ssl = not indexer_host_raw.strip().lower().startswith("http://")
 
         return cls(
             MCP_HOST=os.getenv("MCP_HOST", "0.0.0.0"),
@@ -246,10 +258,11 @@ class ServerConfig:
             WAZUH_VERIFY_SSL=os.getenv("WAZUH_VERIFY_SSL", "true").lower() == "true",
             WAZUH_ALLOW_SELF_SIGNED=os.getenv("WAZUH_ALLOW_SELF_SIGNED", "true").lower() == "true",
             # Wazuh Indexer settings (for vulnerability tools in Wazuh 4.8.0+)
-            WAZUH_INDEXER_HOST=normalize_host(os.getenv("WAZUH_INDEXER_HOST", "")),
+            WAZUH_INDEXER_HOST=normalize_host(indexer_host_raw),
             WAZUH_INDEXER_PORT=validate_port(os.getenv("WAZUH_INDEXER_PORT", "9200"), "WAZUH_INDEXER_PORT"),
             WAZUH_INDEXER_USER=os.getenv("WAZUH_INDEXER_USER", ""),
             WAZUH_INDEXER_PASS=os.getenv("WAZUH_INDEXER_PASS", ""),
+            WAZUH_INDEXER_SSL=indexer_ssl,
             WAZUH_INDEXER_VERIFY_SSL=os.getenv("WAZUH_INDEXER_VERIFY_SSL", "true").lower() == "true",
             LOG_LEVEL=log_level,
         )

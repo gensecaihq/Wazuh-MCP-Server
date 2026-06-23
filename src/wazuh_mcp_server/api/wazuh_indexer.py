@@ -37,7 +37,11 @@ class WazuhIndexerClient:
         password: Optional[str] = None,
         verify_ssl: bool = True,
         timeout: int = 30,
+        use_ssl: bool = True,
     ):
+        # Detect scheme from the host prefix before stripping it; an explicit http://
+        # prefix wins over use_ssl so an OpenSearch node served over plain HTTP works.
+        detected_scheme = self._detect_scheme(host)
         # Normalize host (strip protocol if user included it)
         self.host = self._normalize_host(host)
         self.port = port
@@ -45,6 +49,7 @@ class WazuhIndexerClient:
         self.password = password
         self.verify_ssl = verify_ssl
         self.timeout = timeout
+        self.scheme = detected_scheme or ("https" if use_ssl else "http")
         self.client: Optional[httpx.AsyncClient] = None
         self._initialized = False
         self._init_lock = asyncio.Lock()
@@ -61,10 +66,22 @@ class WazuhIndexerClient:
                 break
         return host.rstrip("/")
 
+    @staticmethod
+    def _detect_scheme(host: str) -> Optional[str]:
+        """Return 'http' or 'https' if the host includes an explicit scheme, else None."""
+        if not host:
+            return None
+        lowered = host.lower()
+        if lowered.startswith("http://"):
+            return "http"
+        if lowered.startswith("https://"):
+            return "https"
+        return None
+
     @property
     def base_url(self) -> str:
         """Get the base URL for the Wazuh Indexer."""
-        return f"https://{self.host}:{self.port}"
+        return f"{self.scheme}://{self.host}:{self.port}"
 
     async def initialize(self):
         """Initialize the HTTP client and circuit breaker."""
@@ -104,7 +121,7 @@ class WazuhIndexerClient:
             )
 
         self._initialized = True
-        logger.info(f"WazuhIndexerClient initialized for {self.host}:{self.port}")
+        logger.info(f"WazuhIndexerClient initialized for {self.base_url} (verify_ssl={self.verify_ssl})")
 
     async def close(self):
         """Close the HTTP client."""

@@ -541,6 +541,8 @@ wazuh_config = WazuhConfig(
     wazuh_indexer_port=config.WAZUH_INDEXER_PORT,
     wazuh_indexer_user=config.WAZUH_INDEXER_USER if config.WAZUH_INDEXER_USER else None,
     wazuh_indexer_pass=config.WAZUH_INDEXER_PASS if config.WAZUH_INDEXER_PASS else None,
+    wazuh_indexer_ssl=config.WAZUH_INDEXER_SSL,
+    wazuh_indexer_verify_ssl=config.WAZUH_INDEXER_VERIFY_SSL,
 )
 
 # Initialize Wazuh client
@@ -1300,8 +1302,8 @@ async def handle_tools_list(params: Dict[str, Any], session: MCPSession) -> Dict
                     "rule_id": {"type": "string", "description": "Filter by specific rule ID"},
                     "level": {"type": "string", "description": "Filter by alert level (e.g., '12', '10+')"},
                     "agent_id": {"type": "string", "description": "Filter by agent ID"},
-                    "timestamp_start": {"type": "string", "description": "Start timestamp (ISO format)"},
-                    "timestamp_end": {"type": "string", "description": "End timestamp (ISO format)"},
+                    "timestamp_start": {"type": "string", "description": "Start timestamp — ISO 8601 (YYYY-MM-DDTHH:MM:SSZ) or relative date math (e.g. now-24h, now-7d)"},
+                    "timestamp_end": {"type": "string", "description": "End timestamp — ISO 8601 (YYYY-MM-DDTHH:MM:SSZ) or relative date math (e.g. now, now-1h)"},
                     "compact": {
                         "type": "boolean",
                         "default": True,

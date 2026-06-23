@@ -49,6 +49,9 @@ VALID_COMPLIANCE_FRAMEWORKS = {"PCI-DSS", "HIPAA", "SOX", "GDPR", "NIST"}
 AGENT_ID_PATTERN = re.compile(r"^[0-9]{1,5}$")  # Wazuh agent IDs: 0 (manager) through 99999
 RULE_ID_PATTERN = re.compile(r"^[0-9]{1,6}$")  # Rule IDs are numeric
 ISO_TIMESTAMP_PATTERN = re.compile(r"^\d{4}-\d{2}-\d{2}(T\d{2}:\d{2}:\d{2}(\.\d+)?(Z|[+-]\d{2}:?\d{2})?)?$")
+# OpenSearch/Elasticsearch date math, e.g. "now", "now-24h", "now-7d/d", "now-1h-30m".
+# These pass straight through to the indexer range query, which evaluates them natively.
+DATE_MATH_PATTERN = re.compile(r"^now([+-]\d+[yMwdhHms])*(/[yMwdhHms])?$")
 # Use ipaddress module for proper validation instead of regex
 IP_ADDRESS_PATTERN = None  # Replaced by _is_valid_ip() function
 HASH_PATTERN = re.compile(r"^[a-fA-F0-9]{32,128}$")  # MD5 to SHA-512
@@ -175,7 +178,11 @@ def validate_agent_status(value: Any, param_name: str = "status") -> Optional[st
 
 
 def validate_timestamp(value: Any, required: bool = False, param_name: str = "timestamp") -> Optional[str]:
-    """Validate ISO 8601 timestamp format."""
+    """Validate an ISO 8601 timestamp or OpenSearch relative date math (e.g. 'now-24h').
+
+    Relative expressions are common from LLM clients and are passed straight through to
+    the indexer range query, which evaluates date math natively.
+    """
     if value is None:
         if required:
             raise ToolValidationError(param_name, "is required")
@@ -188,12 +195,20 @@ def validate_timestamp(value: Any, required: bool = False, param_name: str = "ti
             raise ToolValidationError(param_name, "cannot be empty")
         return None
 
-    if not ISO_TIMESTAMP_PATTERN.match(timestamp):
-        raise ToolValidationError(
-            param_name, f"invalid ISO 8601 format '{timestamp}'", "Use format: YYYY-MM-DD or YYYY-MM-DDTHH:MM:SSZ"
-        )
+    # Accept OpenSearch date math (e.g. now-24h). Normalize the leading "now" keyword to
+    # lowercase since the indexer requires it; unit case (h/H, m/M) is preserved as-is.
+    normalized = ("now" + timestamp[3:]) if timestamp[:3].lower() == "now" else timestamp
+    if DATE_MATH_PATTERN.match(normalized):
+        return normalized
 
-    return timestamp
+    if ISO_TIMESTAMP_PATTERN.match(timestamp):
+        return timestamp
+
+    raise ToolValidationError(
+        param_name,
+        f"invalid timestamp '{timestamp}'",
+        "Use ISO 8601 (YYYY-MM-DD or YYYY-MM-DDTHH:MM:SSZ) or relative date math (e.g. now-24h, now-7d/d)",
+    )
 
 
 def validate_indicator(value: Any, indicator_type: str, param_name: str = "indicator") -> str:
