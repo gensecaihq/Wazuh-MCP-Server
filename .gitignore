@@ -69,3 +69,6 @@ MAINTAINER_MANUAL.md
 
 # Internal planning documents
 localllm.md
+
+# Local Claude Code guidance (not for distribution)
+CLAUDE.md

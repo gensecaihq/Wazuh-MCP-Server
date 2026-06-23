@@ -57,8 +57,9 @@ class WazuhClient:
                 port=config.wazuh_indexer_port,
                 username=config.wazuh_indexer_user,
                 password=config.wazuh_indexer_pass,
-                verify_ssl=config.verify_ssl,
+                verify_ssl=getattr(config, "wazuh_indexer_verify_ssl", config.verify_ssl),
                 timeout=config.request_timeout_seconds,
+                use_ssl=getattr(config, "wazuh_indexer_ssl", True),
             )
             logger.info(f"WazuhIndexerClient configured for {config.wazuh_indexer_host}:{config.wazuh_indexer_port}")
         else:
@@ -155,6 +156,23 @@ class WazuhClient:
             agent_id=params.get("agent_id"),
             timestamp_start=params.get("timestamp_start"),
             timestamp_end=params.get("timestamp_end"),
+        )
+
+    async def get_alerts_aggregated(
+        self,
+        timestamp_start: str = "now-24h",
+        timestamp_end: str = "now",
+        top_rules: int = 50,
+        top_agents: int = 50,
+    ) -> Dict[str, Any]:
+        """Aggregate alerts over a time range (no document limit) via the indexer."""
+        if not self._indexer_client:
+            raise IndexerNotConfiguredError()
+        return await self._indexer_client.aggregate_alerts(
+            timestamp_start=timestamp_start,
+            timestamp_end=timestamp_end,
+            top_rules=top_rules,
+            top_agents=top_agents,
         )
 
     async def get_agents(self, agent_id=None, status=None, limit=100, **params) -> Dict[str, Any]:
