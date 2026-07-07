@@ -196,6 +196,7 @@ python -c "import secrets; print('wazuh_' + secrets.token_urlsafe(32))"
 | `WAZUH_INDEXER_VERIFY_SSL` | `true` | Verify the Indexer's TLS certificate |
 | `YDC_API_KEY` | — | Optional You.com API key. Enables the `search_external_context` tool |
 | `YDC_BASE_URL` | `https://ydc-index.io` | Optional You.com Search API base URL |
+| `YDC_VERIFY_SSL` | `true` | Verify You.com TLS certificates independently of Wazuh |
 
 > Full reference: [Configuration Guide](docs/configuration.md)
 
@@ -218,7 +219,7 @@ python -c "import secrets; print('wazuh_' + secrets.token_urlsafe(32))"
 
 ```
 src/wazuh_mcp_server/
-├── server.py           # MCP protocol + 54 tool handlers
+├── server.py           # MCP protocol + 55 tool handlers
 ├── config.py           # Environment-based configuration
 ├── auth.py             # JWT + API key authentication
 ├── oauth.py            # OAuth 2.0 with Dynamic Client Registration

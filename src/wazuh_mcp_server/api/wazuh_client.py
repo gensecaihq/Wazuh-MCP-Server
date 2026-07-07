@@ -161,6 +161,7 @@ class WazuhClient:
         self._cache_max_size = 100
         self._youcom_api_key = os.getenv("YDC_API_KEY", "").strip() or None
         self._youcom_base_url = os.getenv("YDC_BASE_URL", YDC_DEFAULT_BASE_URL).rstrip("/")
+        self._youcom_verify_ssl = os.getenv("YDC_VERIFY_SSL", "true").strip().lower() == "true"
 
         # Circuit breaker for API resilience — only trip on connection/server errors,
         # not on user-input errors (ValueError) which shouldn't degrade the circuit
@@ -930,14 +931,7 @@ class WazuhClient:
             }
 
         clamped_count = max(1, min(count, 10))
-        params = {"query": query, "count": clamped_count, "safesearch": "moderate", "livecrawl": "web"}
-        url = f"{self._youcom_base_url}/v1/search"
-        async with httpx.AsyncClient(timeout=self.config.request_timeout_seconds, verify=True) as client:
-            response = await client.get(url, params=params, headers={"X-API-Key": self._youcom_api_key})
-        if response.status_code >= 400:
-            raise ValueError(f"You.com Search API error {response.status_code}: {response.text}")
-
-        payload = response.json()
+        payload = await self._search_youcom(query, clamped_count)
         web_results = payload.get("results", {}).get("web", [])[:clamped_count]
         results = []
         for item in web_results:
@@ -950,6 +944,21 @@ class WazuhClient:
                 }
             )
         return {"data": {"query": query, "enabled": True, "results": results, "search_uuid": payload.get("metadata", {}).get("search_uuid")}}
+
+    async def _search_youcom(self, query: str, count: int) -> Dict[str, Any]:
+        """Search You.com with the same resilience wrapper used for Wazuh requests."""
+        async with self._rate_limiter:
+            await self._rate_limit_check()
+            return await self._circuit_breaker._call(self._execute_youcom_search, query, count)
+
+    async def _execute_youcom_search(self, query: str, count: int) -> Dict[str, Any]:
+        params = {"query": query, "count": count, "safesearch": "moderate", "livecrawl": "web"}
+        url = f"{self._youcom_base_url}/v1/search"
+        async with httpx.AsyncClient(timeout=self.config.request_timeout_seconds, verify=self._youcom_verify_ssl) as client:
+            response = await client.get(url, params=params, headers={"X-API-Key": self._youcom_api_key})
+        if response.status_code >= 400:
+            raise ValueError(f"You.com Search API error {response.status_code}: {response.text}")
+        return response.json()
 
     async def perform_risk_assessment(self, agent_id: str = None) -> Dict[str, Any]:
         """Perform risk assessment from agent status, vulnerability data, and alert severity."""
