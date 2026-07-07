@@ -929,15 +929,16 @@ class WazuhClient:
                 }
             }
 
-        params = {"query": query, "count": max(1, min(count, 10)), "safesearch": "moderate", "livecrawl": "web"}
+        clamped_count = max(1, min(count, 10))
+        params = {"query": query, "count": clamped_count, "safesearch": "moderate", "livecrawl": "web"}
         url = f"{self._youcom_base_url}/v1/search"
-        async with httpx.AsyncClient(timeout=self.config.request_timeout_seconds, verify=self.config.verify_ssl) as client:
+        async with httpx.AsyncClient(timeout=self.config.request_timeout_seconds, verify=True) as client:
             response = await client.get(url, params=params, headers={"X-API-Key": self._youcom_api_key})
         if response.status_code >= 400:
             raise ValueError(f"You.com Search API error {response.status_code}: {response.text}")
 
         payload = response.json()
-        web_results = payload.get("results", {}).get("web", [])[:count]
+        web_results = payload.get("results", {}).get("web", [])[:clamped_count]
         results = []
         for item in web_results:
             results.append(

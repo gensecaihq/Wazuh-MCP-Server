@@ -7,7 +7,7 @@
 
 **Talk to your SIEM.** Query alerts, hunt threats, check vulnerabilities, and trigger active responses across your entire Wazuh deployment — through natural conversation with any AI assistant.
 
-> **v4.2.1** | 54 security tools | Wazuh 4.8.0–4.14.4 | [Changelog](CHANGELOG.md)
+> **v4.2.1** | 55 security tools | Wazuh 4.8.0–4.14.4 | [Changelog](CHANGELOG.md)
 
 ---
 
@@ -75,7 +75,7 @@ Open WebUI v0.6.31+ connects to our `/mcp` endpoint natively. Add it as an MCP t
 
 ---
 
-## 54 Security Tools
+## 55 Security Tools
 
 Every tool is validated, rate-limited, scope-checked, and audit-logged.
 

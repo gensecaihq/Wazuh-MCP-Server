@@ -1375,7 +1375,7 @@ def _get_tool_scope(tool_name: str) -> str:
 
 
 async def handle_tools_list(params: Dict[str, Any], session: MCPSession) -> Dict[str, Any]:
-    """Handle tools/list method - All 54 Wazuh Security Tools with pagination.
+    """Handle tools/list method - All 55 Wazuh Security Tools with pagination.
     Filters tools based on session token scopes."""
     _cursor = params.get("cursor")  # Reserved for future pagination
     tools = [
@@ -2101,7 +2101,7 @@ async def handle_tools_list(params: Dict[str, Any], session: MCPSession) -> Dict
 
 
 async def handle_tools_call(params: Dict[str, Any], session: MCPSession) -> Dict[str, Any]:
-    """Handle tools/call method - All 54 Wazuh Security Tools with comprehensive validation."""
+    """Handle tools/call method - All 55 Wazuh Security Tools with comprehensive validation."""
     tool_name = params.get("name")
     arguments = params.get("arguments", {})
 
@@ -2353,7 +2353,7 @@ async def handle_tools_call(params: Dict[str, Any], session: MCPSession) -> Dict
             return _tool_result(f"IoC Reputation:\n{json.dumps(result, indent=2, default=str)}")
 
         elif tool_name == "search_external_context":
-            query = validate_input(arguments.get("query"), "query", required=True)
+            query = validate_query(arguments.get("query"), required=True)
             count = validate_limit(arguments.get("count"), min_val=1, max_val=10, default=5, param_name="count")
 
             result = await wazuh_client.search_external_context(query, count)
