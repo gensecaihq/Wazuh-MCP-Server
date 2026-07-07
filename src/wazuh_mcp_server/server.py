@@ -1604,6 +1604,18 @@ async def handle_tools_list(params: Dict[str, Any], session: MCPSession) -> Dict
             },
         },
         {
+            "name": "search_external_context",
+            "description": "Search the web for additional context around an indicator or security topic (opt-in via YDC_API_KEY)",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "query": {"type": "string", "description": "Security topic or indicator to search for"},
+                    "count": {"type": "integer", "minimum": 1, "maximum": 10, "default": 5},
+                },
+                "required": ["query"],
+            },
+        },
+        {
             "name": "perform_risk_assessment",
             "description": "Perform comprehensive risk assessment for agents or the entire environment",
             "inputSchema": {
@@ -2339,6 +2351,14 @@ async def handle_tools_call(params: Dict[str, Any], session: MCPSession) -> Dict
             result = await wazuh_client.check_ioc_reputation(indicator, indicator_type)
             _success = True
             return _tool_result(f"IoC Reputation:\n{json.dumps(result, indent=2, default=str)}")
+
+        elif tool_name == "search_external_context":
+            query = validate_input(arguments.get("query"), "query", required=True)
+            count = validate_limit(arguments.get("count"), min_val=1, max_val=10, default=5, param_name="count")
+
+            result = await wazuh_client.search_external_context(query, count)
+            _success = True
+            return _tool_result(f"External Context:\n{json.dumps(result, indent=2, default=str)}")
 
         elif tool_name == "perform_risk_assessment":
             agent_id = validate_agent_id(arguments.get("agent_id"))

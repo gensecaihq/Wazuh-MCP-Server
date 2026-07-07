@@ -4,6 +4,7 @@ import asyncio
 import json
 import logging
 import math
+import os
 import time
 from collections import OrderedDict, deque
 from datetime import datetime, timedelta, timezone
@@ -19,6 +20,8 @@ logger = logging.getLogger(__name__)
 
 # Time range to hours mapping for indexer-based queries
 _TIME_RANGE_HOURS = {"1h": 1, "6h": 6, "12h": 12, "1d": 24, "24h": 24, "7d": 168, "30d": 720}
+
+YDC_DEFAULT_BASE_URL = "https://ydc-index.io"
 
 # ISO 27001:2022 Annex A control map — links each control to Wazuh data sources
 # data_source: "sca" | "alerts" | "vulnerabilities" | "agents" | "stats" | "none"
@@ -156,6 +159,8 @@ class WazuhClient:
         self._cache: OrderedDict[str, Tuple[float, Dict[str, Any]]] = OrderedDict()
         self._cache_ttl = 300  # 5 minutes for static data
         self._cache_max_size = 100
+        self._youcom_api_key = os.getenv("YDC_API_KEY", "").strip() or None
+        self._youcom_base_url = os.getenv("YDC_BASE_URL", YDC_DEFAULT_BASE_URL).rstrip("/")
 
         # Circuit breaker for API resilience — only trip on connection/server errors,
         # not on user-input errors (ValueError) which shouldn't degrade the circuit
@@ -911,6 +916,39 @@ class WazuhClient:
                 "risk": risk,
             }
         }
+
+    async def search_external_context(self, query: str, count: int = 5) -> Dict[str, Any]:
+        """Search the web with You.com for additional security context."""
+        if not self._youcom_api_key:
+            return {
+                "data": {
+                    "query": query,
+                    "enabled": False,
+                    "results": [],
+                    "message": "Set YDC_API_KEY to enable optional You.com web search context.",
+                }
+            }
+
+        params = {"query": query, "count": max(1, min(count, 10)), "safesearch": "moderate", "livecrawl": "web"}
+        url = f"{self._youcom_base_url}/v1/search"
+        async with httpx.AsyncClient(timeout=self.config.request_timeout_seconds, verify=self.config.verify_ssl) as client:
+            response = await client.get(url, params=params, headers={"X-API-Key": self._youcom_api_key})
+        if response.status_code >= 400:
+            raise ValueError(f"You.com Search API error {response.status_code}: {response.text}")
+
+        payload = response.json()
+        web_results = payload.get("results", {}).get("web", [])[:count]
+        results = []
+        for item in web_results:
+            results.append(
+                {
+                    "title": item.get("title"),
+                    "url": item.get("url"),
+                    "description": item.get("description"),
+                    "snippets": item.get("snippets", []),
+                }
+            )
+        return {"data": {"query": query, "enabled": True, "results": results, "search_uuid": payload.get("metadata", {}).get("search_uuid")}}
 
     async def perform_risk_assessment(self, agent_id: str = None) -> Dict[str, Any]:
         """Perform risk assessment from agent status, vulnerability data, and alert severity."""

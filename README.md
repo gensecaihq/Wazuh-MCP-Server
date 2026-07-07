@@ -84,7 +84,7 @@ Every tool is validated, rate-limited, scope-checked, and audit-logged.
 | **Alerts** (5) | `get_wazuh_alerts` `get_wazuh_alert_summary` `get_alerts_aggregated` `analyze_alert_patterns` `search_security_events` | Query, filter, search, and aggregate alert data via the Indexer. Timestamps accept ISO 8601 or relative date math (`now-24h`); `get_alerts_aggregated` summarizes a whole period with no document limit |
 | **Agents** (6) | `get_wazuh_agents` `get_wazuh_running_agents` `check_agent_health` `get_agent_processes` `get_agent_ports` `get_agent_configuration` | Monitor agent status, running processes, open ports, and configs |
 | **Vulnerabilities** (3) | `get_wazuh_vulnerabilities` `get_wazuh_critical_vulnerabilities` `get_wazuh_vulnerability_summary` | Query CVEs by severity, agent, and package |
-| **Security Analysis** (5) | `analyze_security_threat` `check_ioc_reputation` `perform_risk_assessment` `get_top_security_threats` `generate_security_report` | Threat analysis, IOC lookup, risk scoring, security reports |
+| **Security Analysis** (6) | `analyze_security_threat` `check_ioc_reputation` `search_external_context` `perform_risk_assessment` `get_top_security_threats` `generate_security_report` | Threat analysis, IOC lookup, optional web context, risk scoring, security reports |
 | **Compliance** (6) | `run_compliance_check` `get_iso27001_dashboard` `get_iso27001_control_detail` `get_iso27001_gap_analysis` `get_iso27001_alerts` `get_sca_policy_checks` | Compliance scoring for PCI-DSS, HIPAA, SOX, GDPR, NIST, and ISO 27001:2022 (Annex A control mapping, gap analysis, SCA detail) |
 | **System** (10) | `get_wazuh_statistics` `get_wazuh_cluster_health` `get_wazuh_cluster_nodes` `get_wazuh_rules_summary` `search_wazuh_manager_logs` `get_wazuh_manager_error_logs` `get_wazuh_log_collector_stats` `get_wazuh_remoted_stats` `get_wazuh_weekly_stats` `validate_wazuh_connection` | Cluster health, rules, manager logs, stats, connectivity |
 | **Active Response** (9) | `wazuh_block_ip` `wazuh_isolate_host` `wazuh_kill_process` `wazuh_disable_user` `wazuh_quarantine_file` `wazuh_firewall_drop` `wazuh_host_deny` `wazuh_active_response` `wazuh_restart` | Block IPs, isolate hosts, kill processes, quarantine files |
@@ -194,6 +194,8 @@ python -c "import secrets; print('wazuh_' + secrets.token_urlsafe(32))"
 | `WAZUH_INDEXER_PASS` | — | Indexer password |
 | `WAZUH_INDEXER_SSL` | `true` | Use HTTPS for the Indexer (set `false` for a plain-HTTP OpenSearch node) |
 | `WAZUH_INDEXER_VERIFY_SSL` | `true` | Verify the Indexer's TLS certificate |
+| `YDC_API_KEY` | — | Optional You.com API key. Enables the `search_external_context` tool |
+| `YDC_BASE_URL` | `https://ydc-index.io` | Optional You.com Search API base URL |
 
 > Full reference: [Configuration Guide](docs/configuration.md)
 
