@@ -113,7 +113,7 @@ access-control-max-age: 600
 
 | Component | Status | Version Support |
 |-----------|--------|-----------------|
-| **API Client** | ✅ READY | Wazuh 4.8.0 - 4.14.1 |
+| **API Client** | ✅ READY | Wazuh 4.8.0 - 4.14.7 |
 | **Vulnerability Detection** | ✅ READY | Indexer API support |
 | **Agent Management** | ✅ READY | Full agent lifecycle |
 | **Alert Retrieval** | ✅ READY | Alert queries supported |
@@ -286,7 +286,7 @@ The server is verified ready for:
 
 Before deploying to production, ensure:
 
-- [ ] **Wazuh Server**: 4.8.0 - 4.14.1 installed and accessible
+- [ ] **Wazuh Server**: 4.8.0 - 4.14.7 installed and accessible
 - [ ] **Environment Variables**: Configure `.env` with real Wazuh credentials
 - [ ] **HTTPS/TLS**: Set up reverse proxy (nginx/traefik) with valid certificates
 - [ ] **API Key**: Securely store and distribute MCP API keys
@@ -376,7 +376,7 @@ After deploying:
 - ✅ Monitoring & Observability
 - ✅ Container Security
 - ✅ Performance Optimization
-- ✅ Wazuh Integration (4.8.0-4.14.1)
+- ✅ Wazuh Integration (4.8.0-4.14.7)
 
 **Testing Date**: November 24, 2025
 **Testing Duration**: Comprehensive automated suite

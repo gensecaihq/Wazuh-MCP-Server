@@ -7,7 +7,7 @@
 
 **Talk to your SIEM.** Query alerts, hunt threats, check vulnerabilities, and trigger active responses across your entire Wazuh deployment — through natural conversation with any AI assistant.
 
-> **v4.2.1** | 55 security tools | Wazuh 4.8.0–4.14.4 | [Changelog](CHANGELOG.md)
+> **v4.2.1** | 55 security tools | Wazuh 4.8.0–4.14.7 | [Changelog](CHANGELOG.md)
 
 ---
 
@@ -100,7 +100,7 @@ The 14 state-changing tools (Active Response + Rollback) require the `wazuh:writ
 ### Prerequisites
 
 - Docker 20.10+ with Compose v2
-- Wazuh 4.8.0–4.14.4 with API access enabled
+- Wazuh 4.8.0–4.14.7 with API access enabled
 
 ### Deploy
 

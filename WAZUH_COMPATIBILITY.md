@@ -10,7 +10,10 @@ This document details the compatibility of Wazuh MCP Server with different Wazuh
 
 | Wazuh Version | Support Status | Recommendation | Notes |
 |---------------|----------------|----------------|-------|
-| **4.14.4** | ✅ **Fully Supported** | **RECOMMENDED** | Latest stable release (Mar 2026) |
+| **4.14.7** | ✅ **Fully Supported** | **RECOMMENDED** | Latest stable release (Jul 2026) |
+| **4.14.6** | ✅ **Fully Supported** | Recommended | Stable release (Jul 2026) |
+| **4.14.5** | ✅ **Fully Supported** | Recommended | Stable release (Apr 2026) |
+| **4.14.4** | ✅ **Fully Supported** | Recommended | Stable release (Mar 2026) |
 | **4.14.3** | ✅ **Fully Supported** | Recommended | Stable release |
 | **4.14.2** | ✅ **Fully Supported** | Recommended | Stable release |
 | **4.14.1** | ✅ **Fully Supported** | Recommended | Previous stable release |
@@ -28,7 +31,42 @@ This document details the compatibility of Wazuh MCP Server with different Wazuh
 
 ## 🎯 **Version-Specific Features**
 
-### **Wazuh 4.14.4 (Latest - March 2026)**
+### **Wazuh 4.14.7 (Latest - July 2026)**
+
+**Changes:**
+- ✅ Removed deprecated `wazuh-dbd` daemon and `database_output` configuration (not used by this server)
+- ✅ Improved API authentication stability (bounded thread pools, regex timeouts, payload size limits)
+- ✅ Improved cluster payload buffer allocation and archive decompression limits
+- ✅ Updated Python dependencies (aiohttp, cryptography, PyJWT, python-multipart, starlette)
+
+**API Compatibility:** ✅ No breaking changes — Manager REST API and Indexer contracts unchanged
+
+**MCP Server Support:** Fully compatible — no code changes required
+
+### **Wazuh 4.14.6 (July 2026)**
+
+**Changes:**
+- ✅ RBAC enforcement for agent removal/group-edit/upgrade moved to the API level
+- ✅ `update-user` endpoint admin protection fixed
+- ✅ Input validation hardening in cluster and authentication paths
+
+**API Compatibility:** ✅ No breaking changes. Note: agent write operations are now RBAC-enforced server-side — ensure your API user has the required permissions for active response and agent management tools
+
+**MCP Server Support:** Fully compatible — no code changes required
+
+### **Wazuh 4.14.5 (April 2026)**
+
+**Changes:**
+- ✅ `/events` endpoint rate-limiting bypass fixed
+- ✅ Nested JSON depth limit in API request processing
+- ✅ Upload size limit configuration mismatch resolved
+- ✅ Security fixes (cluster memory allocation, DAPI RBAC bypass, Authd path traversal, Remoted heap overflow)
+
+**API Compatibility:** ✅ No breaking changes
+
+**MCP Server Support:** Fully compatible — no code changes required
+
+### **Wazuh 4.14.4 (March 2026)**
 
 **Bug Fixes:**
 - ✅ Fixed timestamps in `/agents/upgrade_result` endpoint to return proper UTC time
@@ -155,7 +193,7 @@ This document details the compatibility of Wazuh MCP Server with different Wazuh
 
 ## 🔧 **Configuration by Version**
 
-### **For Wazuh 4.8.0 - 4.14.4 (Recommended)**
+### **For Wazuh 4.8.0 - 4.14.7 (Recommended)**
 
 ```bash
 # .env configuration
@@ -191,7 +229,7 @@ WAZUH_VERIFY_SSL=true
 
 ## 📊 **API Endpoint Compatibility Matrix**
 
-| Endpoint | 4.8-4.14.4 | 4.0-4.7.x | Notes |
+| Endpoint | 4.8-4.14.7 | 4.0-4.7.x | Notes |
 |----------|------------|-----------|-------|
 | `/agents` | ✅ | ✅ | Fully compatible across all versions |
 | `/alerts` (via Indexer) | ✅ | ❌ | Requires Wazuh Indexer (4.8.0+) |
@@ -244,7 +282,7 @@ WAZUH_VERIFY_SSL=true
    - Removed: `custom` parameter
    - Impact: MCP Server filters this parameter automatically
 
-### **No Breaking Changes in 4.9.0 - 4.14.4**
+### **No Breaking Changes in 4.9.0 - 4.14.7**
 - All API endpoints remain compatible
 - New features are additive only
 - Backward compatibility maintained
@@ -349,4 +387,4 @@ curl -X POST http://localhost:3000/mcp \
 - ✅ **Keep both updated** (Wazuh + MCP Server)
 
 **Compatibility Guarantee:**
-This MCP Server is **fully tested and verified** with Wazuh versions 4.8.0 through 4.14.4, with ongoing support for future 4.x releases.
+This MCP Server is **fully tested and verified** with Wazuh versions 4.8.0 through 4.14.7, with ongoing support for future 4.x releases.

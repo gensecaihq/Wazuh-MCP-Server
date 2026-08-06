@@ -1,4 +1,4 @@
-"""Wazuh API client optimized for Wazuh 4.8.0 to 4.14.1 compatibility with latest features."""
+"""Wazuh API client optimized for Wazuh 4.8.0 to 4.14.7 compatibility with latest features."""
 
 import asyncio
 import json
