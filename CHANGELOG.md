@@ -8,6 +8,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **MCP 2026-07-28 protocol support (dual-era)**: modern stateless requests (per-request `_meta` protocol version/capabilities, `server/discover`, `Mcp-Method`/`Mcp-Name` header validation with Base64 sentinel decoding, `resultType`, `ttlMs`/`cacheScope` cache hints, `-32020`/`-32022` spec error codes) served alongside the legacy `initialize` handshake and `Mcp-Session-Id` sessions for clients on 2024-11-05 through 2025-11-25.
+- **OAuth protected resource metadata (RFC 9728)**: `/.well-known/oauth-protected-resource` endpoint and `resource_metadata` hint in `WWW-Authenticate` when `OAUTH_ISSUER_URL` is set.
+- **`rule_groups` filter on `get_wazuh_alerts`** — query alert categories (e.g. `authentication_failed`, `firewall`) via a `terms` query on `rule.groups` (#86).
+- **`search_external_context` tool** (optional, contributed by @mouse-value-add, #85): You.com web search for security context, enabled only when `YDC_API_KEY` is set; isolated behind its own circuit breaker.
+- **Published Docker image**: multi-arch (amd64/arm64) images pushed to `ghcr.io/gensecaihq/wazuh-mcp-server` on releases and `main` (#69).
 - **`get_alerts_aggregated` tool**: summarizes a whole time window via Indexer aggregations (`size=0`) with no per-document limit — true total count plus top rules, severity levels, and agents (#81).
 - **ISO 27001:2022 compliance tools** (contributed by @andrzej-piotrowski-pl, #74): `get_iso27001_dashboard`, `get_iso27001_control_detail`, `get_iso27001_gap_analysis`, `get_iso27001_alerts`, `get_sca_policy_checks`, the `iso27001_assessment` guided prompt, and `ISO27001` as a `run_compliance_check` framework (Annex A control mapping to live Wazuh data).
 - **Relative timestamps**: `timestamp_start`/`timestamp_end` now accept OpenSearch date math (`now-24h`, `now-7d/d`) in addition to ISO 8601 (#73).
@@ -22,6 +27,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Dependencies** trimmed (removed unused `fastmcp`, `passlib`, `aiofiles`) and pinned with upper bounds; tool count is now **54**.
 
 ### Fixed
+- **ISO 27001 tools no longer query the removed Manager `/alerts` endpoint** (404 on Wazuh 4.8+): the dashboard, control detail, and alert-mapping paths now read alert evidence from the Indexer, with rule-group filtering, so alert-backed controls stop reporting false `no_evidence` gaps (#84).
 - **System metrics never collected**: `MetricsCollector` is now started/stopped in the app lifespan, so `/metrics` reports real CPU/memory (previously always `0`).
 - **Circuit breaker tripped on 429**: an upstream rate-limit no longer opens the breaker (5xx still does).
 - **`tools/list` `nextCursor: null`**: confirmed resolved — list responses omit the cursor field (#75).

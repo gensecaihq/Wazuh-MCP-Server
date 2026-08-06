@@ -4,12 +4,44 @@
 
 This document verifies that the Wazuh MCP Remote Server fully complies with the latest Model Context Protocol specifications.
 
-**Current Implementation Status**: ✅ **FULLY COMPLIANT with MCP 2025-11-25**
+**Current Implementation Status**: ✅ **Dual-era server — MCP 2026-07-28 (modern, stateless) and 2025-11-25 and earlier (legacy handshake)**
 
 **References:**
+- [MCP Specification 2026-07-28](https://modelcontextprotocol.io/specification/2026-07-28)
 - [MCP Specification 2025-11-25](https://modelcontextprotocol.io/specification/2025-11-25/basic/transports)
-- [MCP Streamable HTTP Transport](https://modelcontextprotocol.io/specification/2025-11-25/basic/transports#streamable-http)
+- [MCP Streamable HTTP Transport](https://modelcontextprotocol.io/specification/2026-07-28/basic/transports/streamable-http)
 - [MCP Server Development](https://modelcontextprotocol.io/docs/develop/build-server)
+
+---
+
+## ✅ **COMPLIANCE — MCP 2026-07-28 (modern era)**
+
+The 2026-07-28 revision removed protocol-level sessions and the `initialize` handshake:
+every request carries its protocol version, client info, and capabilities in `params._meta`.
+This server implements the spec's **dual-era** model: a request carrying
+`_meta["io.modelcontextprotocol/protocolVersion"]` is served statelessly per 2026-07-28,
+while an `initialize` request selects legacy semantics for that session.
+
+| Requirement | Status | Implementation |
+|-------------|--------|----------------|
+| **Stateless requests via `_meta`** | ✅ COMPLIANT | `extract_modern_meta` / `handle_modern_request` in `server.py`; no session minted or echoed |
+| **`server/discover` (MUST)** | ✅ COMPLIANT | Returns `supportedVersions`, `capabilities`, `instructions`, `serverInfo`; also answers legacy-era probes |
+| **`MCP-Protocol-Version` header ↔ `_meta` match** | ✅ COMPLIANT | Mismatch → HTTP 400 + `HeaderMismatch` (`-32020`) |
+| **`Mcp-Method` header (all requests)** | ✅ COMPLIANT | Validated against body `method`; mismatch → `-32020` |
+| **`Mcp-Name` header (`tools/call`, `resources/read`, `prompts/get`)** | ✅ COMPLIANT | Validated with Base64 sentinel (`=?base64?...?=`) decoding |
+| **`UnsupportedProtocolVersionError` (`-32022`)** | ✅ COMPLIANT | 400 + `data.supported` listing all supported revisions |
+| **`resultType: "complete"` on results** | ✅ COMPLIANT | Added to every modern-era result |
+| **`ttlMs`/`cacheScope` (CacheableResult)** | ✅ COMPLIANT | On `tools/list`, `prompts/list`, `resources/list`, `resources/read`, `resources/templates/list`, `server/discover` |
+| **`serverInfo` in result `_meta`** | ✅ COMPLIANT | `io.modelcontextprotocol/serverInfo` on modern results |
+| **Removed methods not served** | ✅ COMPLIANT | `initialize`, `ping`, `logging/setLevel` → 404 + `-32601` on the modern path (still served to legacy clients) |
+| **Deterministic `tools/list` order** | ✅ COMPLIANT | Static tool registry |
+| **Resource not found → `-32602`** | ✅ COMPLIANT | Invalid Params per JSON-RPC alignment |
+| **Protected resource metadata (RFC 9728)** | ✅ COMPLIANT | `/.well-known/oauth-protected-resource` + `WWW-Authenticate` `resource_metadata` hint (OAuth mode) |
+| **MRTR / sampling / elicitation** | ➖ N/A | Server never initiates client interactions |
+| **`subscriptions/listen`** | ➖ N/A | No `listChanged` capabilities advertised to modern clients (static lists) |
+
+Legacy-era behavior (sessions, `initialize`, `ping`, SSE `GET /mcp`, JSON-RPC batching for
+pre-2025-06-18 clients) is preserved unchanged for backward compatibility and verified below.
 
 ---
 

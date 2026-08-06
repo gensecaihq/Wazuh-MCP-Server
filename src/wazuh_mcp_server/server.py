@@ -59,9 +59,37 @@ from wazuh_mcp_server.security import (
 from wazuh_mcp_server.session_store import SessionStore, create_session_store
 
 # MCP Protocol Version Support
-# Latest: 2025-11-25, also supports backwards compatibility with older versions
+# This is a "dual-era" server per the 2026-07-28 spec: requests carrying modern
+# per-request _meta (io.modelcontextprotocol/protocolVersion) are served statelessly,
+# while an initialize request selects legacy handshake/session semantics.
+MODERN_PROTOCOL_VERSIONS = ["2026-07-28"]
+LEGACY_PROTOCOL_VERSIONS = ["2025-11-25", "2025-06-18", "2025-03-26", "2024-11-05"]
+SUPPORTED_PROTOCOL_VERSIONS = MODERN_PROTOCOL_VERSIONS + LEGACY_PROTOCOL_VERSIONS
+# Latest legacy revision — offered during the initialize handshake (modern revisions have no handshake)
 MCP_PROTOCOL_VERSION = "2025-11-25"
-SUPPORTED_PROTOCOL_VERSIONS = ["2025-11-25", "2025-06-18", "2025-03-26", "2024-11-05"]
+
+# _meta keys defined by the 2026-07-28 revision
+META_PROTOCOL_VERSION = "io.modelcontextprotocol/protocolVersion"
+META_CLIENT_CAPABILITIES = "io.modelcontextprotocol/clientCapabilities"
+META_CLIENT_INFO = "io.modelcontextprotocol/clientInfo"
+META_SERVER_INFO = "io.modelcontextprotocol/serverInfo"
+
+# Methods removed in the 2026-07-28 revision — still served to legacy-era clients
+MODERN_REMOVED_METHODS = {"initialize", "ping", "logging/setLevel"}
+
+# CacheableResult freshness hints (ttlMs) per 2026-07-28 SEP-2549.
+# Everything is scope-filtered by the caller's token, so cacheScope is always "private".
+CACHEABLE_METHOD_TTLS = {
+    "server/discover": 3_600_000,
+    "tools/list": 300_000,
+    "prompts/list": 3_600_000,
+    "resources/list": 300_000,
+    "resources/read": 60_000,
+    "resources/templates/list": 3_600_000,
+}
+
+# Methods whose body name/uri must be mirrored in the Mcp-Name header (2026-07-28 transport)
+MCP_NAME_SOURCE_FIELDS = {"tools/call": "name", "resources/read": "uri", "prompts/get": "name"}
 
 # Production Constants
 SESSION_TIMEOUT_MINUTES = 30
@@ -99,10 +127,18 @@ async def verify_authentication(authorization: Optional[str], config) -> Optiona
             scopes=scopes,
         )
 
+    # Point OAuth clients at the protected resource metadata (RFC 9728) when the
+    # issuer URL is configured — enables automatic authorization server discovery
+    www_authenticate = "Bearer"
+    if config.is_oauth and getattr(config, "OAUTH_ISSUER_URL", ""):
+        www_authenticate = (
+            f'Bearer resource_metadata="{config.OAUTH_ISSUER_URL}/.well-known/oauth-protected-resource"'
+        )
+
     # Authentication required
     if not authorization:
         raise HTTPException(
-            status_code=401, detail="Authorization header required", headers={"WWW-Authenticate": "Bearer"}
+            status_code=401, detail="Authorization header required", headers={"WWW-Authenticate": www_authenticate}
         )
 
     # OAuth mode
@@ -122,7 +158,7 @@ async def verify_authentication(authorization: Optional[str], config) -> Optiona
                     scopes=scopes,
                 )
         raise HTTPException(
-            status_code=401, detail="Invalid or expired OAuth token", headers={"WWW-Authenticate": "Bearer"}
+            status_code=401, detail="Invalid or expired OAuth token", headers={"WWW-Authenticate": www_authenticate}
         )
 
     # Bearer token mode (default)
@@ -690,6 +726,10 @@ MCP_ERRORS = {
     "TIMEOUT": -32001,
     "CANCELLED": -32002,
     "RESOURCE_NOT_FOUND": -32003,
+    # 2026-07-28 spec-reserved range (-32020 to -32099)
+    "HEADER_MISMATCH": -32020,
+    "MISSING_CLIENT_CAPABILITY": -32021,
+    "UNSUPPORTED_PROTOCOL_VERSION": -32022,
 }
 
 
@@ -875,12 +915,13 @@ async def handle_initialize(params: Dict[str, Any], session: MCPSession) -> Dict
     session.capabilities = capabilities
     session.client_info = client_info
 
-    # Protocol version negotiation per MCP spec
-    # Server should respond with a version it supports
-    if client_protocol_version in SUPPORTED_PROTOCOL_VERSIONS:
+    # Protocol version negotiation per MCP spec.
+    # Only legacy revisions can be negotiated here — modern revisions (2026-07-28+)
+    # have no initialize handshake, so counter-offer the latest legacy revision instead.
+    if client_protocol_version in LEGACY_PROTOCOL_VERSIONS:
         negotiated_version = client_protocol_version
     else:
-        # Default to latest supported version
+        # Default to latest legacy version
         negotiated_version = MCP_PROTOCOL_VERSION
 
     # Server capabilities - only declare what we actually implement
@@ -926,6 +967,28 @@ async def handle_ping(params: Dict[str, Any], session: MCPSession) -> Dict[str, 
     MUST respond immediately with empty result.
     """
     return {}
+
+
+async def handle_server_discover(params: Dict[str, Any], session: MCPSession) -> Dict[str, Any]:
+    """
+    Handle server/discover per the 2026-07-28 revision: advertise supported protocol
+    versions, capabilities, and identity. Servers MUST implement this RPC; clients MAY
+    call it before any other request (or use it as a backward-compatibility probe).
+    """
+    return {
+        "resultType": "complete",
+        "supportedVersions": SUPPORTED_PROTOCOL_VERSIONS,
+        "capabilities": {
+            "tools": {},
+            "prompts": {},
+            "resources": {},
+            "completions": {},
+        },
+        "instructions": "Connected to Wazuh MCP Server. Use available tools for security operations.",
+        "ttlMs": CACHEABLE_METHOD_TTLS["server/discover"],
+        "cacheScope": "private",
+        "_meta": {META_SERVER_INFO: {"name": "Wazuh MCP Server", "version": __version__}},
+    }
 
 
 async def handle_logging_set_level(params: Dict[str, Any], session: MCPSession) -> Dict[str, Any]:
@@ -2671,11 +2734,14 @@ async def handle_tools_call(params: Dict[str, Any], session: MCPSession) -> Dict
         record_tool_execution(tool_name, _duration, _success)
 
 
-# MCP Method Registry - Full MCP 2025-03-26 Compliance
+# MCP Method Registry — legacy revisions (2024-11-05 through 2025-11-25) plus
+# the modern methods shared with 2026-07-28 (server/discover, tools, prompts, resources)
 MCP_METHODS = {
     # Lifecycle methods
     "initialize": handle_initialize,
     "ping": handle_ping,
+    # Discovery (2026-07-28) — also answered for legacy-era clients probing for era
+    "server/discover": handle_server_discover,
     # Tools methods
     "tools/list": handle_tools_list,
     "tools/call": handle_tools_call,
@@ -2759,6 +2825,159 @@ async def process_mcp_request(request: MCPRequest, session: MCPSession) -> MCPRe
             error_message=str(e),
         )
         return create_error_response(request.id, MCP_ERRORS["INTERNAL_ERROR"], "Internal server error")
+
+
+def _decode_mcp_header_value(value: str) -> str:
+    """Decode the Base64 sentinel format (=?base64?...?=) used for non-ASCII Mcp-Name values."""
+    if value.startswith("=?base64?") and value.endswith("?="):
+        import base64
+
+        try:
+            return base64.b64decode(value[len("=?base64?") : -len("?=")]).decode("utf-8")
+        except Exception:
+            return value
+    return value
+
+
+def _modern_error_response(
+    request_id: Optional[Union[str, int]],
+    code: int,
+    message: str,
+    data: Any = None,
+    status_code: int = 400,
+    headers: Optional[Dict[str, str]] = None,
+) -> JSONResponse:
+    """Build an HTTP JSON-RPC error response for the modern (2026-07-28) request path."""
+    return JSONResponse(
+        content=create_error_response(request_id, code, message, data=data).dict(),
+        status_code=status_code,
+        headers=headers or {},
+    )
+
+
+def extract_modern_meta(body: Any) -> Optional[Dict[str, Any]]:
+    """Return the request's _meta dict when it declares a modern per-request protocol version."""
+    if not isinstance(body, dict):
+        return None
+    params = body.get("params")
+    if not isinstance(params, dict):
+        return None
+    meta = params.get("_meta")
+    if isinstance(meta, dict) and META_PROTOCOL_VERSION in meta:
+        return meta
+    return None
+
+
+async def handle_modern_request(
+    body: Dict[str, Any],
+    meta: Dict[str, Any],
+    request: Request,
+    auth_token: Any,
+    header_version: Optional[str],
+    origin: Optional[str],
+) -> Response:
+    """
+    Serve a modern (2026-07-28) stateless request.
+
+    Modern requests carry their protocol version, client info, and capabilities in
+    params._meta on every request. There is no initialize handshake and no
+    protocol-level session: no Mcp-Session-Id is minted or echoed, and header/body
+    metadata (MCP-Protocol-Version, Mcp-Method, Mcp-Name) is validated per the
+    Streamable HTTP transport rules.
+    """
+    request_id = body.get("id")
+    requested_version = meta.get(META_PROTOCOL_VERSION)
+    response_headers = {"MCP-Protocol-Version": str(requested_version)}
+
+    if requested_version not in MODERN_PROTOCOL_VERSIONS:
+        return _modern_error_response(
+            request_id,
+            MCP_ERRORS["UNSUPPORTED_PROTOCOL_VERSION"],
+            "Unsupported protocol version",
+            data={"supported": SUPPORTED_PROTOCOL_VERSIONS, "requested": requested_version},
+        )
+
+    method = body.get("method", "")
+
+    # Header ↔ body validation (2026-07-28 Streamable HTTP transport)
+    if header_version != requested_version:
+        return _modern_error_response(
+            request_id,
+            MCP_ERRORS["HEADER_MISMATCH"],
+            f"Header mismatch: MCP-Protocol-Version header {header_version!r} "
+            f"does not match _meta protocol version {requested_version!r}",
+            headers=response_headers,
+        )
+    mcp_method_header = request.headers.get("mcp-method")
+    if mcp_method_header != method:
+        return _modern_error_response(
+            request_id,
+            MCP_ERRORS["HEADER_MISMATCH"],
+            f"Header mismatch: Mcp-Method header {mcp_method_header!r} does not match body method {method!r}",
+            headers=response_headers,
+        )
+    name_field = MCP_NAME_SOURCE_FIELDS.get(method)
+    if name_field:
+        body_name = (body.get("params") or {}).get(name_field)
+        raw_header_name = request.headers.get("mcp-name")
+        decoded_name = _decode_mcp_header_value(raw_header_name) if raw_header_name is not None else None
+        if body_name is None or decoded_name != str(body_name):
+            return _modern_error_response(
+                request_id,
+                MCP_ERRORS["HEADER_MISMATCH"],
+                f"Header mismatch: Mcp-Name header {raw_header_name!r} does not match body {name_field!r} value",
+                headers=response_headers,
+            )
+
+    # The core protocol defines no client-to-server notifications over Streamable HTTP
+    if is_json_rpc_notification(body):
+        return Response(status_code=202, headers=response_headers)
+
+    # Method availability: methods removed in 2026-07-28 (initialize, ping,
+    # logging/setLevel) are not served on the modern path
+    if method in MODERN_REMOVED_METHODS or method not in MCP_METHODS:
+        return _modern_error_response(
+            request_id,
+            MCP_ERRORS["METHOD_NOT_FOUND"],
+            f"Method '{method}' not found",
+            status_code=404,
+            headers=response_headers,
+        )
+
+    # Ephemeral session object for handler compatibility — never stored or echoed
+    session = MCPSession(f"stateless-{uuid.uuid4()}", origin)
+    session.authenticated = True
+    session._auth_token = auth_token
+    session.client_info = meta.get(META_CLIENT_INFO) or {}
+    session.capabilities = meta.get(META_CLIENT_CAPABILITIES) or {}
+
+    try:
+        mcp_request = MCPRequest(**body)
+    except ValidationError as e:
+        return _modern_error_response(
+            request_id,
+            MCP_ERRORS["INVALID_REQUEST"],
+            f"Invalid MCP request: {e}",
+            headers=response_headers,
+        )
+
+    mcp_response = await process_mcp_request(mcp_request, session)
+    payload = mcp_response.dict()
+
+    result = payload.get("result")
+    if isinstance(result, dict):
+        # Every 2026-07-28 result carries resultType; list/read results also carry
+        # CacheableResult freshness hints, and serverInfo identifies the server
+        result.setdefault("resultType", "complete")
+        ttl_ms = CACHEABLE_METHOD_TTLS.get(method)
+        if ttl_ms is not None:
+            result.setdefault("ttlMs", ttl_ms)
+            result.setdefault("cacheScope", "private")
+        result_meta = result.setdefault("_meta", {})
+        if isinstance(result_meta, dict):
+            result_meta.setdefault(META_SERVER_INFO, {"name": "Wazuh MCP Server", "version": __version__})
+
+    return JSONResponse(content=payload, headers=response_headers)
 
 
 async def generate_sse_events(session: MCPSession, event_id_counter: int = 0, track_connection: bool = False):
@@ -3143,8 +3362,17 @@ async def mcp_streamable_http_endpoint(
     This is the RECOMMENDED endpoint for MCP clients. Legacy /sse remains for backwards compatibility.
     Supports authentication modes: bearer (default), oauth, none (authless)
     """
-    # Validate protocol version per 2025-11-25 spec (strict mode returns 400 for invalid)
-    protocol_version = validate_protocol_version(mcp_protocol_version, strict=True)
+    # Validate protocol version header. Unknown versions get a JSON-RPC
+    # UnsupportedProtocolVersionError body (-32022) so modern (2026-07-28) clients
+    # can pick a mutually supported version and retry.
+    if mcp_protocol_version and mcp_protocol_version not in SUPPORTED_PROTOCOL_VERSIONS:
+        return _modern_error_response(
+            None,
+            MCP_ERRORS["UNSUPPORTED_PROTOCOL_VERSION"],
+            "Unsupported protocol version",
+            data={"supported": SUPPORTED_PROTOCOL_VERSIONS, "requested": mcp_protocol_version},
+        )
+    protocol_version = validate_protocol_version(mcp_protocol_version)
 
     # Verify authentication based on configured mode
     auth_token = await verify_authentication(authorization, config)
@@ -3166,7 +3394,25 @@ async def mcp_streamable_http_endpoint(
     _status_code = 200  # Track actual status code for metrics
 
     try:
-        # Session validation per MCP Streamable HTTP spec:
+        # Parse POST bodies first: modern (2026-07-28) requests are stateless and
+        # bypass legacy session handling entirely
+        body = None
+        if request.method == "POST":
+            try:
+                body = await request.json()
+            except json.JSONDecodeError:
+                return JSONResponse(
+                    content=create_error_response(None, MCP_ERRORS["PARSE_ERROR"], "Invalid JSON").dict(),
+                    status_code=400,
+                )
+            modern_meta = extract_modern_meta(body)
+            if modern_meta is not None:
+                # Modern era: no session is minted or echoed; Mcp-Session-Id is ignored
+                return await handle_modern_request(
+                    body, modern_meta, request, auth_token, mcp_protocol_version, origin
+                )
+
+        # Legacy era — session validation per MCP Streamable HTTP spec:
         # If client provides session ID but session doesn't exist, return 404
         if mcp_session_id:
             existing_session = await sessions.get(mcp_session_id)
@@ -3215,17 +3461,8 @@ async def mcp_streamable_http_endpoint(
                     status_code=405, detail="GET requires Accept: text/event-stream header for SSE stream"
                 )
 
-        # Handle POST request (JSON-RPC)
+        # Handle POST request (JSON-RPC) — body already parsed above
         elif request.method == "POST":
-            try:
-                body = await request.json()
-            except json.JSONDecodeError:
-                return JSONResponse(
-                    content=create_error_response(None, MCP_ERRORS["PARSE_ERROR"], "Invalid JSON").dict(),
-                    status_code=400,
-                    headers=response_headers,
-                )
-
             # Handle batch messages per MCP Streamable HTTP spec
             if isinstance(body, list):
                 if not body:
@@ -3484,6 +3721,27 @@ async def oauth_metadata(request: Request):
         raise HTTPException(status_code=404, detail="OAuth not enabled. Set AUTH_MODE=oauth to enable.")
 
     return JSONResponse(_oauth_manager.get_metadata(request))
+
+
+# OAuth 2.0 Protected Resource Metadata (RFC 9728) — required by the MCP
+# authorization spec since 2025-06-18 and carried forward in 2026-07-28
+@app.get("/.well-known/oauth-protected-resource")
+async def oauth_protected_resource_metadata(request: Request):
+    """Protected resource metadata so clients can locate the authorization server."""
+    global _oauth_manager
+    if not config.is_oauth or not _oauth_manager:
+        raise HTTPException(status_code=404, detail="OAuth not enabled. Set AUTH_MODE=oauth to enable.")
+
+    issuer = _oauth_manager.get_issuer_url(request)
+    return JSONResponse(
+        {
+            "resource": f"{issuer}/mcp",
+            "authorization_servers": [issuer],
+            "bearer_methods_supported": ["header"],
+            "scopes_supported": ["wazuh:read", "wazuh:write"],
+            "resource_documentation": f"{issuer}/docs",
+        }
+    )
 
 
 # Authentication endpoint for API key validation
