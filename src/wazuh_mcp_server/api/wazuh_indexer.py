@@ -38,6 +38,7 @@ class WazuhIndexerClient:
         verify_ssl: bool = True,
         timeout: int = 30,
         use_ssl: bool = True,
+        ccs_prefix: str = "",
     ):
         # Detect scheme from the host prefix before stripping it; an explicit http://
         # prefix wins over use_ssl so an OpenSearch node served over plain HTTP works.
@@ -54,6 +55,13 @@ class WazuhIndexerClient:
         self._initialized = False
         self._init_lock = asyncio.Lock()
         self._circuit_breaker = None  # Initialized lazily to avoid import-time fastapi dependency
+        # Cross-Cluster Search: prefix index patterns with a remote cluster name
+        # (e.g. "eu" → "eu:wazuh-alerts-*", "*" → all configured remote clusters)
+        self.ccs_prefix = ccs_prefix.strip().rstrip(":") if ccs_prefix else ""
+
+    def _qualified(self, index: str) -> str:
+        """Qualify an index pattern with the CCS remote-cluster prefix when configured."""
+        return f"{self.ccs_prefix}:{index}" if self.ccs_prefix else index
 
     @staticmethod
     def _normalize_host(host: str) -> str:
@@ -184,7 +192,7 @@ class WazuhIndexerClient:
         """Execute the actual search request (called within circuit breaker)."""
         await self._ensure_initialized()
 
-        url = f"{self.base_url}/{index}/_search"
+        url = f"{self.base_url}/{self._qualified(index)}/_search"
         body: Dict[str, Any] = {"query": query, "size": size}
         if sort:
             body["sort"] = sort
@@ -223,7 +231,7 @@ class WazuhIndexerClient:
         """
         await self._ensure_initialized()
 
-        url = f"{self.base_url}/{index}/_search"
+        url = f"{self.base_url}/{self._qualified(index)}/_search"
         try:
             response = await self.client.post(url, json=body, headers={"Content-Type": "application/json"})
             response.raise_for_status()
@@ -544,7 +552,7 @@ class WazuhIndexerClient:
     async def _execute_agg_search(self) -> Dict[str, Any]:
         """Execute vulnerability aggregation query (called within circuit breaker)."""
         await self._ensure_initialized()
-        url = f"{self.base_url}/{VULNERABILITY_INDEX}/_search"
+        url = f"{self.base_url}/{self._qualified(VULNERABILITY_INDEX)}/_search"
         body = {
             "size": 0,
             "aggs": {

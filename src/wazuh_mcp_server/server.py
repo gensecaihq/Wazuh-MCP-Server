@@ -544,10 +544,9 @@ async def lifespan(app: FastAPI):
             await sessions._store.close()
         logger.info("Sessions cleared")
 
-        # Close Wazuh client to release HTTP connections
-        if wazuh_client and hasattr(wazuh_client, "close"):
-            await wazuh_client.close()
-            logger.info("Wazuh client closed")
+        # Close Wazuh clients (all configured clusters) to release HTTP connections
+        await cluster_registry.close()
+        logger.info("Wazuh client(s) closed")
 
         # Cleanup rate limiter
         if hasattr(rate_limiter, "cleanup"):
@@ -602,6 +601,12 @@ wazuh_config = WazuhConfig(
 
 # Initialize Wazuh client
 wazuh_client = WazuhClient(wazuh_config)
+
+# Multi-cluster registry (opt-in via WAZUH_CLUSTERS_FILE / ./config/clusters.json).
+# Without a clusters file this holds only the env-configured client and nothing changes.
+from wazuh_mcp_server.clusters import load_cluster_registry  # noqa: E402
+
+cluster_registry = load_cluster_registry(wazuh_client)
 
 
 async def get_wazuh_client() -> WazuhClient:
@@ -2161,6 +2166,26 @@ async def handle_tools_list(params: Dict[str, Any], session: MCPSession) -> Dict
         },
     ]
 
+    # Multi-cluster mode: advertise the cluster_id parameter on every tool and the
+    # list_wazuh_clusters tool. Single-cluster deployments see no schema change.
+    if cluster_registry.multi_cluster:
+        cluster_property = {
+            "type": "string",
+            "description": (
+                f"Target Wazuh cluster (default: {cluster_registry.default_id}). "
+                "Use list_wazuh_clusters to see configured clusters."
+            ),
+        }
+        for t in tools:
+            t["inputSchema"].setdefault("properties", {})["cluster_id"] = cluster_property
+        tools.append(
+            {
+                "name": "list_wazuh_clusters",
+                "description": "List the configured Wazuh clusters and the default cluster for tool routing",
+                "inputSchema": {"type": "object", "properties": {}, "required": []},
+            }
+        )
+
     # Filter tools by session scopes: hide write tools from read-only or unknown tokens
     auth_token = getattr(session, "_auth_token", None)
     if not auth_token or not auth_token.has_scope("wazuh:write"):
@@ -2180,6 +2205,14 @@ async def handle_tools_call(params: Dict[str, Any], session: MCPSession) -> Dict
 
     # Validate tool name
     validate_input(tool_name, max_length=100)
+
+    # Multi-cluster routing (opt-in via clusters file): an optional cluster_id argument
+    # selects the target cluster; absent → default cluster. This local intentionally
+    # shadows the module-level single-cluster client for the rest of this handler.
+    cluster_id = arguments.pop("cluster_id", None) if isinstance(arguments, dict) else None
+    if cluster_id is not None and not isinstance(cluster_id, str):
+        raise ToolValidationError("cluster_id", "must be a string", "Use an id from list_wazuh_clusters")
+    wazuh_client = cluster_registry.get(cluster_id)
 
     # Scope enforcement: check if the token has the required scope for this tool.
     # If auth_token is missing (should not happen in normal flow), deny write tools by default.
@@ -2705,6 +2738,15 @@ async def handle_tools_call(params: Dict[str, Any], session: MCPSession) -> Dict
             result = await wazuh_client.host_allow(agent_id, src_ip)
             _success = True
             return _tool_result(f"Host Allow Result:\n{json.dumps(result, indent=2, default=str)}")
+
+        elif tool_name == "list_wazuh_clusters":
+            clusters_info = {
+                "multi_cluster": cluster_registry.multi_cluster,
+                "default_cluster": cluster_registry.default_id,
+                "clusters": cluster_registry.cluster_ids,
+            }
+            _success = True
+            return _tool_result(f"Configured Wazuh Clusters:\n{json.dumps(clusters_info, indent=2)}")
 
         else:
             raise ValueError(f"Unknown tool: {tool_name}. Use 'tools/list' to see available tools.")
@@ -3668,6 +3710,11 @@ async def health_check():
                 "transport": {
                     "streamable_http": "enabled",
                     "legacy_sse": "enabled",
+                },
+                "clusters": {
+                    "multi_cluster": cluster_registry.multi_cluster,
+                    "default": cluster_registry.default_id,
+                    "configured": cluster_registry.cluster_ids,
                 },
                 "authentication": auth_info,
                 "services": {"wazuh_manager": wazuh_status, "wazuh_indexer": indexer_status, "mcp": "healthy"},

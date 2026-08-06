@@ -1,0 +1,40 @@
+{
+  "default_cluster": "prod-eu",
+  "clusters": [
+    {
+      "id": "prod-eu",
+      "wazuh_host": "wazuh-eu.example.com",
+      "wazuh_port": 55000,
+      "wazuh_user": "${WAZUH_EU_USER}",
+      "wazuh_pass": "${WAZUH_EU_PASS}",
+      "verify_ssl": true,
+      "indexer_host": "ccs-coordinator.example.com",
+      "indexer_port": 9200,
+      "indexer_user": "${INDEXER_USER}",
+      "indexer_pass": "${INDEXER_PASS}",
+      "indexer_ssl": true,
+      "indexer_verify_ssl": true,
+      "ccs_prefix": "eu"
+    },
+    {
+      "id": "prod-us",
+      "wazuh_host": "wazuh-us.example.com",
+      "wazuh_user": "${WAZUH_US_USER}",
+      "wazuh_pass": "${WAZUH_US_PASS}",
+      "indexer_host": "ccs-coordinator.example.com",
+      "indexer_user": "${INDEXER_USER}",
+      "indexer_pass": "${INDEXER_PASS}",
+      "ccs_prefix": "us"
+    },
+    {
+      "id": "all",
+      "wazuh_host": "wazuh-eu.example.com",
+      "wazuh_user": "${WAZUH_EU_USER}",
+      "wazuh_pass": "${WAZUH_EU_PASS}",
+      "indexer_host": "ccs-coordinator.example.com",
+      "indexer_user": "${INDEXER_USER}",
+      "indexer_pass": "${INDEXER_PASS}",
+      "ccs_prefix": "*"
+    }
+  ]
+}

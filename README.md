@@ -211,8 +211,24 @@ python -c "import secrets; print('wazuh_' + secrets.token_urlsafe(32))"
 | `YDC_API_KEY` | — | Optional You.com API key. Enables the `search_external_context` tool |
 | `YDC_BASE_URL` | `https://ydc-index.io` | Optional You.com Search API base URL |
 | `YDC_VERIFY_SSL` | `true` | Verify You.com TLS certificates independently of Wazuh |
+| `WAZUH_CLUSTERS_FILE` | `./config/clusters.json` | Optional multi-cluster topology file (see below) |
 
 > Full reference: [Configuration Guide](docs/configuration.md)
+
+### Multi-Cluster (optional)
+
+Managing several Wazuh deployments? Drop a `clusters.json` next to your config (see
+[`config/clusters.json.example`](config/clusters.json.example)) and every tool gains an
+optional `cluster_id` argument plus a `list_wazuh_clusters` tool:
+
+- **No `clusters.json`** → single-cluster behavior from env vars, exactly as before.
+- **With `clusters.json`** → named clusters, each with its own Manager (and optionally
+  Indexer) credentials; `"${ENV_VAR}"` values are resolved from the environment so secrets
+  stay out of the file. The env-configured cluster remains reachable as `default`.
+- **Cross-Cluster Search** → point clusters at a shared OpenSearch CCS coordinator and set
+  `ccs_prefix` (the remote-cluster name); alert/vulnerability queries become
+  `eu:wazuh-alerts-*`. An entry with `"ccs_prefix": "*"` gives you an `all` pseudo-cluster
+  that searches every remote cluster at once.
 
 ---
 
