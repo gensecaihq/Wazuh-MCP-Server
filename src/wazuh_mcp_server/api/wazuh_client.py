@@ -171,6 +171,15 @@ class WazuhClient:
             expected_exception=(ConnectionError, httpx.ConnectError, httpx.TimeoutException, httpx.HTTPStatusError),
         )
         self._circuit_breaker = CircuitBreaker(circuit_config)
+        # Separate breaker for the optional You.com integration — an external search
+        # outage must never open the circuit that gates Wazuh API calls
+        self._youcom_circuit_breaker = CircuitBreaker(
+            CircuitBreakerConfig(
+                failure_threshold=5,
+                recovery_timeout=60,
+                expected_exception=(ConnectionError, httpx.ConnectError, httpx.TimeoutException, httpx.HTTPStatusError),
+            )
+        )
 
         # Initialize Wazuh Indexer client if configured (required for Wazuh 4.8.0+)
         self._indexer_client: Optional[WazuhIndexerClient] = None
@@ -946,10 +955,9 @@ class WazuhClient:
         return {"data": {"query": query, "enabled": True, "results": results, "search_uuid": payload.get("metadata", {}).get("search_uuid")}}
 
     async def _search_youcom(self, query: str, count: int) -> Dict[str, Any]:
-        """Search You.com with the same resilience wrapper used for Wazuh requests."""
+        """Search You.com behind its own circuit breaker, isolated from Wazuh API resilience state."""
         async with self._rate_limiter:
-            await self._rate_limit_check()
-            return await self._circuit_breaker._call(self._execute_youcom_search, query, count)
+            return await self._youcom_circuit_breaker._call(self._execute_youcom_search, query, count)
 
     async def _execute_youcom_search(self, query: str, count: int) -> Dict[str, Any]:
         params = {"query": query, "count": count, "safesearch": "moderate", "livecrawl": "web"}
@@ -957,7 +965,7 @@ class WazuhClient:
         async with httpx.AsyncClient(timeout=self.config.request_timeout_seconds, verify=self._youcom_verify_ssl) as client:
             response = await client.get(url, params=params, headers={"X-API-Key": self._youcom_api_key})
         if response.status_code >= 400:
-            raise ValueError(f"You.com Search API error {response.status_code}: {response.text}")
+            raise ValueError(f"You.com Search API error {response.status_code}: {response.text[:200]}")
         return response.json()
 
     async def perform_risk_assessment(self, agent_id: str = None) -> Dict[str, Any]:
