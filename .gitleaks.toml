@@ -7,6 +7,12 @@ useDefault = true
 
 [allowlist]
 description = "Documentation examples and test fixtures — placeholder credentials only"
+# Test files legitimately contain fabricated credentials as fixtures; do not scan them.
+# (TruffleHog with --only-verified still runs across the repo and would flag a real,
+# verifiable secret regardless.)
+paths = [
+  '''tests/.*''',
+]
 regexes = [
   '''your[-_]?jwt[-_]?token''',
   '''YOUR_JWT_TOKEN''',
@@ -19,6 +25,9 @@ regexes = [
   '''USERNAME:PASSWORD''',
   '''your-username:your-password''',
   '''mcp-api-user:your-secure-password-here''',
+  # Test fixtures (placeholder secrets in unit tests)
+  '''test-secret-key-at-least-32-characters-long''',
+  '''abcdef123456''',
   # Truncated JWT header examples in docs (standard header segment + ellipsis)
   '''eyJ0eXAiOiJKV1Q[A-Za-z0-9+/=]*\.{3}''',
   '''eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9\.{3}''',

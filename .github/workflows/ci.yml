@@ -6,6 +6,11 @@ on:
   pull_request:
     branches: [ main ]
 
+# Cancel superseded runs on the same ref so rapid pushes don't pile up in the queue.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   lint:
     name: Lint

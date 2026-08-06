@@ -9,8 +9,10 @@ on:
   workflow_dispatch:
 
 concurrency:
+  # Per-ref group: rapid pushes to the same branch supersede, but tag builds
+  # (each its own ref) are never cancelled by a branch push.
   group: docker-publish-${{ github.ref }}
-  cancel-in-progress: false
+  cancel-in-progress: true
 
 permissions:
   contents: read

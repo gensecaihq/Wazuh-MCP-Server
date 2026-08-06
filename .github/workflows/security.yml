@@ -5,12 +5,17 @@ on:
     - cron: '0 0 * * 0'  # Weekly on Sunday
   workflow_dispatch:
   push:
-    branches: [ main, mcp-remote ]
+    branches: [ main ]
     paths:
       - '**/requirements*.txt'
       - '**/pyproject.toml'
       - '**/Dockerfile'
       - '**/*.py'
+
+# Cancel superseded runs on the same ref so rapid pushes don't pile up in the queue.
+concurrency:
+  group: security-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   dependency-audit:
