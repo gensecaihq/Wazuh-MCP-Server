@@ -75,7 +75,8 @@ class CircuitBreaker:
                     if self._half_open_trial_in_progress:
                         # Another coroutine is already running the trial request — reject this one
                         raise HTTPException(
-                            status_code=503, detail="Service temporarily unavailable - circuit breaker half-open trial in progress"
+                            status_code=503,
+                            detail="Service temporarily unavailable - circuit breaker half-open trial in progress",
                         )
                     self.state = CircuitBreakerState.HALF_OPEN
                     self._half_open_trial_in_progress = True
@@ -91,7 +92,8 @@ class CircuitBreaker:
             elif self.state == CircuitBreakerState.HALF_OPEN and self._half_open_trial_in_progress:
                 # HALF_OPEN with a trial already running — reject concurrent requests
                 raise HTTPException(
-                    status_code=503, detail="Service temporarily unavailable - circuit breaker half-open trial in progress"
+                    status_code=503,
+                    detail="Service temporarily unavailable - circuit breaker half-open trial in progress",
                 )
 
         try:

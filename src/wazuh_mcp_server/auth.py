@@ -123,7 +123,9 @@ class AuthManager:
                     scopes=self._configured_key_scopes(),
                 )
                 self.api_keys[key_id] = key_obj
-                logger.info(f"Loaded API key from MCP_API_KEY environment variable (scopes: {' '.join(key_obj.scopes)})")
+                logger.info(
+                    f"Loaded API key from MCP_API_KEY environment variable (scopes: {' '.join(key_obj.scopes)})"
+                )
                 return
             else:
                 logger.warning(

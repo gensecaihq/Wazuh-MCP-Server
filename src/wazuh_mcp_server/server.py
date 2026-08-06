@@ -131,9 +131,7 @@ async def verify_authentication(authorization: Optional[str], config) -> Optiona
     # issuer URL is configured — enables automatic authorization server discovery
     www_authenticate = "Bearer"
     if config.is_oauth and getattr(config, "OAUTH_ISSUER_URL", ""):
-        www_authenticate = (
-            f'Bearer resource_metadata="{config.OAUTH_ISSUER_URL}/.well-known/oauth-protected-resource"'
-        )
+        www_authenticate = f'Bearer resource_metadata="{config.OAUTH_ISSUER_URL}/.well-known/oauth-protected-resource"'
 
     # Authentication required
     if not authorization:
@@ -809,17 +807,23 @@ MAX_BATCH_SIZE = 100
 
 # Patterns to redact from output text (credentials, tokens, keys in log lines)
 _OUTPUT_REDACT_PATTERNS = [
-    _re.compile(r'(?i)(password|passwd|pwd)\s*[=:]\s*\S+'),
-    _re.compile(r'(?i)(api[_-]?key|secret|token)\s*[=:]\s*\S+'),
-    _re.compile(r'(?i)Authorization:\s*.+'),
+    _re.compile(r"(?i)(password|passwd|pwd)\s*[=:]\s*\S+"),
+    _re.compile(r"(?i)(api[_-]?key|secret|token)\s*[=:]\s*\S+"),
+    _re.compile(r"(?i)Authorization:\s*.+"),
 ]
 
 
 def _sanitize_output_text(text: str) -> str:
     """Redact credentials/tokens from log text before returning to MCP clients."""
     for pattern in _OUTPUT_REDACT_PATTERNS:
-        text = pattern.sub(lambda m: m.group().split("=")[0] + "=[REDACTED]" if "=" in m.group()
-                           else m.group().split(":")[0] + ": [REDACTED]", text)
+        text = pattern.sub(
+            lambda m: (
+                m.group().split("=")[0] + "=[REDACTED]"
+                if "=" in m.group()
+                else m.group().split(":")[0] + ": [REDACTED]"
+            ),
+            text,
+        )
     return text
 
 
@@ -1333,7 +1337,9 @@ async def handle_resources_read(params: Dict[str, Any], session: MCPSession) -> 
         else:
             raise ValueError(f"Resource not found: {uri}")
 
-        return {"contents": [{"uri": uri, "mimeType": "application/json", "text": json.dumps(data, indent=2, default=str)}]}
+        return {
+            "contents": [{"uri": uri, "mimeType": "application/json", "text": json.dumps(data, indent=2, default=str)}]
+        }
 
     except Exception as e:
         logger.error(f"Error reading resource {uri}: {e}")
@@ -1417,22 +1423,24 @@ async def handle_completion_complete(params: Dict[str, Any], session: MCPSession
 
 # Tool scope mapping: tools requiring write access (active response, rollback, restart)
 # All other tools only require wazuh:read
-WRITE_SCOPE_TOOLS = frozenset({
-    "wazuh_block_ip",
-    "wazuh_isolate_host",
-    "wazuh_kill_process",
-    "wazuh_disable_user",
-    "wazuh_quarantine_file",
-    "wazuh_active_response",
-    "wazuh_firewall_drop",
-    "wazuh_host_deny",
-    "wazuh_restart",
-    "wazuh_unisolate_host",
-    "wazuh_enable_user",
-    "wazuh_restore_file",
-    "wazuh_firewall_allow",
-    "wazuh_host_allow",
-})
+WRITE_SCOPE_TOOLS = frozenset(
+    {
+        "wazuh_block_ip",
+        "wazuh_isolate_host",
+        "wazuh_kill_process",
+        "wazuh_disable_user",
+        "wazuh_quarantine_file",
+        "wazuh_active_response",
+        "wazuh_firewall_drop",
+        "wazuh_host_deny",
+        "wazuh_restart",
+        "wazuh_unisolate_host",
+        "wazuh_enable_user",
+        "wazuh_restore_file",
+        "wazuh_firewall_allow",
+        "wazuh_host_allow",
+    }
+)
 
 # Audit logger for destructive operations
 audit_logger = logging.getLogger("wazuh_mcp_server.audit")
@@ -1465,8 +1473,14 @@ async def handle_tools_list(params: Dict[str, Any], session: MCPSession) -> Dict
                         "maxItems": 20,
                         "description": "Filter by rule group(s), e.g. ['authentication_failed', 'firewall'] — matches alerts belonging to ANY listed group",
                     },
-                    "timestamp_start": {"type": "string", "description": "Start timestamp — ISO 8601 (YYYY-MM-DDTHH:MM:SSZ) or relative date math (e.g. now-24h, now-7d)"},
-                    "timestamp_end": {"type": "string", "description": "End timestamp — ISO 8601 (YYYY-MM-DDTHH:MM:SSZ) or relative date math (e.g. now, now-1h)"},
+                    "timestamp_start": {
+                        "type": "string",
+                        "description": "Start timestamp — ISO 8601 (YYYY-MM-DDTHH:MM:SSZ) or relative date math (e.g. now-24h, now-7d)",
+                    },
+                    "timestamp_end": {
+                        "type": "string",
+                        "description": "End timestamp — ISO 8601 (YYYY-MM-DDTHH:MM:SSZ) or relative date math (e.g. now, now-1h)",
+                    },
                     "compact": {
                         "type": "boolean",
                         "default": True,
@@ -1482,7 +1496,11 @@ async def handle_tools_list(params: Dict[str, Any], session: MCPSession) -> Dict
             "inputSchema": {
                 "type": "object",
                 "properties": {
-                    "time_range": {"type": "string", "enum": ["1h", "6h", "12h", "1d", "24h", "7d", "30d"], "default": "24h"},
+                    "time_range": {
+                        "type": "string",
+                        "enum": ["1h", "6h", "12h", "1d", "24h", "7d", "30d"],
+                        "default": "24h",
+                    },
                     "group_by": {"type": "string", "default": "rule.level"},
                 },
                 "required": [],
@@ -1494,7 +1512,11 @@ async def handle_tools_list(params: Dict[str, Any], session: MCPSession) -> Dict
             "inputSchema": {
                 "type": "object",
                 "properties": {
-                    "time_range": {"type": "string", "enum": ["1h", "6h", "12h", "1d", "24h", "7d", "30d"], "default": "24h"},
+                    "time_range": {
+                        "type": "string",
+                        "enum": ["1h", "6h", "12h", "1d", "24h", "7d", "30d"],
+                        "default": "24h",
+                    },
                     "min_frequency": {"type": "integer", "minimum": 1, "default": 5},
                 },
                 "required": [],
@@ -1506,10 +1528,30 @@ async def handle_tools_list(params: Dict[str, Any], session: MCPSession) -> Dict
             "inputSchema": {
                 "type": "object",
                 "properties": {
-                    "timestamp_start": {"type": "string", "description": "Start of window — ISO 8601 or date math (e.g. now-24h, now-7d). Default now-24h.", "default": "now-24h"},
-                    "timestamp_end": {"type": "string", "description": "End of window — ISO 8601 or date math (e.g. now). Default now.", "default": "now"},
-                    "top_rules": {"type": "integer", "minimum": 1, "maximum": 500, "default": 50, "description": "How many top rules to return"},
-                    "top_agents": {"type": "integer", "minimum": 1, "maximum": 500, "default": 50, "description": "How many top agents to return"},
+                    "timestamp_start": {
+                        "type": "string",
+                        "description": "Start of window — ISO 8601 or date math (e.g. now-24h, now-7d). Default now-24h.",
+                        "default": "now-24h",
+                    },
+                    "timestamp_end": {
+                        "type": "string",
+                        "description": "End of window — ISO 8601 or date math (e.g. now). Default now.",
+                        "default": "now",
+                    },
+                    "top_rules": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 500,
+                        "default": 50,
+                        "description": "How many top rules to return",
+                    },
+                    "top_agents": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 500,
+                        "default": 50,
+                        "description": "How many top agents to return",
+                    },
                 },
                 "required": [],
             },
@@ -1520,12 +1562,22 @@ async def handle_tools_list(params: Dict[str, Any], session: MCPSession) -> Dict
             "inputSchema": {
                 "type": "object",
                 "properties": {
-                    "query": {"type": "string", "description": "Free-text search query (Lucene syntax: AND, OR, NOT, field:value, wildcards, quoted phrases). Searched across all alert fields via Elasticsearch query_string."},
-                    "time_range": {"type": "string", "enum": ["1h", "6h", "12h", "1d", "24h", "7d", "30d"], "default": "24h"},
+                    "query": {
+                        "type": "string",
+                        "description": "Free-text search query (Lucene syntax: AND, OR, NOT, field:value, wildcards, quoted phrases). Searched across all alert fields via Elasticsearch query_string.",
+                    },
+                    "time_range": {
+                        "type": "string",
+                        "enum": ["1h", "6h", "12h", "1d", "24h", "7d", "30d"],
+                        "default": "24h",
+                    },
                     "limit": {"type": "integer", "minimum": 1, "maximum": 1000, "default": 100},
                     "rule_id": {"type": "string", "description": "Filter by Wazuh rule ID (e.g., '5710', '100002')"},
                     "agent_id": {"type": "string", "description": "Filter by Wazuh agent ID (e.g., '001', '1234')"},
-                    "level": {"type": "string", "description": "Minimum rule severity level (e.g., '10' for level >= 10, '12+' for level >= 12)"},
+                    "level": {
+                        "type": "string",
+                        "description": "Minimum rule severity level (e.g., '10' for level >= 10, '12+' for level >= 12)",
+                    },
                     "srcip": {"type": "string", "description": "Filter by source IP address (data.srcip)"},
                     "dstip": {"type": "string", "description": "Filter by destination IP address (data.dstip)"},
                     "compact": {
@@ -1711,7 +1763,11 @@ async def handle_tools_list(params: Dict[str, Any], session: MCPSession) -> Dict
                 "type": "object",
                 "properties": {
                     "limit": {"type": "integer", "minimum": 1, "maximum": 50, "default": 10},
-                    "time_range": {"type": "string", "enum": ["1h", "6h", "12h", "1d", "24h", "7d", "30d"], "default": "24h"},
+                    "time_range": {
+                        "type": "string",
+                        "enum": ["1h", "6h", "12h", "1d", "24h", "7d", "30d"],
+                        "default": "24h",
+                    },
                 },
                 "required": [],
             },
@@ -1817,7 +1873,7 @@ async def handle_tools_list(params: Dict[str, Any], session: MCPSession) -> Dict
                     "policy_id": {
                         "type": "string",
                         "description": "SCA policy ID (e.g. 'cis_debian10', 'cis_win2019'). "
-                                       "Obtain from get_iso27001_control_detail or run_compliance_check.",
+                        "Obtain from get_iso27001_control_detail or run_compliance_check.",
                     },
                 },
                 "required": ["agent_id", "policy_id"],
@@ -2318,7 +2374,9 @@ async def handle_tools_call(params: Dict[str, Any], session: MCPSession) -> Dict
             return _tool_result(f"Alert Patterns:\n{json.dumps(result, indent=2, default=str)}")
 
         elif tool_name == "get_alerts_aggregated":
-            timestamp_start = validate_timestamp(arguments.get("timestamp_start"), param_name="timestamp_start") or "now-24h"
+            timestamp_start = (
+                validate_timestamp(arguments.get("timestamp_start"), param_name="timestamp_start") or "now-24h"
+            )
             timestamp_end = validate_timestamp(arguments.get("timestamp_end"), param_name="timestamp_end") or "now"
             top_rules = validate_limit(
                 arguments.get("top_rules"), min_val=1, max_val=500, default=50, param_name="top_rules"
@@ -2358,15 +2416,22 @@ async def handle_tools_call(params: Dict[str, Any], session: MCPSession) -> Dict
                     )
 
             result = await wazuh_client.search_security_events(
-                query, time_range, limit,
-                rule_id=rule_id, agent_id=agent_id, level=level,
-                srcip=srcip, dstip=dstip,
+                query,
+                time_range,
+                limit,
+                rule_id=rule_id,
+                agent_id=agent_id,
+                level=level,
+                srcip=srcip,
+                dstip=dstip,
             )
             if compact:
                 result = _compact_alerts_result(result)
             result = _add_truncation_warning(result, limit)
             _success = True
-            return _tool_result(f"Security Events:\n{json.dumps(result, indent=2 if not compact else None, default=str)}")
+            return _tool_result(
+                f"Security Events:\n{json.dumps(result, indent=2 if not compact else None, default=str)}"
+            )
 
         # Agent Management Tools
         elif tool_name == "get_wazuh_agents":
@@ -2421,7 +2486,9 @@ async def handle_tools_call(params: Dict[str, Any], session: MCPSession) -> Dict
                 result = _compact_vulns_result(result)
             result = _add_truncation_warning(result, limit)
             _success = True
-            return _tool_result(f"Vulnerabilities:\n{json.dumps(result, indent=2 if not compact else None, default=str)}")
+            return _tool_result(
+                f"Vulnerabilities:\n{json.dumps(result, indent=2 if not compact else None, default=str)}"
+            )
 
         elif tool_name == "get_wazuh_critical_vulnerabilities":
             limit = validate_limit(arguments.get("limit"), max_val=500, default=50, param_name="limit")
@@ -2432,7 +2499,9 @@ async def handle_tools_call(params: Dict[str, Any], session: MCPSession) -> Dict
                 result = _compact_vulns_result(result)
             result = _add_truncation_warning(result, limit)
             _success = True
-            return _tool_result(f"Critical Vulnerabilities:\n{json.dumps(result, indent=2 if not compact else None, default=str)}")
+            return _tool_result(
+                f"Critical Vulnerabilities:\n{json.dumps(result, indent=2 if not compact else None, default=str)}"
+            )
 
         elif tool_name == "get_wazuh_vulnerability_summary":
             time_range = validate_time_range(arguments.get("time_range"))
@@ -2509,7 +2578,9 @@ async def handle_tools_call(params: Dict[str, Any], session: MCPSession) -> Dict
             agent_id = validate_agent_id(arguments.get("agent_id"))
             result = await wazuh_client.get_iso27001_control_detail(control_id, agent_id=agent_id)
             _success = True
-            return _tool_result(f"ISO 27001 Control Detail [{control_id}]:\n{json.dumps(result, indent=2, default=str)}")
+            return _tool_result(
+                f"ISO 27001 Control Detail [{control_id}]:\n{json.dumps(result, indent=2, default=str)}"
+            )
 
         elif tool_name == "get_sca_policy_checks":
             agent_id = validate_agent_id(arguments.get("agent_id"), required=True)
@@ -3237,9 +3308,7 @@ async def mcp_endpoint(
                         continue
                     try:
                         if not isinstance(item, dict):
-                            raise ValidationError.from_exception_data(
-                                "MCPRequest", line_errors=[], input_type="python"
-                            )
+                            raise ValidationError.from_exception_data("MCPRequest", line_errors=[], input_type="python")
                         mcp_request = MCPRequest(**item)
                         response = await process_mcp_request(mcp_request, session)
                         responses.append(response.dict())
@@ -3450,9 +3519,7 @@ async def mcp_streamable_http_endpoint(
             modern_meta = extract_modern_meta(body)
             if modern_meta is not None:
                 # Modern era: no session is minted or echoed; Mcp-Session-Id is ignored
-                return await handle_modern_request(
-                    body, modern_meta, request, auth_token, mcp_protocol_version, origin
-                )
+                return await handle_modern_request(body, modern_meta, request, auth_token, mcp_protocol_version, origin)
 
         # Legacy era — session validation per MCP Streamable HTTP spec:
         # If client provides session ID but session doesn't exist, return 404

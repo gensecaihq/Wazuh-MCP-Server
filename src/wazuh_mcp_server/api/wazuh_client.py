@@ -446,13 +446,10 @@ class WazuhClient:
             for item in failed_items:
                 err = item.get("error", {})
                 agent_ids = item.get("id", [])
-                errors.append(
-                    f"agents {agent_ids}: code {err.get('code')} - {err.get('message', 'unknown error')}"
-                )
+                errors.append(f"agents {agent_ids}: code {err.get('code')} - {err.get('message', 'unknown error')}")
             error_detail = "; ".join(errors) if errors else "no agents affected"
             raise ValueError(
-                f"Active response command failed on all agents "
-                f"(0 succeeded, {total_failed} failed): {error_detail}"
+                f"Active response command failed on all agents " f"(0 succeeded, {total_failed} failed): {error_detail}"
             )
 
         # Log partial failures as warnings but still return success
@@ -644,9 +641,7 @@ class WazuhClient:
                     return data
                 except httpx.HTTPStatusError as retry_err:
                     logger.error(f"Wazuh API request failed after re-auth: {retry_err.response.status_code}")
-                    raise ValueError(
-                        f"Wazuh API error after re-auth for {endpoint}: {retry_err.response.status_code}"
-                    )
+                    raise ValueError(f"Wazuh API error after re-auth for {endpoint}: {retry_err.response.status_code}")
                 except (httpx.ConnectError, httpx.TimeoutException) as retry_err:
                     logger.error(f"Connection lost during re-auth retry for {endpoint}: {retry_err}")
                     raise
@@ -953,7 +948,14 @@ class WazuhClient:
                     "snippets": item.get("snippets", []),
                 }
             )
-        return {"data": {"query": query, "enabled": True, "results": results, "search_uuid": payload.get("metadata", {}).get("search_uuid")}}
+        return {
+            "data": {
+                "query": query,
+                "enabled": True,
+                "results": results,
+                "search_uuid": payload.get("metadata", {}).get("search_uuid"),
+            }
+        }
 
     async def _search_youcom(self, query: str, count: int) -> Dict[str, Any]:
         """Search You.com behind its own circuit breaker, isolated from Wazuh API resilience state."""
@@ -963,7 +965,9 @@ class WazuhClient:
     async def _execute_youcom_search(self, query: str, count: int) -> Dict[str, Any]:
         params = {"query": query, "count": count, "safesearch": "moderate", "livecrawl": "web"}
         url = f"{self._youcom_base_url}/v1/search"
-        async with httpx.AsyncClient(timeout=self.config.request_timeout_seconds, verify=self._youcom_verify_ssl) as client:
+        async with httpx.AsyncClient(
+            timeout=self.config.request_timeout_seconds, verify=self._youcom_verify_ssl
+        ) as client:
             response = await client.get(url, params=params, headers={"X-API-Key": self._youcom_api_key})
         if response.status_code >= 400:
             raise ValueError(f"You.com Search API error {response.status_code}: {response.text[:200]}")
@@ -981,12 +985,14 @@ class WazuhClient:
         total_agents = len(items)
         disconnected = [a for a in items if a.get("status") != "active"]
         if disconnected:
-            risk_factors.append({
-                "factor": "disconnected_agents",
-                "count": len(disconnected),
-                "severity": "high",
-                "details": [{"id": a.get("id"), "name": a.get("name")} for a in disconnected[:10]],
-            })
+            risk_factors.append(
+                {
+                    "factor": "disconnected_agents",
+                    "count": len(disconnected),
+                    "severity": "high",
+                    "details": [{"id": a.get("id"), "name": a.get("name")} for a in disconnected[:10]],
+                }
+            )
 
         # Vulnerability risk
         vuln_data: Dict[str, Any] = {}
@@ -997,7 +1003,9 @@ class WazuhClient:
                 critical = vuln_data.get("critical", 0)
                 high = vuln_data.get("high", 0)
                 if critical > 0:
-                    risk_factors.append({"factor": "critical_vulnerabilities", "count": critical, "severity": "critical"})
+                    risk_factors.append(
+                        {"factor": "critical_vulnerabilities", "count": critical, "severity": "critical"}
+                    )
                 if high > 0:
                     risk_factors.append({"factor": "high_vulnerabilities", "count": high, "severity": "high"})
             except Exception:
@@ -1012,17 +1020,21 @@ class WazuhClient:
                 high_alerts = result.get("data", {}).get("affected_items", [])
                 alert_summary["high_severity_alerts_24h"] = len(high_alerts)
                 if len(high_alerts) > 10:
-                    risk_factors.append({
-                        "factor": "high_severity_alerts",
-                        "count": len(high_alerts),
-                        "severity": "high",
-                    })
+                    risk_factors.append(
+                        {
+                            "factor": "high_severity_alerts",
+                            "count": len(high_alerts),
+                            "severity": "high",
+                        }
+                    )
                 elif len(high_alerts) > 0:
-                    risk_factors.append({
-                        "factor": "elevated_alert_activity",
-                        "count": len(high_alerts),
-                        "severity": "medium",
-                    })
+                    risk_factors.append(
+                        {
+                            "factor": "elevated_alert_activity",
+                            "count": len(high_alerts),
+                            "severity": "medium",
+                        }
+                    )
             except Exception:
                 pass
 
@@ -1038,17 +1050,21 @@ class WazuhClient:
                     if scores:
                         sca_score = int(sum(scores) / len(scores))
                         if sca_score < 50:
-                            risk_factors.append({
-                                "factor": "low_sca_compliance",
-                                "score": sca_score,
-                                "severity": "high",
-                            })
+                            risk_factors.append(
+                                {
+                                    "factor": "low_sca_compliance",
+                                    "score": sca_score,
+                                    "severity": "high",
+                                }
+                            )
                         elif sca_score < 70:
-                            risk_factors.append({
-                                "factor": "moderate_sca_compliance",
-                                "score": sca_score,
-                                "severity": "medium",
-                            })
+                            risk_factors.append(
+                                {
+                                    "factor": "moderate_sca_compliance",
+                                    "score": sca_score,
+                                    "severity": "medium",
+                                }
+                            )
         except Exception:
             pass
 
@@ -1135,22 +1151,24 @@ class WazuhClient:
             affected_count = len(data["affected_agents"])
             threat_score = min(100, int(level * 5 * math.log2(count + 1) * (1 + 0.1 * affected_count)))
 
-            threats.append({
-                "rule_id": rule_id,
-                "description": data["description"],
-                "level": level,
-                "count": count,
-                "threat_score": threat_score,
-                "groups": data["groups"],
-                "mitre": data["mitre"] if data["mitre"] else None,
-                "source_ips": sorted(data["source_ips"])[:20],  # Cap at 20
-                "affected_agents": [
-                    {"id": a.split(":")[0], "name": a.split(":", 1)[1] if ":" in a else ""}
-                    for a in sorted(data["affected_agents"])
-                ][:20],
-                "first_seen": data["first_seen"],
-                "last_seen": data["last_seen"],
-            })
+            threats.append(
+                {
+                    "rule_id": rule_id,
+                    "description": data["description"],
+                    "level": level,
+                    "count": count,
+                    "threat_score": threat_score,
+                    "groups": data["groups"],
+                    "mitre": data["mitre"] if data["mitre"] else None,
+                    "source_ips": sorted(data["source_ips"])[:20],  # Cap at 20
+                    "affected_agents": [
+                        {"id": a.split(":")[0], "name": a.split(":", 1)[1] if ":" in a else ""}
+                        for a in sorted(data["affected_agents"])
+                    ][:20],
+                    "first_seen": data["first_seen"],
+                    "last_seen": data["last_seen"],
+                }
+            )
 
         threats.sort(key=lambda x: (-x["threat_score"], -x["count"]))
         return {
@@ -1189,7 +1207,9 @@ class WazuhClient:
             info = await self._request("GET", "/")
             mgr = info.get("data", {})
             report["sections"]["manager"] = {
-                "version": mgr.get("api_version"), "hostname": mgr.get("hostname"), "type": mgr.get("type"),
+                "version": mgr.get("api_version"),
+                "hostname": mgr.get("hostname"),
+                "type": mgr.get("type"),
             }
         except Exception as e:
             report["sections"]["manager"] = {"error": str(e)}
@@ -1256,26 +1276,34 @@ class WazuhClient:
             alerts_section = report["sections"].get("alerts", {})
             critical_count = alerts_section.get("by_severity", {}).get("critical", 0)
             if critical_count > 0:
-                recommendations.append({
-                    "priority": "critical",
-                    "action": f"Investigate {critical_count} critical-severity alerts immediately",
-                })
+                recommendations.append(
+                    {
+                        "priority": "critical",
+                        "action": f"Investigate {critical_count} critical-severity alerts immediately",
+                    }
+                )
             vuln_section = report["sections"].get("vulnerabilities", {})
             critical_vulns = vuln_section.get("critical", 0)
             if critical_vulns > 0:
-                recommendations.append({
-                    "priority": "critical",
-                    "action": f"Patch {critical_vulns} critical vulnerabilities",
-                })
+                recommendations.append(
+                    {
+                        "priority": "critical",
+                        "action": f"Patch {critical_vulns} critical vulnerabilities",
+                    }
+                )
             agent_section = report["sections"].get("agents", {})
             disconnected_count = agent_section.get("disconnected", 0)
             if disconnected_count > 0:
-                recommendations.append({
-                    "priority": "high",
-                    "action": f"Investigate {disconnected_count} disconnected agents",
-                })
+                recommendations.append(
+                    {
+                        "priority": "high",
+                        "action": f"Investigate {disconnected_count} disconnected agents",
+                    }
+                )
             if not recommendations:
-                recommendations.append({"priority": "info", "action": "No critical issues detected. Maintain monitoring."})
+                recommendations.append(
+                    {"priority": "info", "action": "No critical issues detected. Maintain monitoring."}
+                )
             report["sections"]["recommendations"] = recommendations
 
         return {"data": report}
@@ -1297,7 +1325,9 @@ class WazuhClient:
             try:
                 result = await self._request("GET", f"/sca/{agent_id}")
                 sca_items = result.get("data", {}).get("affected_items", [])
-                return self._format_compliance_result(framework, keywords, [{"agent_id": agent_id, "sca_items": sca_items}])
+                return self._format_compliance_result(
+                    framework, keywords, [{"agent_id": agent_id, "sca_items": sca_items}]
+                )
             except Exception as e:
                 raise ValueError(
                     f"SCA data unavailable for agent {agent_id}: {e}. "
@@ -1313,11 +1343,13 @@ class WazuhClient:
             aid = agent.get("id")
             try:
                 sca = await self._request("GET", f"/sca/{aid}")
-                agent_sca_data.append({
-                    "agent_id": aid,
-                    "agent_name": agent.get("name"),
-                    "sca_items": sca.get("data", {}).get("affected_items", []),
-                })
+                agent_sca_data.append(
+                    {
+                        "agent_id": aid,
+                        "agent_name": agent.get("name"),
+                        "sca_items": sca.get("data", {}).get("affected_items", []),
+                    }
+                )
             except Exception:
                 agent_sca_data.append({"agent_id": aid, "agent_name": agent.get("name"), "sca_items": []})
 
@@ -1336,7 +1368,8 @@ class WazuhClient:
             # Filter policies relevant to the framework (if keywords available)
             if keywords:
                 relevant = [
-                    p for p in sca_items
+                    p
+                    for p in sca_items
                     if any(kw in (p.get("policy_id", "") + " " + p.get("name", "")).lower() for kw in keywords)
                 ]
                 # If no framework-specific policies found, include all (generic CIS benchmarks apply broadly)
@@ -1354,24 +1387,26 @@ class WazuhClient:
             total_fail += agent_fail
             total_checks += agent_total
 
-            results.append({
-                "agent_id": agent.get("agent_id"),
-                "agent_name": agent.get("agent_name"),
-                "score": agent_score,
-                "pass": agent_pass,
-                "fail": agent_fail,
-                "total_checks": agent_total,
-                "policies": [
-                    {
-                        "policy_id": p.get("policy_id"),
-                        "name": p.get("name"),
-                        "score": p.get("score"),
-                        "pass": p.get("pass"),
-                        "fail": p.get("fail"),
-                    }
-                    for p in relevant
-                ],
-            })
+            results.append(
+                {
+                    "agent_id": agent.get("agent_id"),
+                    "agent_name": agent.get("agent_name"),
+                    "score": agent_score,
+                    "pass": agent_pass,
+                    "fail": agent_fail,
+                    "total_checks": agent_total,
+                    "policies": [
+                        {
+                            "policy_id": p.get("policy_id"),
+                            "name": p.get("name"),
+                            "score": p.get("score"),
+                            "pass": p.get("pass"),
+                            "fail": p.get("fail"),
+                        }
+                        for p in relevant
+                    ],
+                }
+            )
 
         overall_score = int(total_pass / total_checks * 100) if total_checks > 0 else 0
 
@@ -1420,14 +1455,14 @@ class WazuhClient:
                     for c in failed[:50]
                 ],
                 "passed_checks": [
-                    {"id": c.get("id"), "title": c.get("title"), "result": c.get("result")}
-                    for c in passed[:50]
+                    {"id": c.get("id"), "title": c.get("title"), "result": c.get("result")} for c in passed[:50]
                 ],
             }
         }
 
     async def get_iso27001_dashboard(self, agent_id: Optional[str] = None) -> Dict[str, Any]:
         """Return an ISO 27001:2022 compliance dashboard aggregated from Wazuh data."""
+
         # --- gather raw data concurrently ---
         async def _safe(coro, default):
             try:
@@ -1435,7 +1470,9 @@ class WazuhClient:
             except Exception:
                 return default
 
-        agents_coro = self._request("GET", "/agents", params={"status": "active", "limit": 500, "select": "id,name,os.name"})
+        agents_coro = self._request(
+            "GET", "/agents", params={"status": "active", "limit": 500, "select": "id,name,os.name"}
+        )
         # Alerts live in the Indexer — the Manager API removed its /alerts endpoint
         alerts_coro = self.get_alerts(limit=500)
         stats_coro = self._request("GET", "/manager/stats/analysisd")
@@ -1455,11 +1492,13 @@ class WazuhClient:
             aid = ag.get("id")
             try:
                 sca = await self._request("GET", f"/sca/{aid}")
-                sca_results.append({
-                    "agent_id": aid,
-                    "agent_name": ag.get("name"),
-                    "sca_items": sca.get("data", {}).get("affected_items", []),
-                })
+                sca_results.append(
+                    {
+                        "agent_id": aid,
+                        "agent_name": ag.get("name"),
+                        "sca_items": sca.get("data", {}).get("affected_items", []),
+                    }
+                )
             except Exception:
                 sca_results.append({"agent_id": aid, "agent_name": ag.get("name"), "sca_items": []})
 
@@ -1480,7 +1519,7 @@ class WazuhClient:
         # Build per-control evidence
         alert_groups: Dict[str, int] = {}
         for a in alerts:
-            for g in (a.get("rule", {}).get("groups") or []):
+            for g in a.get("rule", {}).get("groups") or []:
                 alert_groups[g] = alert_groups.get(g, 0) + 1
 
         # --- Confidence thresholds ---
@@ -1572,17 +1611,19 @@ class WazuhClient:
             if score is not None:
                 domain_weighted[domain].append((score, weight))
 
-            control_statuses.append({
-                "control_id": ctrl_id,
-                "title": ctrl["title"],
-                "domain": domain,
-                "data_source": source,
-                "status": status,
-                "score": score,
-                "weight": weight,
-                "confidence": confidence,
-                "evidence_count": evidence_count,
-            })
+            control_statuses.append(
+                {
+                    "control_id": ctrl_id,
+                    "title": ctrl["title"],
+                    "domain": domain,
+                    "data_source": source,
+                    "status": status,
+                    "score": score,
+                    "weight": weight,
+                    "confidence": confidence,
+                    "evidence_count": evidence_count,
+                }
+            )
 
         # --- Weighted domain scores ---
         domain_names = {"A.5": "Organizational", "A.6": "People", "A.7": "Physical", "A.8": "Technological"}
@@ -1591,10 +1632,19 @@ class WazuhClient:
             if weighted_pairs:
                 total_w = sum(w for _, w in weighted_pairs)
                 weighted_avg = int(sum(s * w for s, w in weighted_pairs) / total_w) if total_w else None
-                low_conf = sum(1 for _, _ in weighted_pairs
-                               if next((c["confidence"] for c in control_statuses
-                                        if c["control_id"].startswith(domain) and c["score"] is not None), "none")
-                               in ("low", "none"))
+                low_conf = sum(
+                    1
+                    for _, _ in weighted_pairs
+                    if next(
+                        (
+                            c["confidence"]
+                            for c in control_statuses
+                            if c["control_id"].startswith(domain) and c["score"] is not None
+                        ),
+                        "none",
+                    )
+                    in ("low", "none")
+                )
             else:
                 weighted_avg = None
                 low_conf = 0
@@ -1614,9 +1664,9 @@ class WazuhClient:
             overall_score = None
 
         overall_confidence = (
-            "high" if sum(1 for c in control_statuses if c["confidence"] in ("low", "none")) <= 2
-            else "medium" if sum(1 for c in control_statuses if c["confidence"] == "none") <= 4
-            else "low"
+            "high"
+            if sum(1 for c in control_statuses if c["confidence"] in ("low", "none")) <= 2
+            else "medium" if sum(1 for c in control_statuses if c["confidence"] == "none") <= 4 else "low"
         )
 
         failing = [c for c in control_statuses if c["status"] == "fail"]
@@ -1637,14 +1687,18 @@ class WazuhClient:
 
             # Vuln count for this device (from shared summary — per-device needs indexer)
             # We flag "unknown" unless we have per-agent data
-            endpoint_devices.append({
-                "agent_id": aid,
-                "device_name": aname,
-                "sca_score": dev_score,
-                "sca_policies": len(sca_items),
-                "sca_status": "pass" if (dev_score or 0) >= 75 else ("fail" if dev_score is not None else "no_data"),
-                "os": next((a.get("os", {}).get("name") for a in agents if a.get("id") == aid), None),
-            })
+            endpoint_devices.append(
+                {
+                    "agent_id": aid,
+                    "device_name": aname,
+                    "sca_score": dev_score,
+                    "sca_policies": len(sca_items),
+                    "sca_status": (
+                        "pass" if (dev_score or 0) >= 75 else ("fail" if dev_score is not None else "no_data")
+                    ),
+                    "os": next((a.get("os", {}).get("name") for a in agents if a.get("id") == aid), None),
+                }
+            )
 
         # Board-level summary sentence
         passing_devices = sum(1 for d in endpoint_devices if d["sca_status"] == "pass")
@@ -1687,9 +1741,7 @@ class WazuhClient:
             }
         }
 
-    async def get_iso27001_control_detail(
-        self, control_id: str, agent_id: Optional[str] = None
-    ) -> Dict[str, Any]:
+    async def get_iso27001_control_detail(self, control_id: str, agent_id: Optional[str] = None) -> Dict[str, Any]:
         """Return detailed Wazuh evidence for a specific ISO 27001 Annex A control."""
         # Handle domain-level queries (e.g. "A.8" → all A.8.x controls)
         if control_id in ("A.5", "A.6", "A.7", "A.8"):
@@ -1712,16 +1764,21 @@ class WazuhClient:
                 if source == "sca":
                     target = agent_id
                     if not target:
-                        agents_res = await self._request("GET", "/agents", params={"status": "active", "limit": 1, "select": "id"})
+                        agents_res = await self._request(
+                            "GET", "/agents", params={"status": "active", "limit": 1, "select": "id"}
+                        )
                         items = agents_res.get("data", {}).get("affected_items", [])
                         target = items[0].get("id") if items else None
                     if target:
                         sca_res = await self._request("GET", f"/sca/{target}")
                         sca_items = sca_res.get("data", {}).get("affected_items", [])
                         kws = ctrl["sca_keywords"]
-                        relevant = [p for p in sca_items if not kws or any(
-                            kw in (p.get("policy_id", "") + " " + p.get("name", "")).lower() for kw in kws
-                        )] or sca_items
+                        relevant = [
+                            p
+                            for p in sca_items
+                            if not kws
+                            or any(kw in (p.get("policy_id", "") + " " + p.get("name", "")).lower() for kw in kws)
+                        ] or sca_items
                         block["evidence"] = {
                             "agent_id": target,
                             "policies": [
@@ -1766,7 +1823,9 @@ class WazuhClient:
                     if self._indexer_client:
                         target = agent_id
                         if not target:
-                            agents_res = await self._request("GET", "/agents", params={"status": "active", "limit": 1, "select": "id"})
+                            agents_res = await self._request(
+                                "GET", "/agents", params={"status": "active", "limit": 1, "select": "id"}
+                            )
                             items = agents_res.get("data", {}).get("affected_items", [])
                             target = items[0].get("id") if items else None
                         if target:
@@ -1787,7 +1846,8 @@ class WazuhClient:
                                         "severity": v.get("severity"),
                                         "version": v.get("version"),
                                     }
-                                    for v in vulns if (v.get("severity") or "").lower() == "critical"
+                                    for v in vulns
+                                    if (v.get("severity") or "").lower() == "critical"
                                 ][:20],
                             }
                     else:
@@ -1842,29 +1902,33 @@ class WazuhClient:
             score = c["score"]
 
             if status == "no_data":
-                gaps.append({
-                    "control_id": ctrl_id,
-                    "title": ctrl_meta.get("title", ""),
-                    "domain": c["domain"],
-                    "gap_type": "no_evidence",
-                    "severity": "high",
-                    "score": None,
-                    "recommendation": (
-                        f"No Wazuh data available for this control. "
-                        f"Data source expected: {ctrl_meta.get('data_source', 'unknown')}. "
-                        "Ensure the relevant Wazuh module is enabled (e.g. SCA, vulnerability scanner, FIM)."
-                    ),
-                })
+                gaps.append(
+                    {
+                        "control_id": ctrl_id,
+                        "title": ctrl_meta.get("title", ""),
+                        "domain": c["domain"],
+                        "gap_type": "no_evidence",
+                        "severity": "high",
+                        "score": None,
+                        "recommendation": (
+                            f"No Wazuh data available for this control. "
+                            f"Data source expected: {ctrl_meta.get('data_source', 'unknown')}. "
+                            "Ensure the relevant Wazuh module is enabled (e.g. SCA, vulnerability scanner, FIM)."
+                        ),
+                    }
+                )
             elif status == "fail" and score is not None:
-                gaps.append({
-                    "control_id": ctrl_id,
-                    "title": ctrl_meta.get("title", ""),
-                    "domain": c["domain"],
-                    "gap_type": "failing_checks",
-                    "severity": "critical" if score < 40 else "medium",
-                    "score": score,
-                    "recommendation": self._iso27001_remediation_hint(ctrl_id, score),
-                })
+                gaps.append(
+                    {
+                        "control_id": ctrl_id,
+                        "title": ctrl_meta.get("title", ""),
+                        "domain": c["domain"],
+                        "gap_type": "failing_checks",
+                        "severity": "critical" if score < 40 else "medium",
+                        "score": score,
+                        "recommendation": self._iso27001_remediation_hint(ctrl_id, score),
+                    }
+                )
 
         gaps.sort(key=lambda g: {"critical": 0, "high": 1, "medium": 2}.get(g["severity"], 3))
 
@@ -1910,9 +1974,7 @@ class WazuhClient:
         hint = hints.get(control_id, "Review Wazuh data for this control and apply relevant hardening measures.")
         return f"Score: {score}%. {hint}"
 
-    async def get_iso27001_alerts(
-        self, time_range: str = "24h", agent_id: Optional[str] = None
-    ) -> Dict[str, Any]:
+    async def get_iso27001_alerts(self, time_range: str = "24h", agent_id: Optional[str] = None) -> Dict[str, Any]:
         """Get recent alerts mapped to ISO 27001:2022 Annex A control domains."""
         hours = _TIME_RANGE_HOURS.get(time_range, 24)
         since = (datetime.now(timezone.utc) - timedelta(hours=hours)).strftime("%Y-%m-%dT%H:%M:%SZ")
@@ -1928,7 +1990,7 @@ class WazuhClient:
         # Build group → alert count index
         alert_group_counts: Dict[str, int] = {}
         for a in alerts:
-            for g in (a.get("rule", {}).get("groups") or []):
+            for g in a.get("rule", {}).get("groups") or []:
                 alert_group_counts[g] = alert_group_counts.get(g, 0) + 1
 
         # Map alerts to ISO 27001 controls
@@ -1944,10 +2006,7 @@ class WazuhClient:
 
             # Collect sample alerts for this control
             if groups:
-                samples = [
-                    a for a in alerts
-                    if any(g in (a.get("rule", {}).get("groups") or []) for g in groups)
-                ][:10]
+                samples = [a for a in alerts if any(g in (a.get("rule", {}).get("groups") or []) for g in groups)][:10]
             else:
                 samples = alerts[:10]
 
@@ -2082,14 +2141,15 @@ class WazuhClient:
     def _validate_ip(ip_address: str, param_name: str = "ip_address") -> str:
         """Validate IPv4 or IPv6 address format."""
         import re
+
         ip_address = ip_address.strip()
         # IPv4
-        if re.match(r'^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$', ip_address):
-            octets = ip_address.split('.')
+        if re.match(r"^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$", ip_address):
+            octets = ip_address.split(".")
             if all(0 <= int(o) <= 255 for o in octets):
                 return ip_address
         # IPv6 (simplified check)
-        if ':' in ip_address and re.match(r'^[0-9a-fA-F:]+$', ip_address):
+        if ":" in ip_address and re.match(r"^[0-9a-fA-F:]+$", ip_address):
             return ip_address
         raise ValueError(f"Invalid IP address format for {param_name}: {ip_address}")
 
@@ -2143,11 +2203,18 @@ class WazuhClient:
         return await self.execute_active_response(data)
 
     # Known Wazuh active response commands (with ! prefix for stateful execution)
-    ALLOWED_AR_COMMANDS = frozenset([
-        "!firewall-drop", "!host-isolation", "!kill-process",
-        "!disable-account", "!enable-account", "!quarantine",
-        "!host-deny", "!restart-wazuh",
-    ])
+    ALLOWED_AR_COMMANDS = frozenset(
+        [
+            "!firewall-drop",
+            "!host-isolation",
+            "!kill-process",
+            "!disable-account",
+            "!enable-account",
+            "!quarantine",
+            "!host-deny",
+            "!restart-wazuh",
+        ]
+    )
 
     async def run_active_response(self, agent_id: str, command: str, parameters: dict = None) -> Dict[str, Any]:
         """Execute generic active response command."""

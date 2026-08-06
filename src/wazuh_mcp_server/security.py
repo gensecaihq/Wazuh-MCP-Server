@@ -48,11 +48,24 @@ VALID_COMPLIANCE_FRAMEWORKS = {"PCI-DSS", "HIPAA", "SOX", "GDPR", "NIST", "ISO27
 # ISO 27001:2022 Annex A — valid control IDs and domain prefixes
 VALID_ISO27001_DOMAINS = {"A.5", "A.6", "A.7", "A.8"}
 VALID_ISO27001_CONTROLS = {
-    "A.5", "A.5.26",
-    "A.6", "A.6.3",
+    "A.5",
+    "A.5.26",
+    "A.6",
+    "A.6.3",
     "A.7",
-    "A.8", "A.8.1", "A.8.2", "A.8.4", "A.8.5", "A.8.7",
-    "A.8.8", "A.8.9", "A.8.12", "A.8.15", "A.8.16", "A.8.20", "A.8.22",
+    "A.8",
+    "A.8.1",
+    "A.8.2",
+    "A.8.4",
+    "A.8.5",
+    "A.8.7",
+    "A.8.8",
+    "A.8.9",
+    "A.8.12",
+    "A.8.15",
+    "A.8.16",
+    "A.8.20",
+    "A.8.22",
 }
 
 # Regex patterns for parameter validation
@@ -723,12 +736,32 @@ class SecurityValidator:
         # Check for suspicious patterns in user-controlled headers only
         # Skip standard framework/transport headers that legitimately contain semicolons, $, etc.
         _skip_headers = {
-            "accept", "accept-encoding", "accept-language", "authorization",
-            "content-type", "content-length", "connection", "host", "origin",
-            "referer", "user-agent", "cookie", "cache-control", "pragma",
-            "if-none-match", "if-modified-since", "x-forwarded-for", "x-real-ip",
-            "x-forwarded-proto", "x-request-id", "mcp-session-id", "mcp-protocol-version",
-            "last-event-id", "sec-websocket-key", "sec-websocket-version", "upgrade",
+            "accept",
+            "accept-encoding",
+            "accept-language",
+            "authorization",
+            "content-type",
+            "content-length",
+            "connection",
+            "host",
+            "origin",
+            "referer",
+            "user-agent",
+            "cookie",
+            "cache-control",
+            "pragma",
+            "if-none-match",
+            "if-modified-since",
+            "x-forwarded-for",
+            "x-real-ip",
+            "x-forwarded-proto",
+            "x-request-id",
+            "mcp-session-id",
+            "mcp-protocol-version",
+            "last-event-id",
+            "sec-websocket-key",
+            "sec-websocket-version",
+            "upgrade",
         }
         for header_name, header_value in request.headers.items():
             if header_name.lower() in _skip_headers:

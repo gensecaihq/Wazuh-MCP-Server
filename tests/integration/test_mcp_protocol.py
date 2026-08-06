@@ -130,7 +130,9 @@ class TestModernEra:
         params = {"name": "security_investigation", "arguments": {"incident_type": "malware"}}
         # Missing Mcp-Name → header mismatch
         async with _client() as client:
-            resp = await client.post("/mcp", json=modern_body("prompts/get", params), headers=modern_headers("prompts/get"))
+            resp = await client.post(
+                "/mcp", json=modern_body("prompts/get", params), headers=modern_headers("prompts/get")
+            )
         assert resp.status_code == 400
         assert resp.json()["error"]["code"] == -32020
 

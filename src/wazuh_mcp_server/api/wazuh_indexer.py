@@ -394,14 +394,16 @@ class WazuhIndexerClient:
             if not has_operators:
                 # Bare term — wrap in wildcards for substring matching
                 qt = f"*{qt}*"
-            must_clauses.append({
-                "query_string": {
-                    "query": qt,
-                    "default_operator": "AND",
-                    "analyze_wildcard": True,
-                    "lenient": True,
+            must_clauses.append(
+                {
+                    "query_string": {
+                        "query": qt,
+                        "default_operator": "AND",
+                        "analyze_wildcard": True,
+                        "lenient": True,
+                    }
                 }
-            })
+            )
 
         if must_clauses:
             query = {"bool": {"must": must_clauses}}

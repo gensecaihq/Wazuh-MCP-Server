@@ -225,7 +225,16 @@ class TestYouComSearchIntegration:
             def json(self):
                 return {
                     "metadata": {"search_uuid": "abc-123"},
-                    "results": {"web": [{"title": "Result", "url": "https://example.com", "description": "desc", "snippets": ["snip"]}]},
+                    "results": {
+                        "web": [
+                            {
+                                "title": "Result",
+                                "url": "https://example.com",
+                                "description": "desc",
+                                "snippets": ["snip"],
+                            }
+                        ]
+                    },
                 }
 
         class DummyClient:
@@ -725,8 +734,11 @@ class TestToolScopeMapping:
         from wazuh_mcp_server.server import WRITE_SCOPE_TOOLS, _get_tool_scope
 
         read_tools = [
-            "get_wazuh_alerts", "get_wazuh_agents", "search_security_events",
-            "get_wazuh_vulnerabilities", "analyze_security_threat",
+            "get_wazuh_alerts",
+            "get_wazuh_agents",
+            "search_security_events",
+            "get_wazuh_vulnerabilities",
+            "analyze_security_threat",
         ]
         for tool in read_tools:
             assert tool not in WRITE_SCOPE_TOOLS
@@ -736,11 +748,20 @@ class TestToolScopeMapping:
         from wazuh_mcp_server.server import WRITE_SCOPE_TOOLS
 
         expected_write = {
-            "wazuh_block_ip", "wazuh_isolate_host", "wazuh_kill_process",
-            "wazuh_disable_user", "wazuh_quarantine_file", "wazuh_active_response",
-            "wazuh_firewall_drop", "wazuh_host_deny", "wazuh_restart",
-            "wazuh_unisolate_host", "wazuh_enable_user", "wazuh_restore_file",
-            "wazuh_firewall_allow", "wazuh_host_allow",
+            "wazuh_block_ip",
+            "wazuh_isolate_host",
+            "wazuh_kill_process",
+            "wazuh_disable_user",
+            "wazuh_quarantine_file",
+            "wazuh_active_response",
+            "wazuh_firewall_drop",
+            "wazuh_host_deny",
+            "wazuh_restart",
+            "wazuh_unisolate_host",
+            "wazuh_enable_user",
+            "wazuh_restore_file",
+            "wazuh_firewall_allow",
+            "wazuh_host_allow",
         }
         assert WRITE_SCOPE_TOOLS == expected_write
 
@@ -755,7 +776,8 @@ class TestAuthlessGuardrails:
         # Simulate what verify_authentication does in authless mode
         scopes = ["wazuh:read"]
         token = AuthToken(
-            token="authless", api_key_id="authless",
+            token="authless",
+            api_key_id="authless",
             created_at=__import__("datetime").datetime.now(__import__("datetime").timezone.utc),
             scopes=scopes,
         )
@@ -768,7 +790,8 @@ class TestAuthlessGuardrails:
 
         scopes = ["wazuh:read", "wazuh:write"]
         token = AuthToken(
-            token="authless", api_key_id="authless",
+            token="authless",
+            api_key_id="authless",
             created_at=__import__("datetime").datetime.now(__import__("datetime").timezone.utc),
             scopes=scopes,
         )
@@ -889,7 +912,8 @@ class TestScopeEnforcementWithNoneToken:
         from wazuh_mcp_server.auth import AuthToken
 
         token = AuthToken(
-            token="test", api_key_id="k",
+            token="test",
+            api_key_id="k",
             created_at=datetime.now(timezone.utc),
             scopes=["wazuh:read", "wazuh:write"],
         )
@@ -936,8 +960,11 @@ class TestCloseErrorHandling:
         from wazuh_mcp_server.config import WazuhConfig
 
         config = WazuhConfig(
-            wazuh_host="localhost", wazuh_user="test", wazuh_pass="test",
-            wazuh_port=55000, verify_ssl=False,
+            wazuh_host="localhost",
+            wazuh_user="test",
+            wazuh_pass="test",
+            wazuh_port=55000,
+            verify_ssl=False,
         )
         client = WazuhClient(config)
         client._cache["test"] = (0.0, {"data": "test"})
@@ -958,8 +985,13 @@ class TestRuleGroupsFilter:
         from wazuh_mcp_server.config import WazuhConfig
 
         config = WazuhConfig(
-            wazuh_host="localhost", wazuh_user="test", wazuh_pass="test", verify_ssl=False,
-            wazuh_indexer_host="localhost", wazuh_indexer_user="idx", wazuh_indexer_pass="idx",
+            wazuh_host="localhost",
+            wazuh_user="test",
+            wazuh_pass="test",
+            verify_ssl=False,
+            wazuh_indexer_host="localhost",
+            wazuh_indexer_user="idx",
+            wazuh_indexer_pass="idx",
         )
         return WazuhClient(config)
 
@@ -1014,7 +1046,12 @@ class TestRuleGroupsFilter:
                         {
                             "id": "1",
                             "timestamp": "2026-08-06T00:00:00Z",
-                            "rule": {"id": "110200", "description": "EDR detection", "level": 10, "groups": ["malware"]},
+                            "rule": {
+                                "id": "110200",
+                                "description": "EDR detection",
+                                "level": 10,
+                                "groups": ["malware"],
+                            },
                             "agent": {"name": "web-01"},
                         }
                     ],
