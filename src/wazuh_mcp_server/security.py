@@ -570,13 +570,18 @@ def validate_batch_items(items: List[Any], max_batch_size: int = 100) -> List[Di
 
 
 # Sensitive data patterns for log sanitization
+# Order matters: URL credentials and `bearer <token>` are redacted before the
+# label-based rules so the token after an `Authorization:` label is caught by the
+# bearer rule instead of being left behind when the label rule stops at whitespace.
 SENSITIVE_PATTERNS = [
+    # user:pass@ embedded in a URL (e.g. https://admin:s3cret@indexer:9200)
+    (r"([a-zA-Z][a-zA-Z0-9+.-]*://)[^\s:/@]+:[^\s@/]+@", r"\1[REDACTED]@"),
+    (r"(bearer\s+)[a-zA-Z0-9._~+/=-]+", r"\1[REDACTED]"),
     (r'(password["\']?\s*[:=]\s*["\']?)[^"\'\s,}]+', r"\1[REDACTED]"),
     (r'(token["\']?\s*[:=]\s*["\']?)[^"\'\s,}]+', r"\1[REDACTED]"),
     (r'(api[_-]?key["\']?\s*[:=]\s*["\']?)[^"\'\s,}]+', r"\1[REDACTED]"),
     (r'(secret["\']?\s*[:=]\s*["\']?)[^"\'\s,}]+', r"\1[REDACTED]"),
     (r'(authorization["\']?\s*[:=]\s*["\']?)[^"\'\s,}]+', r"\1[REDACTED]"),
-    (r"(bearer\s+)[a-zA-Z0-9._-]+", r"\1[REDACTED]"),
     (r"wst_[a-zA-Z0-9_-]+", "wst_[REDACTED]"),
     (r"wazuh_[a-zA-Z0-9_-]{40,}", "wazuh_[REDACTED]"),
 ]
@@ -620,6 +625,42 @@ class SanitizingLogFilter(logging.Filter):
                         sanitized_args.append(arg)
                 record.args = tuple(sanitized_args)
         return True
+
+
+def install_log_sanitizer(extra_logger_names=("uvicorn", "uvicorn.error", "uvicorn.access")):
+    """Attach ``SanitizingLogFilter`` to the handlers that actually emit records.
+
+    A filter attached to a *logger* runs only for records logged directly to that
+    logger. Records that propagate up from child loggers (``wazuh_mcp_server.*``,
+    ``auth``, the API clients) reach the root logger's *handlers* without consulting
+    any ancestor logger's filters — so credential redaction attached to
+    ``logging.getLogger()`` never runs for them. The redaction must therefore live on
+    the handlers.
+
+    Attaches to the root handlers (creating a ``StreamHandler`` if none exist) and to
+    any non-propagating framework loggers that carry their own handlers. Idempotent —
+    safe to call from both ``__main__`` startup and the app lifespan.
+    """
+    sanitizer = SanitizingLogFilter()
+
+    def _attach(target_logger: logging.Logger) -> None:
+        for handler in target_logger.handlers:
+            if not any(isinstance(f, SanitizingLogFilter) for f in handler.filters):
+                handler.addFilter(sanitizer)
+
+    root = logging.getLogger()
+    if not root.handlers:
+        root.addHandler(logging.StreamHandler())
+    _attach(root)
+
+    # uvicorn configures its own non-propagating loggers; the access log in particular
+    # can carry credentials in request lines, so redact there too when present.
+    for name in extra_logger_names:
+        logger_obj = logging.getLogger(name)
+        if logger_obj.handlers:
+            _attach(logger_obj)
+
+    return sanitizer
 
 
 @dataclass

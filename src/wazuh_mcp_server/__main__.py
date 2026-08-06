@@ -18,6 +18,12 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
 logger = logging.getLogger("wazuh_mcp_server.main")
 
+# Redact credentials on the root handler immediately, before any module logs — the app
+# lifespan re-applies this (idempotently) and also covers uvicorn's own handlers.
+from wazuh_mcp_server.security import install_log_sanitizer  # noqa: E402
+
+install_log_sanitizer()
+
 
 def main() -> None:
     """Main entry point for the Wazuh MCP Server."""

@@ -425,10 +425,11 @@ async def lifespan(app: FastAPI):
     global _oauth_manager
 
     # === STARTUP ===
-    # Attach log sanitization filter to prevent credential leakage
-    from wazuh_mcp_server.security import SanitizingLogFilter
+    # Attach the log sanitizer to the emitting handlers (not the root logger, whose
+    # filters are skipped for propagated child-logger records) to prevent credential leakage.
+    from wazuh_mcp_server.security import install_log_sanitizer
 
-    logging.getLogger().addFilter(SanitizingLogFilter())
+    install_log_sanitizer()
 
     logger.info(f"Wazuh MCP Server v{__version__} starting up...")
     logger.info(f"📡 MCP Protocol: {MCP_PROTOCOL_VERSION}")
