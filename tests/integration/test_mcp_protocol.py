@@ -215,6 +215,27 @@ class TestLegacyEra:
         result = resp.json()["result"]
         assert MODERN in result["supportedVersions"]
 
+    @pytest.mark.asyncio
+    async def test_legacy_version_in_meta_is_not_hijacked_onto_modern_path(self):
+        """A legacy client that happens to put a legacy protocolVersion in _meta must be
+        served by the legacy handler, not rejected with UnsupportedProtocolVersionError
+        (which would advertise that same version and livelock the client's retry)."""
+        body = {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "tools/list",
+            "params": {"_meta": {META_VERSION: "2025-11-25"}},
+        }
+        async with _client() as client:
+            resp = await client.post("/mcp", json=body)
+        assert resp.status_code == 200
+        payload = resp.json()
+        assert "result" in payload, payload
+        assert "error" not in payload
+        assert len(payload["result"]["tools"]) > 40
+        # Legacy path is stateful — a session is minted (modern path would not echo one).
+        assert resp.headers.get("MCP-Session-Id")
+
 
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

@@ -2970,14 +2970,26 @@ def _modern_error_response(
 
 
 def extract_modern_meta(body: Any) -> Optional[Dict[str, Any]]:
-    """Return the request's _meta dict when it declares a modern per-request protocol version."""
+    """Return the request's _meta dict only when it declares a *modern* protocol version.
+
+    A legacy client's `_meta` is an open bag and may carry an
+    `io.modelcontextprotocol/protocolVersion` key with a legacy value (e.g. "2025-11-25").
+    Routing that onto the modern, stateless path would reject it with
+    UnsupportedProtocolVersionError whose `supported` list still contains that version —
+    a spec-compliant client then retries the same version forever instead of falling back
+    to `initialize`. So a request is treated as modern only when the declared version is
+    not a known legacy revision; legacy-declared _meta flows to the legacy handler.
+    """
     if not isinstance(body, dict):
         return None
     params = body.get("params")
     if not isinstance(params, dict):
         return None
     meta = params.get("_meta")
-    if isinstance(meta, dict) and META_PROTOCOL_VERSION in meta:
+    if not isinstance(meta, dict):
+        return None
+    declared = meta.get(META_PROTOCOL_VERSION)
+    if declared is not None and declared not in LEGACY_PROTOCOL_VERSIONS:
         return meta
     return None
 
