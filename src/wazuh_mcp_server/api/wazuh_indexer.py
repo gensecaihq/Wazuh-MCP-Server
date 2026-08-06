@@ -386,20 +386,18 @@ class WazuhIndexerClient:
             must_clauses.append({"range": {"timestamp": time_range}})
 
         if query_text:
-            # Use query_string for free-text search across all fields.
-            # Wrap bare terms in wildcards for substring matching.
-            # Preserve explicit Lucene operators (AND, OR, NOT, quotes, field:value).
-            qt = query_text.strip()
-            has_operators = any(op in qt for op in ("AND", "OR", "NOT", ":", '"', "*", "?"))
-            if not has_operators:
-                # Bare term — wrap in wildcards for substring matching
-                qt = f"*{qt}*"
+            # simple_query_string has a restricted, injection-safe grammar (no arbitrary
+            # field:value probes, no regexp, no leading wildcards) and never errors on bad
+            # syntax — unlike query_string, which allowed Lucene injection and wildcard/regex
+            # denial-of-service from authenticated read users. AND/OR/NOT, quoted phrases,
+            # and trailing-wildcard prefixes remain supported.
+            qt = query_text.strip().lstrip("*?")  # forbid a leading wildcard (full-index scan)
             must_clauses.append(
                 {
-                    "query_string": {
+                    "simple_query_string": {
                         "query": qt,
                         "default_operator": "AND",
-                        "analyze_wildcard": True,
+                        "flags": "AND|OR|NOT|PHRASE|PREFIX|WHITESPACE",
                         "lenient": True,
                     }
                 }

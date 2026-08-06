@@ -866,17 +866,18 @@ class TestAgentIDValidation:
     def test_manager_agent_zero_is_valid(self):
         from wazuh_mcp_server.security import validate_agent_id
 
-        assert validate_agent_id("0") == "0"
+        # Accepted, and normalized to Wazuh's zero-padded form.
+        assert validate_agent_id("0") == "000"
 
     def test_single_digit_agent_is_valid(self):
         from wazuh_mcp_server.security import validate_agent_id
 
-        assert validate_agent_id("1") == "1"
+        assert validate_agent_id("1") == "001"
 
     def test_two_digit_agent_is_valid(self):
         from wazuh_mcp_server.security import validate_agent_id
 
-        assert validate_agent_id("12") == "12"
+        assert validate_agent_id("12") == "012"
 
     def test_three_digit_agent_is_valid(self):
         from wazuh_mcp_server.security import validate_agent_id

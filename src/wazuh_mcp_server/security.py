@@ -128,7 +128,10 @@ def validate_agent_id(value: Any, required: bool = False, param_name: str = "age
             param_name, f"invalid format '{agent_id}'", "Agent ID should be a 3-5 digit number (e.g., '001', '1234')"
         )
 
-    return agent_id
+    # Wazuh zero-pads agent IDs to at least 3 digits ("1" -> "001"). The Manager API
+    # requires the padded form and the Indexer stores agent.id padded, so an exact-match
+    # term on "1" would silently return nothing. Normalize here.
+    return agent_id.zfill(3)
 
 
 def validate_rule_id(value: Any, required: bool = False, param_name: str = "rule_id") -> Optional[str]:

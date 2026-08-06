@@ -1505,9 +1505,92 @@ WRITE_SCOPE_TOOLS = frozenset(
 audit_logger = logging.getLogger("wazuh_mcp_server.audit")
 
 
+# Read-scoped tools — the complete set of non-destructive tools. Kept explicit so that a
+# newly-added tool defaults to requiring write (deny) unless it is deliberately listed here.
+READ_SCOPE_TOOLS = frozenset(
+    {
+        "get_wazuh_alerts",
+        "get_wazuh_alert_summary",
+        "get_alerts_aggregated",
+        "analyze_alert_patterns",
+        "search_security_events",
+        "get_wazuh_agents",
+        "get_wazuh_running_agents",
+        "check_agent_health",
+        "get_agent_processes",
+        "get_agent_ports",
+        "get_agent_configuration",
+        "get_wazuh_vulnerabilities",
+        "get_wazuh_critical_vulnerabilities",
+        "get_wazuh_vulnerability_summary",
+        "analyze_security_threat",
+        "check_ioc_reputation",
+        "search_external_context",
+        "perform_risk_assessment",
+        "get_top_security_threats",
+        "generate_security_report",
+        "run_compliance_check",
+        "get_iso27001_dashboard",
+        "get_iso27001_control_detail",
+        "get_iso27001_gap_analysis",
+        "get_iso27001_alerts",
+        "get_sca_policy_checks",
+        "get_wazuh_statistics",
+        "get_wazuh_cluster_health",
+        "get_wazuh_cluster_nodes",
+        "get_wazuh_rules_summary",
+        "search_wazuh_manager_logs",
+        "get_wazuh_manager_error_logs",
+        "get_wazuh_log_collector_stats",
+        "get_wazuh_remoted_stats",
+        "get_wazuh_weekly_stats",
+        "validate_wazuh_connection",
+        "wazuh_check_blocked_ip",
+        "wazuh_check_agent_isolation",
+        "wazuh_check_process",
+        "wazuh_check_user_status",
+        "wazuh_check_file_quarantine",
+        "list_wazuh_clusters",
+    }
+)
+
+# Destructive verbs — a naming-convention safety net so a forgotten write tool cannot
+# fall through to read scope even if it is missing from WRITE_SCOPE_TOOLS.
+_DESTRUCTIVE_TOKENS = (
+    "block",
+    "isolate",
+    "unisolate",
+    "kill",
+    "disable",
+    "enable",
+    "quarantine",
+    "restore",
+    "firewall",
+    "deny",
+    "allow",
+    "restart",
+    "active_response",
+    "drop",
+)
+
+
 def _get_tool_scope(tool_name: str) -> str:
-    """Get the required scope for a tool."""
-    return "wazuh:write" if tool_name in WRITE_SCOPE_TOOLS else "wazuh:read"
+    """Get the required scope for a tool.
+
+    Fails closed: a tool that is not in the explicit read set, or whose name matches a
+    destructive verb, requires write. Only tools deliberately listed in READ_SCOPE_TOOLS
+    are treated as read — a new write tool that someone forgot to add to WRITE_SCOPE_TOOLS
+    is therefore denied to read-only tokens rather than silently allowed.
+    """
+    if tool_name in WRITE_SCOPE_TOOLS:
+        return "wazuh:write"
+    if tool_name in READ_SCOPE_TOOLS:
+        return "wazuh:read"
+    lowered = tool_name.lower()
+    if any(tok in lowered for tok in _DESTRUCTIVE_TOKENS):
+        return "wazuh:write"
+    # Unknown tool: fail closed.
+    return "wazuh:write"
 
 
 async def handle_tools_list(params: Dict[str, Any], session: MCPSession) -> Dict[str, Any]:
