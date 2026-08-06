@@ -5,6 +5,7 @@ on:
     branches: [ main, feature/*, develop ]
   pull_request:
     branches: [ main ]
+  workflow_dispatch:  # allow manual re-runs (e.g. to re-validate after a runner outage)
 
 # Cancel superseded runs on the same ref so rapid pushes don't pile up in the queue.
 concurrency:
