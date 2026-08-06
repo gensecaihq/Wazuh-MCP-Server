@@ -104,18 +104,36 @@ class CircuitBreaker:
         except self.config.expected_exception as e:
             # A 429 is an upstream rate-limit (transient throttle), not a service outage —
             # counting it would turn a soft throttle into a hard circuit-open. Re-raise
-            # for the retry layer without recording a circuit failure.
+            # for the retry layer without recording a circuit failure, but end any in-flight
+            # trial cleanly: leaving it HALF_OPEN with the gate released lets concurrent
+            # callers run untracked, and a stray success would prematurely close the circuit.
             if isinstance(e, httpx.HTTPStatusError) and e.response.status_code == 429:
-                # Still release any half-open trial flag so we don't deadlock recovery.
-                async with self._lock:
-                    self._half_open_trial_in_progress = False
+                await self._end_trial_unproven(func.__name__, "429 throttle")
                 raise
             await self._on_failure(func.__name__, e)
             raise
         except Exception as e:
-            # Unexpected exceptions don't count as circuit breaker failures
+            # Unexpected exceptions are not counted as monitored failures, but a trial that
+            # raised one has NOT proven recovery. Release the single-trial gate and re-arm —
+            # otherwise the breaker stays HALF_OPEN with the gate stuck set and every later
+            # call short-circuits to 503 until the process restarts.
             logger.error(f"Unexpected error in {func.__name__}: {e}")
+            await self._end_trial_unproven(func.__name__, f"unexpected {type(e).__name__}")
             raise
+
+    async def _end_trial_unproven(self, func_name: str, reason: str) -> None:
+        """End a half-open trial that neither succeeded nor counted as a monitored failure.
+
+        Always releases the single-trial gate. If we were mid-trial, return to OPEN and
+        re-arm the recovery timer so the breaker neither livelocks with the gate stuck set
+        nor floods the still-unhealthy dependency with concurrent probes.
+        """
+        async with self._lock:
+            self._half_open_trial_in_progress = False
+            if self.state == CircuitBreakerState.HALF_OPEN:
+                self.state = CircuitBreakerState.OPEN
+                self.last_failure_time = time.time()
+                logger.info(f"Circuit breaker {func_name} half-open trial ended unproven ({reason}); returning to OPEN")
 
     def _should_attempt_reset(self) -> bool:
         """Check if enough time has passed to attempt reset."""
