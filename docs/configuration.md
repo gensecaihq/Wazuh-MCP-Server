@@ -101,7 +101,7 @@ The server speaks plain HTTP on `MCP_PORT`. There is **no built-in HTTPS listene
 
 | Scope | Tools | Description |
 |-------|-------|-------------|
-| `wazuh:read` | 40 tools | Alerts, agents, vulnerabilities, analysis, compliance, system monitoring, verification |
+| `wazuh:read` | 41 tools | Alerts, agents, vulnerabilities, analysis, compliance, system monitoring, verification |
 | `wazuh:write` | 14 tools | Active response (block IP, isolate host, kill process, …) and rollback tools |
 
 - **Fail-closed:** a token with no scope claim gets read-only; write is opt-in.

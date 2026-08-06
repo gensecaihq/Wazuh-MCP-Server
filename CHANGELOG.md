@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [4.3.0] - 2026-08-06
+
+### Security
+- **Credential redaction now actually runs**: the log sanitizer was attached to the root logger, whose filters are skipped for records propagating up from child loggers — so passwords/tokens from the API clients and auth layer were logged in cleartext. It now attaches to the emitting handlers, and the patterns additionally redact URL-embedded credentials and the token after an `Authorization:` label.
+- **RBAC scope boundary and OAuth flows are now tested**: every one of the 14 write tools is verified denied to a read-only token, and the OAuth PKCE/single-use-code/refresh-rotation/revocation/DCR paths have a dedicated suite. A branch-coverage floor is enforced in CI.
+
+### Fixed
+- **Circuit-breaker deadlock**: a half-open trial that raised an unmonitored exception (e.g. `ValueError` on a 4xx/invalid-JSON response) or hit a 429 left the breaker stuck HALF_OPEN with its single-trial gate set, so every later call returned HTTP 503 until restart — bricking all Wazuh tools on that client. The trial now always releases the gate and re-arms.
+- **Active-response and ISO 27001 correctness against stock Wazuh**: the generic `wazuh_active_response` tool (validator rejected the `!` the allowlist required) now works; `wazuh_firewall_allow`/`wazuh_host_allow` no longer silently re-block (they require an operator-deployed undo script via `WAZUH_AR_FIREWALL_UNDO_COMMAND`/`WAZUH_AR_HOSTDENY_UNDO_COMMAND` and refuse otherwise); `disable_user` sets `alert.data.dstuser`; `check_file_quarantine` uses `GET /syscheck/{agent_id}`; `search_wazuh_manager_logs` uses `search=`; ISO A.8.15 reads the nested analysisd stats (was always 0); and an Indexer failure no longer scores A.8.8 as perfect compliance.
+- **MCP dual-era routing**: a legacy client whose `_meta` carried a legacy protocol version is no longer hijacked onto the modern stateless path (which rejected it with a self-contradictory `UnsupportedProtocolVersionError` and livelocked the retry).
+
 ### Added
 - **MCP 2026-07-28 protocol support (dual-era)**: modern stateless requests (per-request `_meta` protocol version/capabilities, `server/discover`, `Mcp-Method`/`Mcp-Name` header validation with Base64 sentinel decoding, `resultType`, `ttlMs`/`cacheScope` cache hints, `-32020`/`-32022` spec error codes) served alongside the legacy `initialize` handshake and `Mcp-Session-Id` sessions for clients on 2024-11-05 through 2025-11-25.
 - **OAuth protected resource metadata (RFC 9728)**: `/.well-known/oauth-protected-resource` endpoint and `resource_metadata` hint in `WWW-Authenticate` when `OAUTH_ISSUER_URL` is set.

@@ -40,11 +40,24 @@ jobs:
         python -m pip install --upgrade pip
         pip install build twine
         pip install -e .
-    
+
+    - name: Verify tag matches package version
+      if: startsWith(github.ref, 'refs/tags/')
+      run: |
+        TAG="${GITHUB_REF#refs/tags/}"
+        TAG_VER="${TAG#v}"
+        PKG_VER="$(python -c 'import importlib.metadata as m; print(m.version("wazuh-mcp-server"))')"
+        INIT_VER="$(python -c 'import wazuh_mcp_server; print(wazuh_mcp_server.__version__)')"
+        echo "tag=$TAG_VER  pyproject=$PKG_VER  __init__=$INIT_VER"
+        if [ "$TAG_VER" != "$PKG_VER" ] || [ "$TAG_VER" != "$INIT_VER" ]; then
+          echo "::error::Tag ($TAG_VER) does not match package version ($PKG_VER) / __version__ ($INIT_VER)"
+          exit 1
+        fi
+
     - name: Run tests
       run: |
-        pip install pytest pytest-asyncio
-        pytest tests/ -v
+        pip install pytest pytest-asyncio pytest-cov
+        pytest tests/ -v --cov=src/wazuh_mcp_server --cov-fail-under=37
     
     - name: Build package
       run: python -m build
@@ -127,34 +140,26 @@ jobs:
     - name: Generate release notes
       id: notes
       run: |
-        cat << 'ENDOFNOTES' > RELEASE_NOTES.md
-        # Wazuh MCP Server Release ${{ steps.version.outputs.VERSION }}
-
-        ## 🚀 Features
-        - Production-ready MCP server for Wazuh SIEM
-        - 48 specialized security tools (alerts, agents, vulnerabilities, active response, compliance)
-        - Full MCP 2025-11-25 protocol compliance (Streamable HTTP + legacy SSE)
-        - Enterprise-grade security with authentication on all endpoints
-
-        ## 📦 Installation
-
-        ### From Source (Recommended)
-        ```bash
-        git clone https://github.com/gensecaihq/Wazuh-MCP-Server.git
-        cd Wazuh-MCP-Server
-        cp .env.example .env
-        # Edit .env with your Wazuh credentials
-        docker compose up -d
-        ```
-
-        ### Docker Compose
-        ```bash
-        docker compose up -d
-        ```
-
-        ## 📋 Changelog
-        See [CHANGELOG.md](https://github.com/${{ github.repository }}/blob/main/CHANGELOG.md)
-        ENDOFNOTES
+        VERSION="${{ steps.version.outputs.VERSION }}"
+        {
+          echo "# Wazuh MCP Server ${VERSION}"
+          echo
+          echo "## Changelog"
+          # Extract the section for this version from CHANGELOG.md (up to the next '## [' heading).
+          awk -v ver="## [${VERSION}]" '
+            index($0, ver) == 1 {found=1; next}
+            found && /^## \[/ {exit}
+            found {print}
+          ' CHANGELOG.md || true
+          echo
+          echo "Full changelog: [CHANGELOG.md](https://github.com/${{ github.repository }}/blob/main/CHANGELOG.md)"
+          echo
+          echo "## Installation"
+          echo '```bash'
+          echo "docker pull ghcr.io/${{ github.repository }}:${VERSION}"
+          echo '```'
+          echo "Or build from source — see the [README](https://github.com/${{ github.repository }}#quick-start)."
+        } > RELEASE_NOTES.md
 
     - name: Create Release
       uses: softprops/action-gh-release@v2

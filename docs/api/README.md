@@ -1,6 +1,6 @@
 # MCP Tools API Reference
 
-Complete reference for all 54 tools available in Wazuh MCP Server v4.2.1.
+Complete reference for all 55 tools available in Wazuh MCP Server v4.3.0.
 
 ## 🛠️ Tool Categories
 

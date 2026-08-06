@@ -118,7 +118,7 @@ pre-2025-06-18 clients) is preserved unchanged for backward compatibility and ve
 |-------------|--------|----------------|
 | **JSON-RPC 2.0** | ✅ COMPLIANT | Full JSON-RPC 2.0 compliance |
 | **Session management** | ✅ COMPLIANT | MCPSession class with state tracking |
-| **Tool registration** | ✅ COMPLIANT | 54 tools properly registered |
+| **Tool registration** | ✅ COMPLIANT | 55 tools properly registered |
 | **Error handling** | ✅ COMPLIANT | Standard MCP error codes |
 | **Capability negotiation** | ✅ COMPLIANT | Server capabilities exposed |
 
@@ -130,7 +130,7 @@ pre-2025-06-18 clients) is preserved unchanged for backward compatibility and ve
 |--------|--------|----------------|
 | **initialize** | ✅ COMPLIANT | Session creation with capability negotiation |
 | **ping** | ✅ COMPLIANT | Returns empty `{}` per spec |
-| **tools/list** | ✅ COMPLIANT | 54 tools with pagination support |
+| **tools/list** | ✅ COMPLIANT | 55 tools with pagination support |
 | **tools/call** | ✅ COMPLIANT | Tool execution with error handling |
 | **prompts/list** | ✅ COMPLIANT | 4 security prompts with pagination |
 | **prompts/get** | ✅ COMPLIANT | Prompt content with argument substitution |
@@ -251,7 +251,7 @@ curl -X POST http://localhost:3000/mcp \
      -H "MCP-Session-Id: <session-id>" \
      -H "Content-Type: application/json" \
      -d '{"jsonrpc":"2.0","method":"tools/list","id":"2"}'
-# Expected: JSON-RPC response with 54 tools
+# Expected: JSON-RPC response with 55 tools
 
 # Test GET with SSE (requires Accept header)
 curl -H "Authorization: Bearer <token>" \
@@ -332,9 +332,10 @@ curl -H "Authorization: Bearer invalid-token" \
 
 ## 🏆 **FINAL COMPLIANCE VERDICT**
 
-### **✅ FULLY COMPLIANT WITH MCP 2025-11-25 SPECIFICATION**
+### **✅ DUAL-ERA: MCP 2026-07-28 (modern) + 2025-11-25 and earlier (legacy)**
 
-The Wazuh MCP Remote Server implementation **100% complies** with the latest MCP standards:
+The Wazuh MCP Remote Server implements the current 2026-07-28 revision on the stateless
+per-request path while preserving the legacy handshake for older clients:
 
 🎯 **Perfect Score: 45/45 Requirements Met**
 
@@ -385,4 +386,4 @@ This implementation is **immediately ready** for production use and supports:
 - **Documentation**: `README.md`, `INSTALLATION.md`
 - **Deployment**: `compose.yml`, `Dockerfile`
 
-**This implementation represents the gold standard for MCP remote server development and is fully up-to-date with the latest 2025-11-25 specification.**
+**This implementation is up-to-date with the latest 2026-07-28 specification (served on the modern stateless path) and remains backward compatible with the 2025-11-25 and earlier handshake-based revisions.**

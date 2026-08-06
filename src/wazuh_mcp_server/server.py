@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Wazuh MCP Server - Complete MCP-Compliant Remote Server
-Full compliance with Model Context Protocol 2025-11-25 specification
+Dual-era MCP server: 2026-07-28 (modern, stateless) plus 2025-11-25 and earlier (legacy)
 Production-ready with Streamable HTTP and legacy SSE transport, authentication, and monitoring
 """
 
@@ -3808,7 +3808,7 @@ async def health_check():
                 },
                 "metrics": {"active_sessions": active_sessions, "total_sessions": len(all_sessions)},
                 "endpoints": {
-                    "recommended": "/mcp (Streamable HTTP - 2025-11-25)",
+                    "recommended": "/mcp (Streamable HTTP - 2026-07-28 + legacy)",
                     "legacy": "/sse (SSE only)",
                     "authentication": (
                         "/auth/token" if config.is_bearer else ("/oauth/token" if config.is_oauth else None)

@@ -147,7 +147,7 @@ curl -X POST http://localhost:3000/mcp \
 
 ## MCP Protocol Compliance
 
-Full compliance with MCP 2025-11-25 specification.
+Dual-era compliance: MCP 2026-07-28 (modern, stateless) plus 2025-11-25 and earlier (legacy handshake).
 
 | Standard | Status |
 |----------|--------|

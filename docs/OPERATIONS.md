@@ -178,7 +178,7 @@ docker compose up -d
 
 | Endpoint | Method | Description |
 |----------|--------|-------------|
-| `/mcp` | GET/POST/DELETE | **Recommended** - Streamable HTTP (MCP 2025-11-25) |
+| `/mcp` | GET/POST/DELETE | **Recommended** - Streamable HTTP (MCP 2026-07-28 + legacy) |
 | `/sse` | GET | Legacy SSE endpoint |
 | `/` | GET/POST | JSON-RPC 2.0 endpoint (authenticated) |
 | `/health` | GET | Health check |
