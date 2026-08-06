@@ -150,6 +150,90 @@ class TestDCR:
         assert client.client_id.startswith("client_")
 
 
+class TestScopeBinding:
+    def _read_only_client(self, mgr):
+        return mgr.register_client(
+            {"client_name": "ro", "redirect_uris": ["https://ok.example/cb"], "scope": "wazuh:read"}
+        )
+
+    def test_read_only_client_cannot_self_grant_write(self):
+        mgr = _mgr(dcr=True)
+        client = self._read_only_client(mgr)
+        granted = mgr.bound_scope("wazuh:read wazuh:write", client)
+        assert granted == "wazuh:read"
+
+    def test_scope_downscoped_through_full_flow(self):
+        mgr = _mgr(dcr=True)
+        client = self._read_only_client(mgr)
+        verifier, challenge = _pkce()
+        code = mgr.create_authorization_code(
+            client.client_id,
+            "https://ok.example/cb",
+            mgr.bound_scope("wazuh:read wazuh:write", client),
+            challenge,
+            "S256",
+        )
+        tokens = mgr.exchange_code_for_tokens(code, client.client_id, "https://ok.example/cb", verifier)
+        assert tokens["scope"] == "wazuh:read"
+        tok = mgr.validate_access_token(tokens["access_token"])
+        assert tok.scope == "wazuh:read"
+
+    def test_full_scope_client_keeps_write(self):
+        mgr = _mgr(dcr=True)
+        client = mgr.register_client(
+            {"client_name": "rw", "redirect_uris": ["https://ok.example/cb"], "scope": "wazuh:read wazuh:write"}
+        )
+        assert mgr.bound_scope("wazuh:write", client) == "wazuh:write"
+
+
+class TestConfidentialClientAuth:
+    def test_confidential_client_requires_secret(self):
+        mgr = _mgr(dcr=True)
+        client = mgr.register_client({"client_name": "c", "redirect_uris": ["https://ok.example/cb"]})
+        assert mgr.client_requires_secret(client) is True
+
+    def test_public_client_does_not_require_secret(self):
+        mgr = _mgr(dcr=True)
+        client = mgr.register_client(
+            {
+                "client_name": "pub",
+                "redirect_uris": ["https://ok.example/cb"],
+                "token_endpoint_auth_method": "none",
+            }
+        )
+        assert mgr.client_requires_secret(client) is False
+
+    def test_wrong_secret_rejected(self):
+        mgr = _mgr(dcr=True)
+        client = mgr.register_client({"client_name": "c", "redirect_uris": ["https://ok.example/cb"]})
+        assert mgr.validate_client(client.client_id, "wrong-secret") is None
+        assert mgr.validate_client(client.client_id, client.client_secret) is not None
+
+
+class TestIssuerTrust:
+    class _Req:
+        def __init__(self, peer, headers):
+            self.client = type("C", (), {"host": peer})()
+            self.headers = headers
+            self.url = type("U", (), {"scheme": "https", "netloc": "real.example"})()
+
+    def test_forwarded_headers_ignored_from_untrusted_peer(self):
+        mgr = _mgr()
+        req = self._Req("203.0.113.9", {"x-forwarded-host": "attacker.example", "x-forwarded-proto": "https"})
+        assert mgr.get_issuer_url(req) == "https://real.example"
+
+    def test_forwarded_headers_honored_from_trusted_proxy(self, monkeypatch):
+        mgr = _mgr()
+        mgr._trusted_proxies = {"10.0.0.1"}
+        req = self._Req("10.0.0.1", {"x-forwarded-host": "public.example", "x-forwarded-proto": "https"})
+        assert mgr.get_issuer_url(req) == "https://public.example"
+
+    def test_configured_issuer_wins(self):
+        mgr = _mgr(issuer="https://issuer.example/")
+        req = self._Req("10.0.0.1", {"x-forwarded-host": "attacker.example"})
+        assert mgr.get_issuer_url(req) == "https://issuer.example"
+
+
 class TestTokenTypeSeparation:
     def test_refresh_token_is_not_accepted_as_access_token(self):
         mgr = _mgr()

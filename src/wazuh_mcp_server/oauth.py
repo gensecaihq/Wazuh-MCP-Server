@@ -6,6 +6,7 @@ Implements MCP 2026-07-28 authentication specification for Claude Desktop integr
 
 import hashlib
 import logging
+import os
 import secrets
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
@@ -108,6 +109,11 @@ class OAuthManager:
         # Revocation denylist (token -> expiry) so revoked-but-unexpired tokens cannot
         # slip back in via the stateless JWT fallback. Cleaned up alongside expired tokens.
         self.revoked_tokens: Dict[str, datetime] = {}
+        # Proxies whose x-forwarded-* headers we trust when deriving the issuer URL.
+        self._trusted_proxies = {p.strip() for p in os.getenv("TRUSTED_PROXIES", "").split(",") if p.strip()} | {
+            "127.0.0.1",
+            "::1",
+        }
 
         # Pre-register Claude as a known client
         self._register_claude_client()
@@ -130,12 +136,21 @@ class OAuthManager:
         logger.info("Pre-registered Claude Desktop OAuth client")
 
     def get_issuer_url(self, request: Request) -> str:
-        """Get the OAuth issuer URL."""
+        """Get the OAuth issuer URL.
+
+        Prefer the explicitly configured ``OAUTH_ISSUER_URL``. When deriving from the
+        request, only honor ``x-forwarded-*`` headers if the direct peer is a trusted
+        proxy — otherwise an attacker can poison authorization-server discovery (both
+        well-known documents echo this issuer) by spoofing ``x-forwarded-host``.
+        """
         if self.config.OAUTH_ISSUER_URL:
-            return self.config.OAUTH_ISSUER_URL
-        # Derive from request
-        scheme = request.headers.get("x-forwarded-proto", request.url.scheme)
-        host = request.headers.get("x-forwarded-host", request.url.netloc)
+            return self.config.OAUTH_ISSUER_URL.rstrip("/")
+        scheme = request.url.scheme
+        host = request.url.netloc
+        peer = request.client.host if request.client else ""
+        if peer in self._trusted_proxies:
+            scheme = request.headers.get("x-forwarded-proto", scheme)
+            host = request.headers.get("x-forwarded-host", host)
         return f"{scheme}://{host}"
 
     def get_metadata(self, request: Request) -> Dict[str, Any]:
@@ -153,6 +168,7 @@ class OAuthManager:
             "token_endpoint_auth_methods_supported": ["client_secret_post", "client_secret_basic"],
             "scopes_supported": ["wazuh:read", "wazuh:write"],
             "code_challenge_methods_supported": ["S256"],
+            "authorization_response_iss_parameter_supported": True,
             "service_documentation": f"{issuer}/docs",
         }
 
@@ -212,7 +228,14 @@ class OAuthManager:
         return client
 
     def validate_client(self, client_id: str, client_secret: Optional[str] = None) -> Optional[OAuthClient]:
-        """Validate client credentials."""
+        """Resolve a client, rejecting a *wrong* secret if one is presented.
+
+        Used by the authorization endpoint (which does not authenticate the client) and,
+        with a secret, by the token endpoint. A *missing* secret is not rejected here —
+        confidential-client authentication is enforced separately via
+        client_requires_secret() at the token endpoint, because the auth-code flow
+        legitimately resolves the client with no secret.
+        """
         client = self.clients.get(client_id)
         if not client:
             return None
@@ -221,6 +244,28 @@ class OAuthManager:
             return None
 
         return client
+
+    @staticmethod
+    def client_requires_secret(client: OAuthClient) -> bool:
+        """A confidential client (has a secret and doesn't use auth method 'none') must
+        authenticate with that secret at the token endpoint."""
+        return bool(client.client_secret) and client.token_endpoint_auth_method != "none"
+
+    @staticmethod
+    def bound_scope(requested: Optional[str], client: OAuthClient) -> str:
+        """Down-scope the requested scope to what the client is registered for.
+
+        Prevents a read-only client from self-granting `wazuh:write`. Grants only scopes
+        that are both registered for the client and valid; falls back to the client's
+        registered read scope."""
+        valid = {"wazuh:read", "wazuh:write"}
+        registered = set((client.scope or "").split()) & valid
+        asked = set((requested or "").split()) & valid
+        granted = (asked & registered) if asked else registered
+        if not granted:
+            granted = registered or {"wazuh:read"}
+        # Stable, canonical order.
+        return " ".join(s for s in ("wazuh:read", "wazuh:write") if s in granted)
 
     def create_authorization_code(
         self,
@@ -521,12 +566,16 @@ def create_oauth_router(oauth_manager: OAuthManager) -> APIRouter:
         # For MCP servers, we auto-approve (the user already chose to connect)
         # In production, you might show a consent screen here
 
+        # Down-scope the request to what the client is registered for (a read-only
+        # client must not be able to self-grant write).
+        granted_scope = oauth_manager.bound_scope(scope, client)
+
         # Generate authorization code
         try:
             code = oauth_manager.create_authorization_code(
                 client_id=client_id,
                 redirect_uri=redirect_uri,
-                scope=scope,
+                scope=granted_scope,
                 code_challenge=code_challenge,
                 code_challenge_method=code_challenge_method,
             )
@@ -534,8 +583,9 @@ def create_oauth_router(oauth_manager: OAuthManager) -> APIRouter:
             params = urlencode({"error": "invalid_request", "error_description": str(e), "state": state or ""})
             return RedirectResponse(f"{redirect_uri}?{params}")
 
-        # Redirect back with code
-        params = {"code": code}
+        # Redirect back with code and the issuer identifier (RFC 9207) so the client can
+        # defend against authorization-server mix-up attacks.
+        params = {"code": code, "iss": oauth_manager.get_issuer_url(request)}
         if state:
             params["state"] = state
 
@@ -577,6 +627,13 @@ def create_oauth_router(oauth_manager: OAuthManager) -> APIRouter:
             # Per MCP spec: Return 401 with invalid_client to signal client deletion
             return JSONResponse(
                 {"error": "invalid_client", "error_description": "Client authentication failed"}, status_code=401
+            )
+
+        # A confidential client MUST present its secret at the token endpoint — otherwise
+        # anyone knowing the client_id could redeem a stolen refresh token by omitting it.
+        if oauth_manager.client_requires_secret(client) and not client_secret:
+            return JSONResponse(
+                {"error": "invalid_client", "error_description": "Client authentication required"}, status_code=401
             )
 
         try:
@@ -687,4 +744,10 @@ def init_oauth_manager(config) -> OAuthManager:
     """Initialize OAuth manager."""
     global _oauth_manager
     _oauth_manager = OAuthManager(config)
+    if getattr(config, "ENVIRONMENT", "") == "production" and not getattr(config, "OAUTH_ISSUER_URL", ""):
+        logger.warning(
+            "OAUTH_ISSUER_URL is not set in production. The issuer is derived from the "
+            "request and only trusts x-forwarded-* from TRUSTED_PROXIES; set OAUTH_ISSUER_URL "
+            "explicitly to make authorization-server discovery deterministic."
+        )
     return _oauth_manager
