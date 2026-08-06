@@ -3732,7 +3732,33 @@ async def close_mcp_session(
 
 @app.get("/health")
 async def health_check():
-    """Health check endpoint with detailed status."""
+    """Liveness probe: 200 whenever the server process is up and serving.
+
+    Deliberately does NOT check Wazuh / Indexer reachability. A SIEM outage must
+    not mark the MCP server itself unhealthy — that would fail the container
+    healthcheck and restart-loop a perfectly live server. Use /ready for
+    dependency/readiness checks.
+    """
+    return JSONResponse(
+        content={
+            "status": "healthy",
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "version": __version__,
+            "mcp_protocol_version": MCP_PROTOCOL_VERSION,
+            "supported_protocol_versions": SUPPORTED_PROTOCOL_VERSIONS,
+        },
+        status_code=200,
+    )
+
+
+@app.get("/ready")
+async def readiness_check():
+    """Readiness probe with detailed component status.
+
+    Verifies Wazuh Manager (and Indexer, if configured) reachability and returns
+    503 when a dependency is unhealthy. Intended for load-balancer / orchestrator
+    readiness gating, not for liveness (see /health).
+    """
     try:
         # Test Wazuh connectivity
         wazuh_status = "healthy"
@@ -3813,7 +3839,7 @@ async def health_check():
                     "authentication": (
                         "/auth/token" if config.is_bearer else ("/oauth/token" if config.is_oauth else None)
                     ),
-                    "monitoring": ["/health", "/metrics"],
+                    "monitoring": ["/health", "/ready", "/metrics"],
                 },
             },
             status_code=status_code,
