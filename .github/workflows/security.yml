@@ -28,27 +28,18 @@ jobs:
     - name: Install audit tools
       run: |
         python -m pip install --upgrade pip
-        pip install safety pip-audit bandit
-      # Note: semgrep is used via returntocorp/semgrep-action, not pip
-    
+        pip install pip-audit bandit
+      # Note: semgrep is used via semgrep/semgrep-action, not pip.
+      # safety was dropped: its 3.x CLI changed output flags and requires an
+      # account for scans; pip-audit covers dependency CVEs via the PyPA database.
+
     - name: Install project dependencies
       run: pip install -e .
-    
-    - name: Run safety check
-      continue-on-error: false
-      run: |
-        safety check --json --output safety-report.json
-        if [ -f safety-report.json ]; then
-          echo "### Safety Report" >> $GITHUB_STEP_SUMMARY
-          echo '```json' >> $GITHUB_STEP_SUMMARY
-          cat safety-report.json >> $GITHUB_STEP_SUMMARY
-          echo '```' >> $GITHUB_STEP_SUMMARY
-        fi
 
     - name: Run pip-audit
       continue-on-error: false
       run: |
-        pip-audit --format json --output pip-audit-report.json
+        pip-audit --skip-editable --format json --output pip-audit-report.json
         if [ -f pip-audit-report.json ]; then
           echo "### Pip Audit Report" >> $GITHUB_STEP_SUMMARY
           echo '```json' >> $GITHUB_STEP_SUMMARY
@@ -60,9 +51,7 @@ jobs:
       uses: actions/upload-artifact@v4
       with:
         name: dependency-security-reports
-        path: |
-          safety-report.json
-          pip-audit-report.json
+        path: pip-audit-report.json
       if: always()
 
   code-security:
@@ -80,11 +69,11 @@ jobs:
     - name: Run Bandit
       continue-on-error: false
       run: |
-        pip install bandit
-        bandit -r src/ -f json -o bandit-report.json
+        pip install "bandit[toml]"
+        bandit -c pyproject.toml -r src/ -f json -o bandit-report.json
         echo "### Bandit Security Report" >> $GITHUB_STEP_SUMMARY
         echo '```' >> $GITHUB_STEP_SUMMARY
-        bandit -r src/ -f txt
+        bandit -c pyproject.toml -r src/ -f txt
         echo '```' >> $GITHUB_STEP_SUMMARY
     
     - name: Run Semgrep
@@ -109,7 +98,7 @@ jobs:
     - uses: actions/checkout@v4
     
     - name: Run Trivy vulnerability scanner
-      uses: aquasecurity/trivy-action@0.31.0
+      uses: aquasecurity/trivy-action@v0.36.0
       with:
         scan-type: 'fs'
         scan-ref: '.'

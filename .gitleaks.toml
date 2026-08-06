@@ -1,0 +1,25 @@
+# Gitleaks configuration — extends the default ruleset with an allowlist for the
+# documentation/test placeholder "secrets" that live in this repo's git history.
+# Real secret detection remains active (and TruffleHog runs alongside in CI).
+
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Documentation examples and test fixtures — placeholder credentials only"
+regexes = [
+  '''your[-_]?jwt[-_]?token''',
+  '''YOUR_JWT_TOKEN''',
+  '''YOUR_TOKEN''',
+  '''your[-_]token''',
+  '''your_token''',
+  '''invalid-token''',
+  '''sk-abc123def456''',
+  '''admin:admin''',
+  '''USERNAME:PASSWORD''',
+  '''your-username:your-password''',
+  '''mcp-api-user:your-secure-password-here''',
+  # Truncated JWT header examples in docs (standard header segment + ellipsis)
+  '''eyJ0eXAiOiJKV1Q[A-Za-z0-9+/=]*\.{3}''',
+  '''eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9\.{3}''',
+]

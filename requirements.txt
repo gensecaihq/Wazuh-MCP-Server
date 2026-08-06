@@ -31,7 +31,7 @@ psutil>=6.0.0,<8.0.0
 tenacity>=9.0.0,<10.0.0
 
 # Encryption (Fernet, used by config validation)
-cryptography>=44.0.0,<50.0.0
+cryptography>=50.0.0,<51.0.0
 
 # Optional: Redis-backed session store for multi-instance / serverless deployments.
 # Install alongside: pip install redis

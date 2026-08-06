@@ -35,7 +35,7 @@ dependencies = [
     "pydantic>=2.12.0,<3.0.0",
     # Security & Auth
     "pyjwt[crypto]>=2.9.0,<3.0.0",
-    "cryptography>=44.0.0,<50.0.0",
+    "cryptography>=50.0.0,<51.0.0",
     "python-multipart>=0.0.9,<1.0.0",
     # Monitoring
     "prometheus-client>=0.24.0,<1.0.0",
@@ -92,3 +92,11 @@ minversion = "7.0"
 testpaths = ["tests"]
 python_files = ["test_*.py"]
 asyncio_mode = "auto"
+
+[tool.bandit]
+# B104: binding 0.0.0.0 is the documented default for this containerized server (MCP_HOST)
+# B105/B106: false positives on token-type labels ("access", "refresh", "Bearer", "jwt",
+#            "authless") and scoring thresholds — real secret detection is handled by
+#            gitleaks and TruffleHog in the Security Audit workflow
+# B110: best-effort cleanup paths (client close / cache eviction) intentionally swallow errors
+skips = ["B104", "B105", "B106", "B110"]
