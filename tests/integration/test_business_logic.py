@@ -194,6 +194,67 @@ class TestMCPResponseJsonRpc:
         assert resp.dict() == resp.model_dump()
 
 
+class TestYouComSearchIntegration:
+    @pytest.mark.asyncio
+    async def test_search_external_context_disabled_without_key(self, monkeypatch):
+        from wazuh_mcp_server.api.wazuh_client import WazuhClient
+        from wazuh_mcp_server.config import WazuhConfig
+
+        monkeypatch.delenv("YDC_API_KEY", raising=False)
+        client = WazuhClient(
+            WazuhConfig(wazuh_host="localhost", wazuh_user="test", wazuh_pass="test", verify_ssl=False)
+        )
+
+        result = await client.search_external_context("malware.io", 3)
+        assert result["data"]["enabled"] is False
+        assert result["data"]["results"] == []
+
+    @pytest.mark.asyncio
+    async def test_search_external_context_success(self, monkeypatch):
+        from wazuh_mcp_server.api import wazuh_client as client_module
+        from wazuh_mcp_server.api.wazuh_client import WazuhClient
+        from wazuh_mcp_server.config import WazuhConfig
+
+        monkeypatch.setenv("YDC_API_KEY", "test-key")
+        monkeypatch.setenv("YDC_BASE_URL", "https://ydc-index.io")
+
+        class DummyResponse:
+            status_code = 200
+            text = "ok"
+
+            def json(self):
+                return {
+                    "metadata": {"search_uuid": "abc-123"},
+                    "results": {"web": [{"title": "Result", "url": "https://example.com", "description": "desc", "snippets": ["snip"]}]},
+                }
+
+        class DummyClient:
+            def __init__(self, *args, **kwargs):
+                self.kwargs = kwargs
+
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, exc_type, exc, tb):
+                return False
+
+            async def get(self, url, params=None, headers=None):
+                assert url.endswith("/v1/search")
+                assert headers == {"X-API-Key": "test-key"}
+                assert params["query"] == "malware.io"
+                return DummyResponse()
+
+        monkeypatch.setattr(client_module.httpx, "AsyncClient", DummyClient)
+
+        client = WazuhClient(
+            WazuhConfig(wazuh_host="localhost", wazuh_user="test", wazuh_pass="test", verify_ssl=False)
+        )
+        result = await client.search_external_context("malware.io", 3)
+        assert result["data"]["enabled"] is True
+        assert result["data"]["search_uuid"] == "abc-123"
+        assert result["data"]["results"][0]["title"] == "Result"
+
+
 class TestTimeRangeSync:
     """Tests for synchronized time range values (Fix #8)."""
 
