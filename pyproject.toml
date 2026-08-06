@@ -53,7 +53,9 @@ redis = [
 dev = [
     "pytest>=7.0.0",
     "pytest-asyncio>=0.21.0",
+    "pytest-cov>=4.1.0",
     "black>=23.0.0",
+    "isort>=5.12.0",
     "ruff>=0.1.0",
 ]
 
@@ -92,6 +94,16 @@ minversion = "7.0"
 testpaths = ["tests"]
 python_files = ["test_*.py"]
 asyncio_mode = "auto"
+
+[tool.coverage.run]
+source = ["src/wazuh_mcp_server"]
+branch = true
+omit = ["*/__main__.py"]
+
+[tool.coverage.report]
+# Honest floor at the current level. Ratchet upward as coverage grows — never down.
+fail_under = 37
+show_missing = false
 
 [tool.bandit]
 # B104: binding 0.0.0.0 is the documented default for this containerized server (MCP_HOST)

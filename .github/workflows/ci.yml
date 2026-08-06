@@ -53,7 +53,7 @@ jobs:
 
     - name: Run tests
       run: |
-        pytest tests/ -v --cov=src/wazuh_mcp_server --cov-report=xml
+        pytest tests/ -v --cov=src/wazuh_mcp_server --cov-report=xml --cov-fail-under=37
 
     - name: Upload coverage
       uses: codecov/codecov-action@v4
