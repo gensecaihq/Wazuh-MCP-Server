@@ -122,6 +122,20 @@ docker compose up -d
 curl http://localhost:3000/health
 ```
 
+### Pre-built image
+
+A multi-arch image (amd64/arm64) is published to GitHub Container Registry on every release and on every push to `main`:
+
+```bash
+docker pull ghcr.io/gensecaihq/wazuh-mcp-server:latest   # main branch
+docker pull ghcr.io/gensecaihq/wazuh-mcp-server:4.2.1    # pinned release
+```
+
+```bash
+docker run -d --name wazuh-mcp-server --env-file .env -p 3000:3000 \
+  ghcr.io/gensecaihq/wazuh-mcp-server:latest
+```
+
 ### Connect Claude Desktop
 
 1. **Settings** → **Connectors** → **Add custom connector**
