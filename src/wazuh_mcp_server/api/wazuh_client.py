@@ -24,6 +24,9 @@ _TIME_RANGE_HOURS = {"1h": 1, "6h": 6, "12h": 12, "1d": 24, "24h": 24, "7d": 168
 
 YDC_DEFAULT_BASE_URL = "https://ydc-index.io"
 
+# Reporting window for ISO 27001 alert-backed controls (dashboard/gap analysis).
+_ISO27001_ALERT_WINDOW_DAYS = 30
+
 # ISO 27001:2022 Annex A control map — links each control to Wazuh data sources
 # data_source: "sca" | "alerts" | "vulnerabilities" | "agents" | "stats" | "none"
 _ISO27001_CONTROL_MAP: Dict[str, Dict] = {
@@ -1482,8 +1485,13 @@ class WazuhClient:
         agents_coro = self._request(
             "GET", "/agents", params={"status": "active", "limit": 500, "select": "id,name,os.name"}
         )
-        # Alerts live in the Indexer — the Manager API removed its /alerts endpoint
-        alerts_coro = self.get_alerts(limit=500)
+        # Alerts live in the Indexer — the Manager API removed its /alerts endpoint.
+        # Bound to a fixed reporting window so the dashboard reflects recent posture
+        # (and matches the other ISO tools) rather than counting all alert history.
+        _iso_window_start = (datetime.now(timezone.utc) - timedelta(days=_ISO27001_ALERT_WINDOW_DAYS)).strftime(
+            "%Y-%m-%dT%H:%M:%SZ"
+        )
+        alerts_coro = self.get_alerts(limit=500, timestamp_start=_iso_window_start)
         stats_coro = self._request("GET", "/manager/stats/analysisd")
 
         agents_res, alerts_res, stats_res = await asyncio.gather(
