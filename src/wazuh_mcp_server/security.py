@@ -409,7 +409,10 @@ def validate_boolean(value: Any, default: bool = True, param_name: str = "flag")
 
 # Regex patterns for action tool parameter validation
 USERNAME_PATTERN = re.compile(r"^[a-zA-Z0-9._@-]{1,128}$")
-AR_COMMAND_PATTERN = re.compile(r"^[a-zA-Z0-9_-]{1,64}$")
+# Wazuh active-response command names may carry a leading "!" (the stateful-execution
+# marker, e.g. "!firewall-drop"). Accept it optionally so both "firewall-drop" and
+# "!firewall-drop" validate; run_active_response normalizes to the "!" form.
+AR_COMMAND_PATTERN = re.compile(r"^!?[a-zA-Z0-9_-]{1,64}$")
 
 
 def validate_ip_address(value: Any, required: bool = False, param_name: str = "ip_address") -> Optional[str]:

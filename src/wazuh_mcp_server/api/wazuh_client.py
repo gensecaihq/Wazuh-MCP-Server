@@ -5,6 +5,7 @@ import json
 import logging
 import math
 import os
+import re
 import time
 from collections import OrderedDict, deque
 from datetime import datetime, timedelta, timezone
@@ -162,6 +163,14 @@ class WazuhClient:
         self._youcom_api_key = os.getenv("YDC_API_KEY", "").strip() or None
         self._youcom_base_url = os.getenv("YDC_BASE_URL", YDC_DEFAULT_BASE_URL).rstrip("/")
         self._youcom_verify_ssl = os.getenv("YDC_VERIFY_SSL", "true").strip().lower() == "true"
+
+        # Optional custom active-response commands for unblocking. Stock Wazuh cannot
+        # remove a firewall-drop / host-deny block via the API (the API only ever
+        # triggers the "add" action; the stock scripts ignore extra_args for add/delete),
+        # so the firewall_allow / host_allow rollback tools require an operator-deployed
+        # undo script named here. Without one they fail safe rather than re-blocking.
+        self._ar_firewall_undo_command = self._normalize_ar_command(os.getenv("WAZUH_AR_FIREWALL_UNDO_COMMAND"))
+        self._ar_hostdeny_undo_command = self._normalize_ar_command(os.getenv("WAZUH_AR_HOSTDENY_UNDO_COMMAND"))
 
         # Circuit breaker for API resilience — only trip on connection/server errors,
         # not on user-input errors (ValueError) which shouldn't degrade the circuit
@@ -1502,8 +1511,12 @@ class WazuhClient:
             except Exception:
                 sca_results.append({"agent_id": aid, "agent_name": ag.get("name"), "sca_items": []})
 
-        # Vulnerability summary (indexer if available, else skip)
+        # Vulnerability summary (indexer if available, else skip).
+        # vuln_query_ok gates scoring: a *successful* query that returns zero vulns is a
+        # legitimate 100/pass, but a failed query (Indexer outage/auth error) or no target
+        # must score the vuln controls as no_data — not silently as full compliance.
         vuln_summary: Dict[str, int] = {"critical": 0, "high": 0, "medium": 0, "low": 0}
+        vuln_query_ok = False
         if self._indexer_client:
             try:
                 target_id = agent_id or (agents[0].get("id") if agents else None)
@@ -1513,8 +1526,12 @@ class WazuhClient:
                         sev = (v.get("severity") or "").lower()
                         if sev in vuln_summary:
                             vuln_summary[sev] += 1
+                    vuln_query_ok = True
             except Exception:
-                pass
+                logger.warning(
+                    "ISO27001: vulnerability query failed; scoring vulnerability controls as no_data",
+                    exc_info=True,
+                )
 
         # Build per-control evidence
         alert_groups: Dict[str, int] = {}
@@ -1532,7 +1549,9 @@ class WazuhClient:
                     return "medium"
                 return "low"
             if source == "vulnerabilities":
-                return "high" if self._indexer_client else "none"
+                # Confidence reflects whether the query actually succeeded, not merely
+                # whether an Indexer client is configured.
+                return "high" if vuln_query_ok else "none"
             if source == "alerts":
                 if evidence_count >= 20:
                     return "high"
@@ -1582,14 +1601,16 @@ class WazuhClient:
                 status = "active" if cnt > 0 else "no_data"
 
             elif source == "vulnerabilities":
-                total_vulns = sum(vuln_summary.values())
-                critical = vuln_summary.get("critical", 0)
-                high = vuln_summary.get("high", 0)
-                evidence_count = total_vulns
-                if total_vulns == 0 and not self._indexer_client:
+                if not vuln_query_ok:
+                    # No successful vulnerability query — cannot assert compliance.
                     status = "no_data"
                     score = None
+                    evidence_count = 0
                 else:
+                    total_vulns = sum(vuln_summary.values())
+                    critical = vuln_summary.get("critical", 0)
+                    high = vuln_summary.get("high", 0)
+                    evidence_count = total_vulns
                     # Weighted penalty: critical = -15 pts each (up from -10), high = -5 (up from -3)
                     score = max(0, 100 - critical * 15 - high * 5 - vuln_summary.get("medium", 0))
                     status = "pass" if score >= 75 else "fail"
@@ -1600,7 +1621,9 @@ class WazuhClient:
                 status = "active" if agents else "no_data"
 
             elif source == "stats":
-                analysisd = stats_res.get("data", {}) if stats_res else {}
+                # /manager/stats/analysisd returns data.affected_items[0].{...}, not data.{...}
+                stats_items = stats_res.get("data", {}).get("affected_items", []) if stats_res else []
+                analysisd = stats_items[0] if stats_items else {}
                 events = analysisd.get("total_events_decoded", analysisd.get("events_decoded", 0))
                 evidence_count = events if isinstance(events, int) else 0
                 score = 100 if evidence_count > 0 else 0
@@ -2095,8 +2118,13 @@ class WazuhClient:
         return await self._request("GET", "/manager/stats/analysisd")
 
     async def search_manager_logs(self, query: str, limit: int) -> Dict[str, Any]:
-        """Search manager logs."""
-        params = {"q": query, "limit": limit}
+        """Search manager logs by free text.
+
+        Uses the ``search`` parameter (substring match). The ``q`` parameter requires
+        structured ``field=value`` syntax and returns HTTP 400 on bare search terms,
+        which is what LLM callers typically pass.
+        """
+        params = {"search": query, "limit": limit}
         return await self._request("GET", "/manager/logs", params=params)
 
     async def get_manager_error_logs(self, limit: int) -> Dict[str, Any]:
@@ -2191,7 +2219,15 @@ class WazuhClient:
         if not agent_id:
             raise ValueError("agent_id is required for disable_user")
         username = self._sanitize_ar_argument(username, "username")
-        data = {"command": "!disable-account", "agent_list": [agent_id], "arguments": [username]}
+        # The stock disable-account script reads the target user from
+        # alert.data.dstuser and ignores extra_args; pass it there (and keep it in
+        # arguments for custom scripts that expect a positional username).
+        data = {
+            "command": "!disable-account",
+            "agent_list": [agent_id],
+            "arguments": [username],
+            "alert": {"data": {"dstuser": username}},
+        }
         return await self.execute_active_response(data)
 
     async def quarantine_file(self, agent_id: str, file_path: str) -> Dict[str, Any]:
@@ -2218,6 +2254,10 @@ class WazuhClient:
 
     async def run_active_response(self, agent_id: str, command: str, parameters: dict = None) -> Dict[str, Any]:
         """Execute generic active response command."""
+        # Normalize to the "!" stateful-execution form so callers may pass either
+        # "firewall-drop" or "!firewall-drop" (the tool validator accepts both, but the
+        # allowlist is keyed on the "!" form — without this the tool could never succeed).
+        command = command if command.startswith("!") else f"!{command}"
         if command not in self.ALLOWED_AR_COMMANDS:
             raise ValueError(
                 f"Unknown active response command: {command}. "
@@ -2345,7 +2385,8 @@ class WazuhClient:
 
     async def check_file_quarantine(self, agent_id: str, file_path: str) -> Dict[str, Any]:
         """Check if a file has been quarantined via FIM events."""
-        result = await self._request("GET", "/syscheck", params={"agents_list": agent_id, "q": f"file={file_path}"})
+        # FIM data is per-agent: GET /syscheck/{agent_id}. GET /syscheck (no id) is 405.
+        result = await self._request("GET", f"/syscheck/{agent_id}", params={"q": f"file={file_path}"})
         events = result.get("data", {}).get("affected_items", [])
         quarantined = any(e.get("type") == "deleted" or "quarantine" in str(e) for e in events)
         return {"data": {"agent_id": agent_id, "file_path": file_path, "quarantined": quarantined}}
@@ -2371,27 +2412,53 @@ class WazuhClient:
         data = {"command": "!quarantine", "agent_list": [agent_id], "arguments": ["restore", file_path]}
         return await self.execute_active_response(data)
 
-    async def firewall_allow(self, agent_id: str, src_ip: str) -> Dict[str, Any]:
-        """Remove firewall drop rule via active response."""
+    @staticmethod
+    def _normalize_ar_command(value: Optional[str]) -> Optional[str]:
+        """Validate and normalize an operator-supplied active-response command name."""
+        if not value or not str(value).strip():
+            return None
+        command = str(value).strip()
+        if not re.match(r"^!?[a-zA-Z0-9_-]{1,64}$", command):
+            raise ValueError(f"Invalid active-response command name: {command!r}")
+        return command if command.startswith("!") else f"!{command}"
+
+    async def _undo_block(
+        self, agent_id: str, src_ip: str, undo_command: Optional[str], block_kind: str
+    ) -> Dict[str, Any]:
+        """Remove an active-response block using an operator-configured undo command.
+
+        Stock Wazuh has no API path to trigger the stateful 'delete' action — the API
+        only sends 'add', and the stock firewall-drop/host-deny scripts decide add vs
+        delete from that field, not from extra_args. Re-invoking the block command here
+        would silently RE-BLOCK the address. So this requires an operator-deployed undo
+        script; without one it raises rather than doing the wrong thing.
+        """
         self._validate_ip(src_ip)
         src_ip = self._sanitize_ar_argument(src_ip, "src_ip")
+        if not undo_command:
+            env_var = "WAZUH_AR_FIREWALL_UNDO_COMMAND" if block_kind == "firewall" else "WAZUH_AR_HOSTDENY_UNDO_COMMAND"
+            raise ValueError(
+                f"Cannot remove a {block_kind} block through the Wazuh API: stock active-response "
+                f"scripts only support the 'add' action via the API, so this would re-block "
+                f"{src_ip} instead of removing it. Configure an operator-deployed undo script "
+                f"and set {env_var} to its command name, or rely on the manager's "
+                f"<active-response><timeout> to expire the block automatically."
+            )
         data = {
-            "command": "!firewall-drop",
+            "command": undo_command,
             "agent_list": [agent_id],
-            "arguments": [f"-srcip {src_ip}", "delete"],
+            "arguments": [f"-srcip {src_ip}"],
+            "alert": {"data": {"srcip": src_ip}},
         }
         return await self.execute_active_response(data)
 
+    async def firewall_allow(self, agent_id: str, src_ip: str) -> Dict[str, Any]:
+        """Remove a firewall-drop block via an operator-configured undo active response."""
+        return await self._undo_block(agent_id, src_ip, self._ar_firewall_undo_command, "firewall")
+
     async def host_allow(self, agent_id: str, src_ip: str) -> Dict[str, Any]:
-        """Remove hosts.deny entry via active response."""
-        self._validate_ip(src_ip)
-        src_ip = self._sanitize_ar_argument(src_ip, "src_ip")
-        data = {
-            "command": "!host-deny",
-            "agent_list": [agent_id],
-            "arguments": [f"-srcip {src_ip}", "delete"],
-        }
-        return await self.execute_active_response(data)
+        """Remove a hosts.deny block via an operator-configured undo active response."""
+        return await self._undo_block(agent_id, src_ip, self._ar_hostdeny_undo_command, "host-deny")
 
     async def close(self):
         """Close the HTTP client and indexer client, releasing all connections."""

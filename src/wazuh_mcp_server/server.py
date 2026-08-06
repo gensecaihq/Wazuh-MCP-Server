@@ -2199,7 +2199,7 @@ async def handle_tools_list(params: Dict[str, Any], session: MCPSession) -> Dict
         },
         {
             "name": "wazuh_firewall_allow",
-            "description": "[ACTION] Remove a firewall drop rule. Risk: MEDIUM, Reversal of firewall_drop.",
+            "description": "[ACTION] Remove a firewall-drop block. Risk: MEDIUM, reversal of firewall_drop. Requires an operator-deployed undo script (set WAZUH_AR_FIREWALL_UNDO_COMMAND); stock Wazuh cannot unblock via the API and this tool will refuse rather than re-block.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
@@ -2211,7 +2211,7 @@ async def handle_tools_list(params: Dict[str, Any], session: MCPSession) -> Dict
         },
         {
             "name": "wazuh_host_allow",
-            "description": "[ACTION] Remove a hosts.deny entry. Risk: MEDIUM, Reversal of host_deny.",
+            "description": "[ACTION] Remove a hosts.deny entry. Risk: MEDIUM, reversal of host_deny. Requires an operator-deployed undo script (set WAZUH_AR_HOSTDENY_UNDO_COMMAND); stock Wazuh cannot unblock via the API and this tool will refuse rather than re-block.",
             "inputSchema": {
                 "type": "object",
                 "properties": {

@@ -212,6 +212,8 @@ python -c "import secrets; print('wazuh_' + secrets.token_urlsafe(32))"
 | `YDC_BASE_URL` | `https://ydc-index.io` | Optional You.com Search API base URL |
 | `YDC_VERIFY_SSL` | `true` | Verify You.com TLS certificates independently of Wazuh |
 | `WAZUH_CLUSTERS_FILE` | `./config/clusters.json` | Optional multi-cluster topology file (see below) |
+| `WAZUH_AR_FIREWALL_UNDO_COMMAND` | — | Custom active-response command that removes a firewall-drop block. Required for `wazuh_firewall_allow` — stock Wazuh can't unblock via the API |
+| `WAZUH_AR_HOSTDENY_UNDO_COMMAND` | — | Custom active-response command that removes a hosts.deny block. Required for `wazuh_host_allow` |
 
 > Full reference: [Configuration Guide](docs/configuration.md)
 
