@@ -11,7 +11,7 @@ import re
 import time
 from collections import defaultdict, deque
 from dataclasses import dataclass
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, Set
 
 import httpx
@@ -630,6 +630,46 @@ class SanitizingLogFilter(logging.Filter):
         return True
 
 
+MAX_JSON_DEPTH = 64
+
+
+def parse_json_body_safe(raw: bytes, max_depth: int = MAX_JSON_DEPTH):
+    """Parse a JSON body, rejecting excessive nesting before it can exhaust the stack.
+
+    ``json.loads`` raises ``RecursionError`` (not ``JSONDecodeError``) on deeply nested
+    input, which would escape a handler that only catches decode errors and burn CPU per
+    request. Pre-scan the raw bytes for nesting depth (string-aware) and cap it, then
+    parse. Raises ``ValueError`` on malformed or over-nested input.
+    """
+    import json as _json
+
+    depth = 0
+    in_string = False
+    escaped = False
+    for byte in raw:
+        char = chr(byte) if byte < 128 else ""
+        if in_string:
+            if escaped:
+                escaped = False
+            elif char == "\\":
+                escaped = True
+            elif char == '"':
+                in_string = False
+            continue
+        if char == '"':
+            in_string = True
+        elif char in "[{":
+            depth += 1
+            if depth > max_depth:
+                raise ValueError(f"JSON nesting too deep (>{max_depth})")
+        elif char in "]}":
+            depth = max(0, depth - 1)
+    try:
+        return _json.loads(raw)
+    except RecursionError:
+        raise ValueError("JSON nesting too deep")
+
+
 def install_log_sanitizer(extra_logger_names=("uvicorn", "uvicorn.error", "uvicorn.access")):
     """Attach ``SanitizingLogFilter`` to the handlers that actually emit records.
 
@@ -714,10 +754,12 @@ class RateLimiter:
 
         # Check rate limit
         if len(request_times) >= self.max_requests:
-            # Block for escalating time periods
-            block_duration = min(300, len(request_times) * 10)  # Max 5 minutes
-            self.blocked_until[identifier] = datetime.now(timezone.utc) + timedelta(seconds=block_duration)
-            return False, block_duration
+            # Sliding window: allow again as soon as the oldest request leaves the window,
+            # rather than imposing a fixed escalating multi-minute block. A single burst
+            # at the ceiling should cost seconds of backoff, not 5 minutes.
+            oldest = request_times[0]
+            retry_after = max(1, int(self.window_seconds - (now - oldest)) + 1)
+            return False, retry_after
 
         # Allow request
         request_times.append(now)

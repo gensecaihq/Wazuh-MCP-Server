@@ -32,8 +32,11 @@ from wazuh_mcp_server.config import WazuhConfig, get_config
 from wazuh_mcp_server.monitoring import ACTIVE_CONNECTIONS, setup_monitoring_middleware
 from wazuh_mcp_server.resilience import GracefulShutdown
 from wazuh_mcp_server.security import (
+    MAX_JSON_DEPTH,
     RateLimiter,
     ToolValidationError,
+    parse_json_body_safe,
+    security_manager,
     security_middleware,
     validate_active_response_command,
     validate_agent_id,
@@ -735,6 +738,32 @@ MCP_ERRORS = {
     "MISSING_CLIENT_CAPABILITY": -32021,
     "UNSUPPORTED_PROTOCOL_VERSION": -32022,
 }
+
+
+def _rate_limit_key(request: Request, auth_token: Any = None) -> str:
+    """Derive a rate-limit bucket key.
+
+    Prefer the authenticated principal so distinct clients get distinct buckets even
+    behind a shared TLS-terminating reverse proxy (where request.client.host is the
+    proxy for every request). Combine it with the trusted-proxy-aware client IP so
+    authless/oauth callers on different real IPs still separate.
+    """
+    ip = security_manager.get_client_ip(request)
+    api_key_id = getattr(auth_token, "api_key_id", None) or "anon"
+    return f"{api_key_id}|{ip}"
+
+
+def _normalize_jsonrpc_id(value: Any) -> Optional[Union[str, int]]:
+    """JSON-RPC ids must be string, number, or null. Coerce anything else (float, list,
+    object — malformed but attacker-controllable) to None so building an error response
+    can't itself raise and 500 with no body."""
+    if isinstance(value, bool):  # bool is an int subclass; not a valid id
+        return None
+    if isinstance(value, int):
+        return value
+    if isinstance(value, str):
+        return value
+    return None
 
 
 def create_error_response(
@@ -3011,7 +3040,7 @@ async def handle_modern_request(
     metadata (MCP-Protocol-Version, Mcp-Method, Mcp-Name) is validated per the
     Streamable HTTP transport rules.
     """
-    request_id = body.get("id")
+    request_id = _normalize_jsonrpc_id(body.get("id"))
     requested_version = meta.get(META_PROTOCOL_VERSION)
     response_headers = {"MCP-Protocol-Version": str(requested_version)}
 
@@ -3201,9 +3230,9 @@ async def mcp_endpoint(
         # Origin validation per MCP 2025-11-25 spec
         validate_origin_header(origin, config.ALLOWED_ORIGINS)
 
-        # Rate limiting
-        client_ip = request.client.host if request.client else "unknown"
-        allowed, retry_after = rate_limiter.is_allowed(client_ip)
+        # Rate limiting — key on the authenticated principal + trusted-proxy IP so a
+        # single client behind the reverse proxy can't exhaust everyone's shared bucket.
+        allowed, retry_after = rate_limiter.is_allowed(_rate_limit_key(request, auth_token))
         if not allowed:
             headers = {"Retry-After": str(retry_after)} if retry_after else {}
             raise HTTPException(status_code=429, detail="Rate limit exceeded", headers=headers)
@@ -3419,9 +3448,8 @@ async def mcp_sse_endpoint(
     # Origin validation per MCP 2025-11-25 spec
     validate_origin_header(origin, config.ALLOWED_ORIGINS)
 
-    # Rate limiting
-    client_ip = request.client.host if request.client else "unknown"
-    allowed, retry_after = rate_limiter.is_allowed(client_ip)
+    # Rate limiting — key on the authenticated principal + trusted-proxy IP
+    allowed, retry_after = rate_limiter.is_allowed(_rate_limit_key(request, auth_token))
     if not allowed:
         headers = {"Retry-After": str(retry_after)} if retry_after else {}
         raise HTTPException(status_code=429, detail="Rate limit exceeded", headers=headers)
@@ -3505,9 +3533,8 @@ async def mcp_streamable_http_endpoint(
     # Only validate if Origin is present; if present and invalid, return 403
     validate_origin_header(origin, config.ALLOWED_ORIGINS)
 
-    # Rate limiting
-    client_ip = request.client.host if request.client else "unknown"
-    allowed, retry_after = rate_limiter.is_allowed(client_ip)
+    # Rate limiting — key on the authenticated principal + trusted-proxy IP
+    allowed, retry_after = rate_limiter.is_allowed(_rate_limit_key(request, auth_token))
     if not allowed:
         headers = {"Retry-After": str(retry_after)} if retry_after else {}
         raise HTTPException(status_code=429, detail="Rate limit exceeded", headers=headers)
@@ -3523,8 +3550,10 @@ async def mcp_streamable_http_endpoint(
         body = None
         if request.method == "POST":
             try:
-                body = await request.json()
-            except json.JSONDecodeError:
+                # Depth-capped parse: a deeply nested payload otherwise raises RecursionError
+                # (not JSONDecodeError), which would escape as a 500 and burn CPU per request.
+                body = parse_json_body_safe(await request.body(), max_depth=MAX_JSON_DEPTH)
+            except (json.JSONDecodeError, ValueError):
                 return JSONResponse(
                     content=create_error_response(None, MCP_ERRORS["PARSE_ERROR"], "Invalid JSON").dict(),
                     status_code=400,
