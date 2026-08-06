@@ -950,5 +950,124 @@ class TestCloseErrorHandling:
         await client.close()
 
 
+class TestRuleGroupsFilter:
+    """Tests for the rule_groups alert filter (#86) and ISO 27001 alert routing (#84)."""
+
+    def _client_with_indexer(self):
+        from wazuh_mcp_server.api.wazuh_client import WazuhClient
+        from wazuh_mcp_server.config import WazuhConfig
+
+        config = WazuhConfig(
+            wazuh_host="localhost", wazuh_user="test", wazuh_pass="test", verify_ssl=False,
+            wazuh_indexer_host="localhost", wazuh_indexer_user="idx", wazuh_indexer_pass="idx",
+        )
+        return WazuhClient(config)
+
+    @pytest.mark.asyncio
+    async def test_indexer_get_alerts_builds_terms_query_for_rule_groups(self):
+        from wazuh_mcp_server.api.wazuh_indexer import WazuhIndexerClient
+
+        indexer = WazuhIndexerClient(host="localhost", username="u", password="p")
+        captured = {}
+
+        async def fake_search(index, query, size=100, sort=None):
+            captured["query"] = query
+            return {"hits": {"hits": [], "total": {"value": 0}}}
+
+        indexer._search = fake_search
+        await indexer.get_alerts(rule_groups=["authentication_failed", "firewall"], agent_id="001")
+
+        clauses = captured["query"]["bool"]["must"]
+        assert {"terms": {"rule.groups": ["authentication_failed", "firewall"]}} in clauses
+        assert {"term": {"agent.id": "001"}} in clauses
+
+    @pytest.mark.asyncio
+    async def test_client_get_alerts_forwards_rule_groups(self):
+        client = self._client_with_indexer()
+        captured = {}
+
+        async def fake_get_alerts(**kwargs):
+            captured.update(kwargs)
+            return {"data": {"affected_items": [], "total_affected_items": 0}}
+
+        client._indexer_client.get_alerts = fake_get_alerts
+        await client.get_alerts(limit=50, rule_groups=["malware"])
+        assert captured["rule_groups"] == ["malware"]
+        assert captured["limit"] == 50
+
+    @pytest.mark.asyncio
+    async def test_iso27001_control_detail_uses_indexer_not_manager_alerts(self):
+        """Alert-backed controls must query the Indexer — the Manager /alerts endpoint is gone (404 on 4.8+)."""
+        client = self._client_with_indexer()
+        manager_endpoints = []
+        captured = {}
+
+        async def fake_request(method, endpoint, **kwargs):
+            manager_endpoints.append(endpoint)
+            return {"data": {"affected_items": []}}
+
+        async def fake_get_alerts(**kwargs):
+            captured.update(kwargs)
+            return {
+                "data": {
+                    "affected_items": [
+                        {
+                            "id": "1",
+                            "timestamp": "2026-08-06T00:00:00Z",
+                            "rule": {"id": "110200", "description": "EDR detection", "level": 10, "groups": ["malware"]},
+                            "agent": {"name": "web-01"},
+                        }
+                    ],
+                    "total_affected_items": 1,
+                }
+            }
+
+        client._request = fake_request
+        client._indexer_client.get_alerts = fake_get_alerts
+
+        result = await client.get_iso27001_control_detail(control_id="A.8.7")
+        block = result["data"]["controls"][0]
+
+        assert "/alerts" not in manager_endpoints
+        assert captured["rule_groups"] == ["malware", "virus", "rootcheck", "trojans"]
+        assert block["evidence"]["alert_count"] == 1
+        assert "error" not in block["evidence"]
+
+    @pytest.mark.asyncio
+    async def test_iso27001_alerts_routes_via_indexer(self):
+        client = self._client_with_indexer()
+        captured = {}
+
+        async def fake_request(method, endpoint, **kwargs):
+            assert endpoint != "/alerts", "Manager /alerts endpoint must not be used"
+            return {"data": {"affected_items": []}}
+
+        async def fake_get_alerts(**kwargs):
+            captured.update(kwargs)
+            return {"data": {"affected_items": [], "total_affected_items": 0}}
+
+        client._request = fake_request
+        client._indexer_client.get_alerts = fake_get_alerts
+
+        result = await client.get_iso27001_alerts(time_range="24h", agent_id="002")
+        assert captured["agent_id"] == "002"
+        assert "timestamp_start" in captured
+        assert result["data"]["total_alerts_fetched"] == 0
+
+    def test_validate_rule_groups(self):
+        from wazuh_mcp_server.security import ToolValidationError, validate_rule_groups
+
+        assert validate_rule_groups(None) is None
+        assert validate_rule_groups("sshd") == ["sshd"]
+        assert validate_rule_groups(["authentication_failed", "pci_dss_10.2.4"]) == [
+            "authentication_failed",
+            "pci_dss_10.2.4",
+        ]
+        with pytest.raises(ToolValidationError):
+            validate_rule_groups(["bad group name!"])
+        with pytest.raises(ToolValidationError):
+            validate_rule_groups([f"g{i}" for i in range(25)])
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

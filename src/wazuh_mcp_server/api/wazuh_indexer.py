@@ -10,7 +10,7 @@ Wazuh stores alerts and vulnerability data in the Wazuh Indexer
 import asyncio
 import json
 import logging
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
 import httpx
 from tenacity import retry, retry_if_exception_type, stop_after_attempt, wait_exponential
@@ -317,6 +317,7 @@ class WazuhIndexerClient:
         query_text: Optional[str] = None,
         srcip: Optional[str] = None,
         dstip: Optional[str] = None,
+        rule_groups: Optional[List[str]] = None,
     ) -> Dict[str, Any]:
         """
         Get alerts from the Wazuh Indexer (wazuh-alerts-* index).
@@ -331,6 +332,8 @@ class WazuhIndexerClient:
             query_text: Free-text search via Elasticsearch query_string (searches all fields)
             srcip: Filter by source IP (data.srcip)
             dstip: Filter by destination IP (data.dstip)
+            rule_groups: Filter by rule group membership — matches alerts whose
+                rule.groups array contains ANY of the given group names
 
         Returns:
             Alert data in standard Wazuh format
@@ -344,6 +347,11 @@ class WazuhIndexerClient:
 
         if agent_id:
             must_clauses.append({"term": {"agent.id": agent_id}})
+
+        if rule_groups:
+            # rule.groups is a keyword array — a terms query matches documents whose
+            # groups contain at least one of the requested values (OR semantics)
+            must_clauses.append({"terms": {"rule.groups": rule_groups}})
 
         if level:
             # level is a minimum severity threshold (e.g. "10" means level >= 10)

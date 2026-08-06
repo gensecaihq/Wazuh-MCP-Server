@@ -45,12 +45,13 @@ from wazuh_mcp_server.security import (
     validate_indicator_type,
     validate_input,
     validate_ip_address,
+    validate_iso27001_control,
     validate_limit,
     validate_query,
     validate_report_type,
+    validate_rule_groups,
     validate_rule_id,
     validate_severity,
-    validate_iso27001_control,
     validate_time_range,
     validate_timestamp,
     validate_username,
@@ -1390,6 +1391,12 @@ async def handle_tools_list(params: Dict[str, Any], session: MCPSession) -> Dict
                     "rule_id": {"type": "string", "description": "Filter by specific rule ID"},
                     "level": {"type": "string", "description": "Filter by alert level (e.g., '12', '10+')"},
                     "agent_id": {"type": "string", "description": "Filter by agent ID"},
+                    "rule_groups": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "maxItems": 20,
+                        "description": "Filter by rule group(s), e.g. ['authentication_failed', 'firewall'] — matches alerts belonging to ANY listed group",
+                    },
                     "timestamp_start": {"type": "string", "description": "Start timestamp — ISO 8601 (YYYY-MM-DDTHH:MM:SSZ) or relative date math (e.g. now-24h, now-7d)"},
                     "timestamp_end": {"type": "string", "description": "End timestamp — ISO 8601 (YYYY-MM-DDTHH:MM:SSZ) or relative date math (e.g. now, now-1h)"},
                     "compact": {
@@ -2170,6 +2177,7 @@ async def handle_tools_call(params: Dict[str, Any], session: MCPSession) -> Dict
                         "Use a number 0-15, optionally with '+' (e.g., '12', '10+')",
                     )
             agent_id = validate_agent_id(arguments.get("agent_id"))
+            rule_groups = validate_rule_groups(arguments.get("rule_groups"))
             timestamp_start = validate_timestamp(arguments.get("timestamp_start"), param_name="timestamp_start")
             timestamp_end = validate_timestamp(arguments.get("timestamp_end"), param_name="timestamp_end")
             compact = validate_boolean(arguments.get("compact"), default=True, param_name="compact")
@@ -2179,6 +2187,7 @@ async def handle_tools_call(params: Dict[str, Any], session: MCPSession) -> Dict
                 rule_id=rule_id,
                 level=level,
                 agent_id=agent_id,
+                rule_groups=rule_groups,
                 timestamp_start=timestamp_start,
                 timestamp_end=timestamp_end,
             )

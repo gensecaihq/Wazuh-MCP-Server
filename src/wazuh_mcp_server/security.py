@@ -349,6 +349,34 @@ def validate_query(value: Any, required: bool = True, param_name: str = "query")
     return query
 
 
+RULE_GROUP_PATTERN = re.compile(r"^[A-Za-z0-9_.-]{1,64}$")
+
+
+def validate_rule_groups(value: Any, param_name: str = "rule_groups") -> Optional[List[str]]:
+    """Validate an optional list of Wazuh rule group names (e.g. authentication_failed, firewall)."""
+    if value is None:
+        return None
+    if isinstance(value, str):
+        value = [value]
+    if not isinstance(value, list):
+        raise ToolValidationError(
+            param_name, "must be a list of rule group names", 'Provide e.g. ["authentication_failed", "firewall"]'
+        )
+    groups: List[str] = []
+    for item in value:
+        group = str(item).strip()
+        if not RULE_GROUP_PATTERN.match(group):
+            raise ToolValidationError(
+                param_name,
+                f"invalid group name '{group}'",
+                "Group names may contain letters, digits, dot, underscore, and hyphen (max 64 chars)",
+            )
+        groups.append(group)
+    if len(groups) > 20:
+        raise ToolValidationError(param_name, f"too many groups ({len(groups)})", "Provide at most 20 rule groups")
+    return groups or None
+
+
 def validate_boolean(value: Any, default: bool = True, param_name: str = "flag") -> bool:
     """Validate boolean parameter."""
     if value is None:

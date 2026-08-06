@@ -288,6 +288,7 @@ class WazuhClient:
             agent_id=params.get("agent_id"),
             timestamp_start=params.get("timestamp_start"),
             timestamp_end=params.get("timestamp_end"),
+            rule_groups=params.get("rule_groups"),
         )
 
     async def get_alerts_aggregated(
@@ -1435,7 +1436,8 @@ class WazuhClient:
                 return default
 
         agents_coro = self._request("GET", "/agents", params={"status": "active", "limit": 500, "select": "id,name,os.name"})
-        alerts_coro = self._request("GET", "/alerts", params={"limit": 500, "sort": "-timestamp"})
+        # Alerts live in the Indexer — the Manager API removed its /alerts endpoint
+        alerts_coro = self.get_alerts(limit=500)
         stats_coro = self._request("GET", "/manager/stats/analysisd")
 
         agents_res, alerts_res, stats_res = await asyncio.gather(
@@ -1736,13 +1738,13 @@ class WazuhClient:
                         }
 
                 elif source == "alerts":
-                    params: Dict[str, Any] = {"limit": 100, "sort": "-timestamp"}
+                    # Alerts live in the Indexer — the Manager API removed its /alerts endpoint
                     groups = ctrl["rule_groups"]
-                    if groups:
-                        params["q"] = " OR ".join(f"rule.groups~{g}" for g in groups)
-                    if agent_id:
-                        params["q"] = (params.get("q", "") + f" AND agent.id={agent_id}").lstrip(" AND ")
-                    alerts_res = await self._request("GET", "/alerts", params=params)
+                    alerts_res = await self.get_alerts(
+                        limit=100,
+                        agent_id=agent_id,
+                        rule_groups=groups or None,
+                    )
                     alert_items = alerts_res.get("data", {}).get("affected_items", [])
                     block["evidence"] = {
                         "alert_count": len(alert_items),
@@ -1914,12 +1916,10 @@ class WazuhClient:
         """Get recent alerts mapped to ISO 27001:2022 Annex A control domains."""
         hours = _TIME_RANGE_HOURS.get(time_range, 24)
         since = (datetime.now(timezone.utc) - timedelta(hours=hours)).strftime("%Y-%m-%dT%H:%M:%SZ")
-        params: Dict[str, Any] = {"limit": 500, "sort": "-timestamp", "q": f"timestamp>{since}"}
-        if agent_id:
-            params["q"] += f";agent.id={agent_id}"
 
         try:
-            result = await self._request("GET", "/alerts", params=params)
+            # Alerts live in the Indexer — the Manager API removed its /alerts endpoint
+            result = await self.get_alerts(limit=500, timestamp_start=since, agent_id=agent_id)
         except Exception as e:
             return {"error": f"Failed to fetch alerts: {e}"}
 
