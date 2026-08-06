@@ -1,0 +1,10 @@
+# Hadolint configuration
+#
+# DL3018 (pin apk versions) and DL3013 (pin pip tool versions) are ignored:
+# Alpine's rolling package repositories drop old versions on every index update,
+# so exact apk pins break rebuilds within weeks. Python dependency pinning is
+# handled in requirements.txt (installed with --requirement, which DL3013 exempts);
+# the only unpinned pip installs are the pip/setuptools/wheel bootstrap upgrades.
+ignored:
+  - DL3018
+  - DL3013

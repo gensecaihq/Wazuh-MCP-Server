@@ -29,11 +29,11 @@ WORKDIR /build
 
 # Copy and install Python dependencies with latest pip
 COPY requirements.txt .
-RUN pip install --upgrade pip setuptools wheel && \
+RUN pip install --no-cache-dir --upgrade pip setuptools wheel && \
     pip install --user --no-cache-dir --no-compile -r requirements.txt
 
-# Stage 2: Security scanner with latest Trivy
-FROM aquasec/trivy:latest AS scanner
+# Stage 2: Security scanner with pinned Trivy
+FROM aquasec/trivy:0.73.0 AS scanner
 
 LABEL stage=scanner
 COPY --from=builder /root/.local /scan
@@ -41,15 +41,19 @@ COPY --from=builder /root/.local /scan
 # Run comprehensive security scan
 # Set TRIVY_EXIT_CODE=1 in production builds to fail on HIGH/CRITICAL findings
 ARG TRIVY_EXIT_CODE=0
-RUN trivy fs \
+RUN if trivy fs \
     --no-progress \
     --scanners vuln,secret,misconfig \
     --severity HIGH,CRITICAL \
     --format json \
     --output /scan-results.json \
-    --exit-code ${TRIVY_EXIT_CODE} \
-    /scan && echo "Security scan passed" || \
-    (echo "Security scan found HIGH/CRITICAL vulnerabilities - review /scan-results.json" && exit ${TRIVY_EXIT_CODE})
+    --exit-code "${TRIVY_EXIT_CODE}" \
+    /scan; then \
+      echo "Security scan passed"; \
+    else \
+      echo "Security scan found HIGH/CRITICAL vulnerabilities - review /scan-results.json"; \
+      exit "${TRIVY_EXIT_CODE}"; \
+    fi
 
 # Stage 3: Production image with latest Alpine
 FROM python:${PYTHON_VERSION}-alpine AS production
@@ -89,8 +93,8 @@ RUN find /app -type d -exec chmod 755 {} \; && \
     chmod 600 .env.example && \
     chmod +x /app/src/wazuh_mcp_server/*.py
 
-# Switch to non-root user
-USER wazuh
+# Switch to non-root user (numeric uid:gid so the host can resolve it)
+USER 1000:1000
 
 # Environment configuration
 ENV PATH="/home/wazuh/.local/bin:${PATH}" \
@@ -107,10 +111,7 @@ ENV PATH="/home/wazuh/.local/bin:${PATH}" \
 
 # Comprehensive health check with JSON validation and timeout handling
 HEALTHCHECK --interval=15s --timeout=10s --start-period=45s --retries=5 \
-    CMD curl -f --max-time 5 --retry 2 --retry-delay 1 \
-        -H "Accept: application/json" \
-        http://localhost:3000/health | \
-        jq -e '.status == "healthy"' > /dev/null || exit 1
+    CMD ["sh", "-c", "curl -f --max-time 5 --retry 2 --retry-delay 1 -H 'Accept: application/json' http://localhost:3000/health | jq -e '.status == \"healthy\"' > /dev/null || exit 1"]
 
 # Expose SSE port
 EXPOSE 3000
