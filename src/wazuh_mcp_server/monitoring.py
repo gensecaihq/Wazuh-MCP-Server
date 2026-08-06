@@ -6,6 +6,7 @@ Implements comprehensive monitoring with Prometheus metrics and health checks
 
 import asyncio
 import contextvars
+import json
 import logging
 import os
 import sys
@@ -663,3 +664,77 @@ def record_session_event(event: str) -> None:
         SESSION_CREATED.inc()
     elif event == "expired":
         SESSION_EXPIRED.inc()
+
+
+def record_auth_attempt(success: bool) -> None:
+    """Record an authentication attempt (result=success|failure)."""
+    AUTHENTICATION_ATTEMPTS.labels(result="success" if success else "failure").inc()
+
+
+def record_rate_limit_hit(endpoint: str) -> None:
+    """Record a rate-limit rejection for an endpoint."""
+    RATE_LIMIT_HITS.labels(endpoint=endpoint).inc()
+
+
+class JsonLogFormatter(logging.Formatter):
+    """Structured JSON log formatter that surfaces the correlation ID and any `extra` fields.
+
+    The default text formatter silently drops the `correlation_id` (and other structured
+    fields) attached via `extra=`, so correlation IDs never appeared in output. Select this
+    with LOG_FORMAT=json.
+    """
+
+    _RESERVED = set(logging.LogRecord("", 0, "", 0, "", (), None).__dict__) | {"message", "asctime", "taskName"}
+
+    def format(self, record: logging.LogRecord) -> str:
+        payload = {
+            "timestamp": datetime.fromtimestamp(record.created, timezone.utc).isoformat(),
+            "level": record.levelname,
+            "logger": record.name,
+            "message": record.getMessage(),
+        }
+        cid = getattr(record, "correlation_id", None) or get_correlation_id()
+        if cid:
+            payload["correlation_id"] = cid
+        if record.exc_info:
+            payload["exc_info"] = self.formatException(record.exc_info)
+        # Include any structured extras passed via logger(..., extra={...}).
+        for key, value in record.__dict__.items():
+            if key not in self._RESERVED and key not in payload and not key.startswith("_"):
+                try:
+                    json.dumps(value)
+                    payload[key] = value
+                except (TypeError, ValueError):
+                    payload[key] = str(value)
+        return json.dumps(payload, default=str)
+
+
+def configure_logging(log_format: Optional[str] = None, level: int = logging.INFO) -> None:
+    """Configure root logging. LOG_FORMAT=json installs the structured formatter."""
+    log_format = (log_format or os.getenv("LOG_FORMAT", "text")).lower()
+    root = logging.getLogger()
+    root.setLevel(level)
+    if not root.handlers:
+        root.addHandler(logging.StreamHandler())
+    if log_format == "json":
+        formatter: logging.Formatter = JsonLogFormatter()
+    else:
+        formatter = logging.Formatter("%(asctime)s - %(name)s - %(levelname)s - [%(correlation_id)s] %(message)s")
+    for handler in root.handlers:
+        handler.setFormatter(formatter)
+    # The text formatter references %(correlation_id)s, which is absent on most records;
+    # a filter defaults it so formatting never raises.
+    _install_correlation_default(root)
+
+
+class _CorrelationIdDefaultFilter(logging.Filter):
+    def filter(self, record: logging.LogRecord) -> bool:
+        if not hasattr(record, "correlation_id"):
+            record.correlation_id = get_correlation_id() or "-"
+        return True
+
+
+def _install_correlation_default(root: logging.Logger) -> None:
+    for handler in root.handlers:
+        if not any(isinstance(f, _CorrelationIdDefaultFilter) for f in handler.filters):
+            handler.addFilter(_CorrelationIdDefaultFilter())

@@ -14,8 +14,10 @@ import uvicorn
 # Add the src directory to Python path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-# Configure basic logging for startup
-logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
+# Configure logging (LOG_FORMAT=json for structured logs with correlation IDs).
+from wazuh_mcp_server.monitoring import configure_logging  # noqa: E402
+
+configure_logging(level=getattr(logging, os.getenv("LOG_LEVEL", "INFO").upper(), logging.INFO))
 logger = logging.getLogger("wazuh_mcp_server.main")
 
 # Redact credentials on the root handler immediately, before any module logs — the app

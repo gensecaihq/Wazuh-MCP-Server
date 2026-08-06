@@ -109,6 +109,19 @@ _oauth_manager = None
 
 
 async def verify_authentication(authorization: Optional[str], config) -> Optional[Any]:
+    """Authenticate the request and record the outcome metric (success|failure)."""
+    from wazuh_mcp_server.monitoring import record_auth_attempt
+
+    try:
+        token = await _do_verify_authentication(authorization, config)
+        record_auth_attempt(True)
+        return token
+    except HTTPException:
+        record_auth_attempt(False)
+        raise
+
+
+async def _do_verify_authentication(authorization: Optional[str], config) -> Optional[Any]:
     """
     Verify authentication based on configured auth mode.
 
@@ -401,6 +414,9 @@ async def get_or_create_session(session_id: Optional[str], origin: Optional[str]
     new_session_id = str(uuid.uuid4())
     session = MCPSession(new_session_id, origin)
     await sessions.set(new_session_id, session)
+    from wazuh_mcp_server.monitoring import record_session_event
+
+    record_session_event("created")
 
     # Cleanup expired sessions periodically (at most every 60 seconds)
     now = time.time()
@@ -409,6 +425,10 @@ async def get_or_create_session(session_id: Optional[str], origin: Optional[str]
         try:
             expired_count = await sessions.cleanup_expired()
             if expired_count > 0:
+                from wazuh_mcp_server.monitoring import record_session_event
+
+                for _ in range(expired_count):
+                    record_session_event("expired")
                 logger.debug(f"Cleaned up {expired_count} expired sessions")
                 # Sync _initialized_sessions with active sessions
                 active = await sessions.get_all()
@@ -751,6 +771,15 @@ def _rate_limit_key(request: Request, auth_token: Any = None) -> str:
     ip = security_manager.get_client_ip(request)
     api_key_id = getattr(auth_token, "api_key_id", None) or "anon"
     return f"{api_key_id}|{ip}"
+
+
+def _rate_limited_response(retry_after: Optional[int]) -> HTTPException:
+    """Record the rate-limit metric and build the 429 response."""
+    from wazuh_mcp_server.monitoring import record_rate_limit_hit
+
+    record_rate_limit_hit("mcp")
+    headers = {"Retry-After": str(retry_after)} if retry_after else {}
+    return HTTPException(status_code=429, detail="Rate limit exceeded", headers=headers)
 
 
 def _normalize_jsonrpc_id(value: Any) -> Optional[Union[str, int]]:
@@ -3234,8 +3263,7 @@ async def mcp_endpoint(
         # single client behind the reverse proxy can't exhaust everyone's shared bucket.
         allowed, retry_after = rate_limiter.is_allowed(_rate_limit_key(request, auth_token))
         if not allowed:
-            headers = {"Retry-After": str(retry_after)} if retry_after else {}
-            raise HTTPException(status_code=429, detail="Rate limit exceeded", headers=headers)
+            raise _rate_limited_response(retry_after)
 
         # Session validation per MCP Streamable HTTP spec
         if mcp_session_id:
@@ -3451,8 +3479,7 @@ async def mcp_sse_endpoint(
     # Rate limiting — key on the authenticated principal + trusted-proxy IP
     allowed, retry_after = rate_limiter.is_allowed(_rate_limit_key(request, auth_token))
     if not allowed:
-        headers = {"Retry-After": str(retry_after)} if retry_after else {}
-        raise HTTPException(status_code=429, detail="Rate limit exceeded", headers=headers)
+        raise _rate_limited_response(retry_after)
 
     # Session validation: if client provides session ID but session doesn't exist, return 404
     # Done BEFORE incrementing ACTIVE_CONNECTIONS to avoid counter leak on early errors.
@@ -3536,8 +3563,7 @@ async def mcp_streamable_http_endpoint(
     # Rate limiting — key on the authenticated principal + trusted-proxy IP
     allowed, retry_after = rate_limiter.is_allowed(_rate_limit_key(request, auth_token))
     if not allowed:
-        headers = {"Retry-After": str(retry_after)} if retry_after else {}
-        raise HTTPException(status_code=429, detail="Rate limit exceeded", headers=headers)
+        raise _rate_limited_response(retry_after)
 
     # Track active connections (metrics tracked after processing)
     ACTIVE_CONNECTIONS.inc()
