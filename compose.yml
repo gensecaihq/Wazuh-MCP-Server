@@ -34,7 +34,10 @@ services:
       AUTH_MODE: ${AUTH_MODE:-bearer}
       
     ports:
-      - "${MCP_PORT:-3000}:3000"
+      # Bind to loopback by default: the server serves plain HTTP and expects a TLS-
+      # terminating reverse proxy in front. Set MCP_BIND=0.0.0.0 to expose it directly
+      # (only behind a trusted network/firewall).
+      - "${MCP_BIND:-127.0.0.1}:${MCP_PORT:-3000}:3000"
     
     # Modern health check with curl
     healthcheck:

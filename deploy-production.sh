@@ -1,10 +1,13 @@
 #!/bin/bash
-# Production deployment script for Wazuh MCP Remote Server v4.0
-# MCP-compliant remote server with Docker Compose v3.9
-# OS-agnostic deployment with security hardening and monitoring
-# Branch: mcp-remote
-
+# DEPRECATED: this legacy script targets an old branch/version and does not wire the
+# generated key to the server (which reads MCP_API_KEY from .env).
+# Use the supported paths instead:
+#   docker compose up -d      # primary, reads .env
+#   python deploy.py          # cross-platform helper (configures MCP_API_KEY in .env)
+# Kept only for historical reference.
 set -euo pipefail
+
+echo "WARNING: deploy-production.sh is deprecated. Use 'docker compose up -d' or 'python deploy.py'." >&2
 
 # Colors for output
 RED='\033[0;31m'

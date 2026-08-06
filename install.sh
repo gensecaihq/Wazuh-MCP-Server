@@ -1,10 +1,12 @@
 #!/bin/bash
-# Wazuh MCP Remote Server - Intelligent Installer & Configurator
-# OS-agnostic automated setup for production deployment
-# Branch: mcp-remote - Production-ready remote MCP server
-# Supports: Linux (Ubuntu, CentOS, RHEL, Debian, Alpine), macOS, Windows (WSL)
-
+# DEPRECATED: this legacy installer targets an old branch/version. Use the supported
+# paths instead:
+#   docker compose up -d      # primary, reads .env
+#   python deploy.py          # cross-platform helper
+# Kept only for historical reference.
 set -euo pipefail
+
+echo "WARNING: install.sh is deprecated. Use 'docker compose up -d' or 'python deploy.py'." >&2
 
 # Version and metadata
 readonly SCRIPT_VERSION="4.0.0"

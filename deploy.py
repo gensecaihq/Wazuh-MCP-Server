@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-OS-Agnostic Deployment Script for Wazuh MCP Server v4.0.7
+OS-Agnostic Deployment Script for Wazuh MCP Server
 Works on Windows, macOS, and Linux with Docker installed.
 """
 
@@ -39,7 +39,7 @@ def print_header():
     """Print deployment header"""
     print(f"{Colors.CYAN}{'=' * 70}{Colors.NC}")
     print(f"{Colors.CYAN}   WAZUH MCP REMOTE SERVER - PRODUCTION DEPLOYMENT{Colors.NC}")
-    print(f"{Colors.CYAN}   Version: 4.0.7 | OS-Agnostic Docker Deployment{Colors.NC}")
+    print(f"{Colors.CYAN}   Version: 4.3.0 | OS-Agnostic Docker Deployment{Colors.NC}")
     print(f"{Colors.CYAN}{'=' * 70}{Colors.NC}\n")
 
 
@@ -147,31 +147,36 @@ def setup_environment():
 
 
 def generate_api_key() -> str:
-    """Generate a secure API key"""
-    print_step("Generating API key for client authentication...")
+    """Ensure MCP_API_KEY is set in .env (the server only reads it from there)."""
+    print_step("Configuring API key for client authentication...")
 
-    # Generate secure random key
-    random_bytes = secrets.token_bytes(32)
-    api_key = f"wazuh_{random_bytes.hex()[:32]}"
+    env_file = Path('.env')
+
+    # Reuse an existing configured key so redeploys don't invalidate live tokens.
+    if env_file.exists():
+        for line in env_file.read_text().splitlines():
+            stripped = line.strip()
+            if stripped.startswith('MCP_API_KEY=') and stripped.split('=', 1)[1].strip():
+                api_key = stripped.split('=', 1)[1].strip()
+                print_success("Using existing MCP_API_KEY from .env")
+                return api_key
+
+    # Match the format the server validates: wazuh_ + 43-char url-safe base64 (256 bits).
+    api_key = f"wazuh_{secrets.token_urlsafe(32)}"
+
+    # Write it into .env, which docker compose passes to the container as MCP_API_KEY.
+    with open(env_file, 'a') as f:
+        f.write(f"\n# Auto-generated API key for client authentication\nMCP_API_KEY={api_key}\n")
+    try:
+        os.chmod(env_file, 0o600)
+    except OSError:
+        pass  # Windows doesn't support chmod
 
     print()
     print_success(f"Generated API key: {api_key}")
-    print_warning("Save this API key securely - it won't be shown again")
-    print(f"{Colors.CYAN}Use this key to authenticate with the MCP server{Colors.NC}")
+    print_warning("Saved to .env as MCP_API_KEY - keep it secret")
+    print(f"{Colors.CYAN}Use this key as a Bearer token to authenticate with the MCP server{Colors.NC}")
     print()
-
-    # Save to secure file
-    api_key_file = Path('.api_key')
-    with open(api_key_file, 'w') as f:
-        f.write(f"API_KEY={api_key}\n")
-
-    # Set permissions (works on Unix-like systems, silently fails on Windows)
-    try:
-        os.chmod(api_key_file, 0o600)
-    except:
-        pass  # Windows doesn't support chmod
-
-    print_success("API key saved to .api_key")
 
     return api_key
 
@@ -182,7 +187,7 @@ def build_and_deploy():
 
     # Set build metadata
     os.environ['BUILD_DATE'] = datetime.utcnow().strftime('%Y-%m-%dT%H:%M:%SZ')
-    os.environ['VERSION'] = os.environ.get('VERSION', '4.1.1')
+    os.environ['VERSION'] = os.environ.get('VERSION', '4.3.0')
     os.environ['PYTHON_VERSION'] = os.environ.get('PYTHON_VERSION', '3.13')
 
     # Build with Docker Compose
