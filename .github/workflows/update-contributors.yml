@@ -25,13 +25,13 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           fetch-depth: 0
           token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Setup Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
           python-version: '3.12'
 
@@ -67,8 +67,9 @@ jobs:
               """Fetch all pages from a paginated GitHub API endpoint."""
               results = []
               page = 1
+              sep = '&' if '?' in url else '?'  # preserve an existing query string (e.g. state=all)
               while True:
-                  resp = requests.get(f"{url}?page={page}&per_page=100", headers=headers)
+                  resp = requests.get(f"{url}{sep}page={page}&per_page=100", headers=headers)
                   if resp.status_code != 200:
                       break
                   data = resp.json()
@@ -76,7 +77,7 @@ jobs:
                       break
                   results.extend(data)
                   page += 1
-                  if page > 10:  # Safety limit
+                  if page > 30:  # Safety limit
                       break
               return results
 
@@ -88,9 +89,9 @@ jobs:
               if login and login not in BOTS:
                   contributors[login].add('code')
 
-          # Get issue authors
+          # Get issue authors (state=all so closed-issue authors are kept, not just open ones)
           print("Fetching issue authors...")
-          issues = fetch_paginated(f'https://api.github.com/repos/{REPO}/issues')
+          issues = fetch_paginated(f'https://api.github.com/repos/{REPO}/issues?state=all')
           for issue in issues:
               if 'pull_request' not in issue:  # Exclude PRs from issues
                   author = issue.get('user', {}).get('login', '')
@@ -200,7 +201,7 @@ jobs:
           EOF
 
       - name: Open pull request with changes
-        uses: peter-evans/create-pull-request@v6
+        uses: peter-evans/create-pull-request@v8
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
           commit-message: "docs: update contributors list"
