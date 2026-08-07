@@ -152,7 +152,7 @@ All tools return JSON responses with consistent structure:
   "metadata": {
     "query_time": "2024-01-01T12:00:00Z",
     "api_source": "wazuh_server",
-    "version": "4.2.1"
+    "version": "4.3.0"
   }
 }
 ```

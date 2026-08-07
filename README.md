@@ -7,7 +7,7 @@
 
 **Talk to your SIEM.** Query alerts, hunt threats, check vulnerabilities, and trigger active responses across your entire Wazuh deployment — through natural conversation with any AI assistant.
 
-> **v4.2.1** | 55 security tools | Wazuh 4.8.0–4.14.7 | [Changelog](CHANGELOG.md)
+> **v4.3.0** | 55 security tools | Wazuh 4.8.0–4.14.7 | [Changelog](CHANGELOG.md)
 
 ---
 
@@ -128,7 +128,7 @@ A multi-arch image (amd64/arm64) is published to GitHub Container Registry on ev
 
 ```bash
 docker pull ghcr.io/gensecaihq/wazuh-mcp-server:latest   # main branch
-docker pull ghcr.io/gensecaihq/wazuh-mcp-server:4.2.1    # pinned release
+docker pull ghcr.io/gensecaihq/wazuh-mcp-server:4.3.0    # pinned release
 ```
 
 ```bash

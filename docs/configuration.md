@@ -1,6 +1,6 @@
 # Configuration Guide
 
-Complete configuration reference for Wazuh MCP Server v4.2.1.
+Complete configuration reference for Wazuh MCP Server v4.3.0.
 
 All configuration is via environment variables, loaded from (highest precedence first):
 

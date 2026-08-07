@@ -1,6 +1,6 @@
 # Security Configuration Guide
 
-Comprehensive security hardening guide for Wazuh MCP Server v4.2.1 production deployments.
+Comprehensive security hardening guide for Wazuh MCP Server v4.3.0 production deployments.
 
 ## 🔒 Security Overview
 
