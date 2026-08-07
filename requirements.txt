@@ -21,7 +21,7 @@ python-dotenv>=1.0.0,<2.0.0
 
 # Authentication (JWT, HS256)
 pyjwt[crypto]>=2.9.0,<3.0.0
-python-multipart>=0.0.9,<1.0.0  # Form parsing for the OAuth token endpoint
+python-multipart>=0.0.20,<1.0.0  # Form parsing for the OAuth token endpoint
 
 # Monitoring and metrics
 prometheus-client>=0.24.0,<1.0.0

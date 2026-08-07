@@ -82,9 +82,10 @@ jobs:
         echo '```' >> $GITHUB_STEP_SUMMARY
     
     - name: Run Semgrep
-      uses: semgrep/semgrep-action@v1
-      with:
-        config: auto
+      # semgrep/semgrep-action is archived/deprecated; run the maintained CLI instead.
+      run: |
+        pip install semgrep
+        semgrep --config auto --error --sarif --output semgrep.sarif src/
       continue-on-error: false
     
     - name: Upload code security reports
@@ -148,17 +149,25 @@ jobs:
       # there is no diff (BASE == HEAD) and the action errors out; gitleaks below scans
       # the full git history on every event, so secret coverage is maintained.
       if: github.event_name == 'push' || github.event_name == 'pull_request'
-      uses: trufflesecurity/trufflehog@v3.88.0
+      uses: trufflesecurity/trufflehog@v3.96.0
       with:
         path: ./
         extra_args: --only-verified
       continue-on-error: false
 
     - name: Gitleaks (manual)
+      env:
+        # Pin the version and verify the download against a known SHA-256 so a
+        # compromised/altered release artifact can't be silently executed in CI.
+        GITLEAKS_VERSION: "8.28.0"
+        GITLEAKS_SHA256: "a65b5253807a68ac0cafa4414031fd740aeb55f54fb7e55f386acb52e6a840eb"
       run: |
-        # Install gitleaks CLI (free version)
-        wget -q https://github.com/gitleaks/gitleaks/releases/download/v8.21.2/gitleaks_8.21.2_linux_x64.tar.gz
-        tar -xzf gitleaks_8.21.2_linux_x64.tar.gz
+        set -euo pipefail
+        archive="gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz"
+        url="https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/${archive}"
+        curl -fsSL -o "$archive" "$url"
+        echo "${GITLEAKS_SHA256}  ${archive}" | sha256sum -c -
+        tar -xzf "$archive"
         ./gitleaks detect --source . --verbose --report-path gitleaks-report.json
         echo "### Gitleaks Report" >> $GITHUB_STEP_SUMMARY
         if [ -f gitleaks-report.json ]; then

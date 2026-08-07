@@ -1,0 +1,27 @@
+version: 2
+updates:
+  # Python dependencies (pyproject.toml + requirements.txt)
+  - package-ecosystem: "pip"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 10
+    groups:
+      python-deps:
+        patterns:
+          - "*"
+
+  # GitHub Actions used across the workflows (keeps pinned actions current and
+  # flags newly-published SHAs so they can be pinned).
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 10
+
+  # Base images referenced in the Dockerfile.
+  - package-ecosystem: "docker"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 5

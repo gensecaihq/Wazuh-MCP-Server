@@ -32,30 +32,13 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir --upgrade pip setuptools wheel && \
     pip install --user --no-cache-dir --no-compile -r requirements.txt
 
-# Stage 2: Security scanner with pinned Trivy
-FROM aquasec/trivy:0.73.0 AS scanner
+# NOTE: image vulnerability scanning is done on the BUILT image in CI
+# (docker-publish.yml runs `trivy image` and fails on HIGH/CRITICAL), not as a
+# Dockerfile stage. The previous in-Dockerfile `scanner` stage was never part of
+# the production target's build graph (and defaulted to exit-code 0), so it gave a
+# false sense of scanning while never actually gating anything.
 
-LABEL stage=scanner
-COPY --from=builder /root/.local /scan
-
-# Run comprehensive security scan
-# Set TRIVY_EXIT_CODE=1 in production builds to fail on HIGH/CRITICAL findings
-ARG TRIVY_EXIT_CODE=0
-RUN if trivy fs \
-    --no-progress \
-    --scanners vuln,secret,misconfig \
-    --severity HIGH,CRITICAL \
-    --format json \
-    --output /scan-results.json \
-    --exit-code "${TRIVY_EXIT_CODE}" \
-    /scan; then \
-      echo "Security scan passed"; \
-    else \
-      echo "Security scan found HIGH/CRITICAL vulnerabilities - review /scan-results.json"; \
-      exit "${TRIVY_EXIT_CODE}"; \
-    fi
-
-# Stage 3: Production image with latest Alpine
+# Stage 2: Production image with latest Alpine
 FROM python:${PYTHON_VERSION}-alpine AS production
 
 LABEL stage=production

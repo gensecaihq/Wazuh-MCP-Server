@@ -59,6 +59,7 @@ jobs:
             org.opencontainers.image.licenses=MIT
 
       - name: Build and push
+        id: build
         uses: docker/build-push-action@v6
         with:
           context: .
@@ -71,3 +72,15 @@ jobs:
             VERSION=${{ steps.meta.outputs.version }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+      # Scan the actual published image (by digest) and fail on HIGH/CRITICAL.
+      # This replaces the dead in-Dockerfile Trivy stage, which never ran in the
+      # production build graph and defaulted to exit-code 0 (never gated anything).
+      - name: Scan published image for vulnerabilities
+        uses: aquasecurity/trivy-action@v0.36.0
+        with:
+          image-ref: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}@${{ steps.build.outputs.digest }}
+          format: table
+          exit-code: '1'
+          ignore-unfixed: true
+          severity: HIGH,CRITICAL

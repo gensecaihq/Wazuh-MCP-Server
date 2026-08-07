@@ -36,7 +36,7 @@ dependencies = [
     # Security & Auth
     "pyjwt[crypto]>=2.9.0,<3.0.0",
     "cryptography>=50.0.0,<51.0.0",
-    "python-multipart>=0.0.9,<1.0.0",
+    "python-multipart>=0.0.20,<1.0.0",
     # Monitoring
     "prometheus-client>=0.24.0,<1.0.0",
     "psutil>=6.0.0,<8.0.0",
