@@ -55,7 +55,7 @@ pre-2025-06-18 clients) is preserved unchanged for backward compatibility and ve
 | **POST method support** | ✅ COMPLIANT | JSON-RPC requests via POST |
 | **GET method support (SSE only)** | ✅ COMPLIANT | Returns 405 without SSE Accept header (per spec) |
 | **DELETE method support** | ✅ COMPLIANT | Session termination via DELETE |
-| **MCP-Protocol-Version header** | ✅ COMPLIANT | Validates 2025-11-25, 2025-06-18, 2025-03-26, 2024-11-05; returns 400 for invalid |
+| **MCP-Protocol-Version header** | ✅ COMPLIANT | Validates 2026-07-28, 2025-11-25, 2025-06-18, 2025-03-26, 2024-11-05; returns 400 (-32022) for unsupported |
 | **Accept header handling** | ✅ COMPLIANT | Supports both `application/json` and `text/event-stream` |
 | **Dynamic response format** | ✅ COMPLIANT | JSON or SSE based on Accept header |
 | **MCP-Session-Id header** | ✅ COMPLIANT | Full session management with proper casing |
@@ -91,7 +91,7 @@ pre-2025-06-18 clients) is preserved unchanged for backward compatibility and ve
 | Requirement | Status | Implementation |
 |-------------|--------|----------------|
 | **Version header support** | ✅ COMPLIANT | `MCP-Protocol-Version` header parsed |
-| **Multiple version support** | ✅ COMPLIANT | 2025-11-25, 2025-06-18, 2025-03-26, 2024-11-05 |
+| **Multiple version support** | ✅ COMPLIANT | 2026-07-28 (modern) + 2025-11-25, 2025-06-18, 2025-03-26, 2024-11-05 (legacy) |
 | **Default version fallback** | ✅ COMPLIANT | Defaults to 2025-03-26 if no header (per spec) |
 | **Strict version validation** | ✅ COMPLIANT | Returns HTTP 400 for unsupported versions |
 | **Version validation** | ✅ COMPLIANT | `validate_protocol_version()` function with strict mode |
@@ -132,7 +132,7 @@ pre-2025-06-18 clients) is preserved unchanged for backward compatibility and ve
 | **ping** | ✅ COMPLIANT | Returns empty `{}` per spec |
 | **tools/list** | ✅ COMPLIANT | 55 tools with pagination support |
 | **tools/call** | ✅ COMPLIANT | Tool execution with error handling |
-| **prompts/list** | ✅ COMPLIANT | 4 security prompts with pagination |
+| **prompts/list** | ✅ COMPLIANT | 5 security prompts with pagination |
 | **prompts/get** | ✅ COMPLIANT | Prompt content with argument substitution |
 | **resources/list** | ✅ COMPLIANT | 6 Wazuh resources |
 | **resources/read** | ✅ COMPLIANT | Resource content via `wazuh://` URIs |
@@ -153,7 +153,7 @@ pre-2025-06-18 clients) is preserved unchanged for backward compatibility and ve
 
 ### ✅ **Recommended Configuration (Streamable HTTP)**
 
-**Latest Standard - MCP 2025-11-25:**
+**Legacy handshake config (MCP 2025-11-25 and earlier):**
 ```json
 {
   "mcpServers": {
@@ -370,7 +370,7 @@ per-request path while preserving the legacy handshake for older clients:
 
 This implementation is **immediately ready** for production use and supports:
 
-- ✅ **Latest MCP Clients** (2025-11-25 protocol)
+- ✅ **Modern MCP clients** (2026-07-28) and **legacy clients** (2025-11-25 and earlier)
 - ✅ **Legacy MCP Clients** (backwards compatible with 2025-06-18, 2025-03-26, 2024-11-05)
 - ✅ **Enterprise Security Standards**
 - ✅ **Scalable Architecture**

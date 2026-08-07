@@ -34,7 +34,7 @@ The server includes production-grade HA features for maximum reliability.
 Two middleware layers are automatically registered on all HTTP requests:
 
 - **Monitoring Middleware**: Tracks request counts, active connections, response durations, and adds correlation IDs to every request
-- **Security Middleware**: Adds security headers to all responses (X-Content-Type-Options, X-Frame-Options, Content-Security-Policy, X-XSS-Protection, Referrer-Policy)
+- **Security Middleware**: Adds security headers to all responses (X-Content-Type-Options, X-Frame-Options, Content-Security-Policy, X-XSS-Protection, Strict-Transport-Security (HSTS))
 
 Prometheus metrics are available at `/metrics` using a custom collector registry for accurate reporting.
 
@@ -158,7 +158,7 @@ Dual-era compliance: MCP 2026-07-28 (modern, stateless) plus 2025-11-25 and earl
 | Security | ✅ HTTPS, origin validation, rate limiting |
 | Legacy Support | ✅ Legacy `/sse` endpoint maintained |
 | Session Management | ✅ `MCP-Session-Id` header, full lifecycle with DELETE |
-| Prompts | ✅ `prompts/list` and `prompts/get` with 4 security prompts |
+| Prompts | ✅ `prompts/list` and `prompts/get` with 5 security prompts |
 | Resources | ✅ `resources/list`, `resources/read`, `resources/templates/list` |
 | Logging | ✅ `logging/setLevel` with RFC 5424 levels |
 | Completion | ✅ `completion/complete` for argument suggestions |

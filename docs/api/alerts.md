@@ -22,10 +22,12 @@ Retrieve Wazuh security alerts with comprehensive filtering options.
 |-----------|------|---------|----------|-------------|
 | `limit` | integer | `100` | No | Maximum number of alerts to retrieve (1-1000) |
 | `rule_id` | string | `null` | No | Filter by specific Wazuh rule ID |
-| `level` | string | `null` | No | Filter by alert level (e.g., '12', '10+', '5-8') |
+| `level` | string | `null` | No | **Minimum** severity threshold — a number, optionally with `+` (e.g. `'10'` or `'10+'` → level ≥ 10). Ranges are not supported |
 | `agent_id` | string | `null` | No | Filter by specific agent ID |
+| `rule_groups` | array of strings | `null` | No | Filter by rule group(s), e.g. `["authentication_failed", "firewall"]` — matches alerts in ANY listed group (max 20) |
 | `timestamp_start` | string | `null` | No | Start time. ISO 8601 (`2024-01-01T00:00:00Z`) or relative date math (`now-24h`, `now-7d`) |
 | `timestamp_end` | string | `null` | No | End time. ISO 8601 (`2024-01-01T23:59:59Z`) or relative date math (`now`, `now-1h`) |
+| `compact` | boolean | `true` | No | Return compact alerts (essential fields only) to avoid token limits |
 
 ### Usage Examples
 
@@ -442,7 +444,7 @@ Ask Claude: "Find events with 'authentication failure' AND 'root' in the last ho
 
 ### Performance Tips
 
-1. **Indexer vs Server API**: Tools automatically choose optimal API
+1. **Indexer-backed**: alert query/search/aggregation tools always read from the Wazuh Indexer (the Manager `/alerts` endpoint was removed in Wazuh 4.8) — there is no cross-fallback
 2. **Caching**: Results are cached for 5 minutes
 3. **Pagination**: Use limit and offset for large datasets
 

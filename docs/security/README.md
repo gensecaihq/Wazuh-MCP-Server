@@ -5,16 +5,16 @@ Comprehensive security hardening guide for Wazuh MCP Server v4.3.0 production de
 ## 🔒 Security Overview
 
 Wazuh MCP Server implements multiple layers of security:
-- **Transport Security**: HTTPS with Streamable HTTP transport, CORS origin validation
-- **Authentication**: OAuth 2.0 with DCR, JWT bearer tokens, API key authentication on all endpoints
+- **Transport Security**: Streamable HTTP transport with Origin/CORS validation. The server itself listens on **plain HTTP** — terminate inbound TLS at a reverse proxy (see [TLS](#tls--https))
+- **Authentication**: OAuth 2.0 (DCR optional, disabled by default), JWT bearer tokens, API key authentication on all endpoints
 - **RBAC**: Per-tool scope enforcement (`wazuh:read` / `wazuh:write`). 14 active response tools require write scope. Read-only tokens can only query data
 - **Authless Guardrails**: `AUTH_MODE=none` defaults to read-only. `AUTHLESS_ALLOW_WRITE=true` required for destructive operations
 - **Output Sanitization**: Credentials, tokens, and API keys are redacted from alert data before returning to LLM clients
 - **Log Sanitization**: Global `SanitizingLogFilter` redacts passwords, tokens, secrets from all server logs
 - **Security Middleware**: Automatic security headers (X-Content-Type-Options, X-Frame-Options, CSP, HSTS)
-- **Encryption**: TLS/SSL encryption for all API communications
+- **Encryption**: TLS for outbound Wazuh Manager/Indexer connections (verified by default); inbound HTTPS is provided by the reverse proxy in front
 - **Input Validation**: Comprehensive parameter validation — regex-based IDs, `ipaddress` module for IPs, shell metacharacter blocking for active response, Elasticsearch Query DSL (no string interpolation)
-- **Rate Limiting**: Per-client sliding window with escalating block duration
+- **Rate Limiting**: Per-client sliding window with a short retry-after backoff (seconds until the oldest request leaves the window)
 - **Audit Logging**: All destructive tool calls logged with client ID, session, and arguments via dedicated audit logger
 
 ## 🛡️ Security Architecture
@@ -36,7 +36,7 @@ Wazuh MCP Server implements multiple layers of security:
 - ✅ Injection attacks (comprehensive input validation with regex patterns)
 - ✅ Privilege escalation (per-tool RBAC scope enforcement, authless mode read-only by default)
 - ✅ Data leakage to LLMs (output sanitization redacts credentials from alert data)
-- ✅ Brute force attacks (rate limiting per client with escalating blocks)
+- ✅ Brute force attacks (sliding-window rate limit with short backoff)
 - ✅ Unauthorized active response (write tools require explicit `wazuh:write` scope with audit trail)
 - ✅ Clickjacking/XSS (security middleware headers)
 
@@ -104,28 +104,39 @@ curl -k -X POST "https://wazuh-server:55000/security/users" \
 }
 ```
 
+### OAuth 2.0 hardening
+
+When `AUTH_MODE=oauth`, the authorization server enforces:
+
+- **PKCE with `S256` is mandatory** — authorization codes without a valid `S256` challenge/verifier are rejected.
+- **Single-use authorization codes** — a code is consumed atomically on exchange; replay fails.
+- **Refresh-token rotation with replay detection** — every refresh issues a new refresh token; presenting a rotated (already-used) token revokes the entire grant (per OAuth BCP).
+- **Revocation denylist** — revoked tokens are rejected even via the stateless-JWT fallback (`/oauth/revoke`, RFC 7009).
+- **Scope bound to the client** — the granted scope is intersected with the client's registered scope, so a read-only client cannot self-grant `wazuh:write`.
+- **Confidential-client authentication** — a client with a secret must present it at the token endpoint (omitting it is rejected, protecting refresh-token redemption).
+- **Issuer integrity** — the issuer URL comes from `OAUTH_ISSUER_URL`, or is derived from the request only when the peer is in `TRUSTED_PROXIES` (prevents `x-forwarded-host` discovery poisoning). RFC 9207 `iss` is returned on the authorization response.
+- **DCR off by default** — `OAUTH_ENABLE_DCR=false`; when enabled, registration validates redirect URIs (https, or http for loopback, no fragments).
+- **Discovery** — `/.well-known/oauth-authorization-server` (RFC 8414) and `/.well-known/oauth-protected-resource` (RFC 9728); the latter is also advertised via the `WWW-Authenticate` header on 401s.
+
 ## 🔒 Encryption & TLS
 
 ### TLS Configuration
 
-#### Production TLS Settings
+The server has **no built-in inbound HTTPS listener** — it speaks plain HTTP on `MCP_PORT`,
+and inbound TLS (certificates, minimum TLS version, cipher suites, HSTS, client-cert auth)
+is configured at the **reverse proxy** in front (nginx/Caddy/Traefik). The only TLS knobs the
+server itself honors are for its **outbound** connections to Wazuh:
+
 ```bash
-# .env - Production
-VERIFY_SSL=true
-ALLOW_SELF_SIGNED=false
-MIN_TLS_VERSION=TLSv1.3
-SSL_TIMEOUT=10
+# .env — outbound TLS to the Wazuh Manager / Indexer
+WAZUH_VERIFY_SSL=true            # verify the Manager cert (default)
+WAZUH_ALLOW_SELF_SIGNED=false    # allow a self-signed Manager cert
+WAZUH_INDEXER_VERIFY_SSL=true    # verify the Indexer cert (default)
+WAZUH_INDEXER_SSL=true           # use HTTPS to the Indexer
 ```
 
-#### Certificate Management
-```bash
-# Custom CA certificate
-CA_BUNDLE_PATH=/etc/ssl/certs/company-ca.crt
-
-# Client certificate authentication
-CLIENT_CERT_PATH=/etc/wazuh-mcp/client.crt
-CLIENT_KEY_PATH=/etc/wazuh-mcp/client.key
-```
+For inbound TLS hardening, see your reverse proxy's documentation (a sample is in
+`docs/nginx-reverse-proxy.conf`).
 
 ### Certificate Best Practices
 
@@ -152,15 +163,16 @@ if [ $(openssl x509 -in "$CERT_PATH" -noout -checkend 2592000) ]; then
 fi
 ```
 
-### SSL/TLS Hardening
+### Inbound TLS hardening (at the reverse proxy)
 
-#### Disable Weak Protocols
-```bash
-# Force TLS 1.3 only
-MIN_TLS_VERSION=TLSv1.3
+Enforce a minimum TLS version and strong ciphers on the proxy that terminates HTTPS in
+front of the server — for example, in nginx:
 
-# Disable weak ciphers (if supported)
-SSL_CIPHERS="ECDHE+AESGCM:ECDHE+CHACHA20:DHE+AESGCM:DHE+CHACHA20:!aNULL:!MD5:!DSS"
+```nginx
+ssl_protocols TLSv1.2 TLSv1.3;
+ssl_ciphers ECDHE+AESGCM:ECDHE+CHACHA20:!aNULL:!MD5;
+ssl_prefer_server_ciphers on;
+add_header Strict-Transport-Security "max-age=31536000; includeSubDomains" always;
 ```
 
 ## 🔐 Credential Security
@@ -246,37 +258,23 @@ query = {
 
 ## 📊 Audit Logging
 
-### Security Event Logging
+### Destructive-operation audit trail
 
-#### Enable Audit Logging
-```bash
-# .env
-AUDIT_LOGGING=true
-AUDIT_LOG_FILE=logs/security-audit.log
-AUDIT_LOG_LEVEL=INFO
+Audit logging is **always on** — there is no enable flag. Every `wazuh:write` (active
+response / rollback) tool call is emitted at WARNING level on the dedicated
+`wazuh_mcp_server.audit` Python logger before the action runs. Route or persist it with
+standard Python logging / your container's log driver (e.g. a file on a mounted volume,
+syslog, or an OTLP shipper); the global `SanitizingLogFilter` redacts credentials from it.
+
+#### Audit record format
+Each record is a single WARNING line:
+
+```
+AUDIT: tool=wazuh_block_ip client=<api_key_id> session=<session_id> args={"ip_address":"10.0.0.9","cluster_id":"prod-eu"}
 ```
 
-#### Audit Event Types
-- Authentication attempts (success/failure)
-- Authorization checks
-- Configuration changes
-- Tool usage and parameters
-- Error conditions
-- Connection events
-
-#### Audit Log Format
-```json
-{
-  "timestamp": "2024-01-01T12:00:00Z",
-  "event_type": "authentication",
-  "result": "success",
-  "user": "mcp-service",
-  "source_ip": "127.0.0.1",
-  "tool": "get_wazuh_alerts",
-  "parameters": {"limit": 100, "level": "12+"},
-  "response_time": 0.25
-}
-```
+It captures the tool name, the authenticated client (API-key id), the session id, and the
+call arguments — enough to answer "who did what, to which target, when" from timestamps.
 
 ### Log Security
 

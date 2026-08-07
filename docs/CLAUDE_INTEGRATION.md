@@ -63,10 +63,12 @@ AUTH_MODE=oauth docker compose up -d
 3. Handles authorization flow seamlessly
 
 **OAuth Endpoints:**
-- Discovery: `/.well-known/oauth-authorization-server`
+- Discovery (authorization server): `/.well-known/oauth-authorization-server` (RFC 8414)
+- Discovery (protected resource): `/.well-known/oauth-protected-resource` (RFC 9728)
 - Authorization: `/oauth/authorize`
 - Token: `/oauth/token`
-- Registration: `/oauth/register` (DCR)
+- Revocation: `/oauth/revoke` (RFC 7009)
+- Registration: `/oauth/register` — only when `OAUTH_ENABLE_DCR=true` (off by default)
 
 ### Bearer Token Mode
 

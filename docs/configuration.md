@@ -25,11 +25,12 @@ The Manager API is always reached over HTTPS on `WAZUH_PORT` (it is TLS-only).
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `ENVIRONMENT` | `development` | `production` enforces stricter startup checks (see [Production](#production)) |
-| `MCP_HOST` | `0.0.0.0` | Bind address |
+| `MCP_HOST` | `0.0.0.0` | Container-internal bind address |
 | `MCP_PORT` | `3000` | Listen port (plain HTTP — terminate TLS at a reverse proxy) |
-| `MCP_TRANSPORT` | `http` | Transport. Only HTTP/SSE is implemented |
+| `MCP_BIND` | `127.0.0.1` | **Compose-level** host interface the port is published on (see `compose.yml`). Loopback by default (expects a reverse proxy); set `0.0.0.0` to expose directly on a trusted network |
 | `LOG_LEVEL` | `INFO` | `DEBUG`, `INFO`, `WARNING`, `ERROR`, or `CRITICAL` |
-| `MAX_MEMORY_MB` | `512` | Memory budget used for the ratio reported by `/health` and `/metrics` |
+| `LOG_FORMAT` | `text` | Set `json` for structured logs that include the request correlation ID and extra fields |
+| `MAX_MEMORY_MB` | `512` | Memory budget used for the ratio reported by `/metrics` |
 
 ## Wazuh Manager
 
@@ -37,6 +38,7 @@ The Manager API is always reached over HTTPS on `WAZUH_PORT` (it is TLS-only).
 |----------|---------|-------------|
 | `WAZUH_PORT` | `55000` | Manager API port |
 | `WAZUH_VERIFY_SSL` | `true` | Verify the Manager's TLS certificate. Set `false` only for self-signed certs in development |
+| `WAZUH_ALLOW_SELF_SIGNED` | `false` | Explicitly allow self-signed Manager certificates |
 
 ## Wazuh Indexer
 
@@ -93,6 +95,17 @@ OAuth requires **PKCE with `S256`**; authorization codes are single-use and refr
 | `REDIS_URL` | — | Redis URL for shared session storage across instances. Without it, sessions are in-memory (single-instance) |
 | `SESSION_TTL_SECONDS` | `1800` | Session inactivity timeout |
 
+## Optional integrations
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `WAZUH_CLUSTERS_FILE` | `./config/clusters.json` | Multi-cluster topology file. When present, tools accept an optional `cluster_id` and a `list_wazuh_clusters` tool appears (see the [Multi-Cluster Guide](MULTI_CLUSTER.md)). Absent → single-cluster from the env vars above |
+| `WAZUH_AR_FIREWALL_UNDO_COMMAND` | — | Operator-deployed active-response command that removes a firewall-drop block. Required for `wazuh_firewall_allow` — stock Wazuh cannot unblock via the API |
+| `WAZUH_AR_HOSTDENY_UNDO_COMMAND` | — | Same, for removing a hosts.deny block (`wazuh_host_allow`) |
+| `YDC_API_KEY` | — | Optional You.com API key. Enables the `search_external_context` web-search tool |
+| `YDC_BASE_URL` | `https://ydc-index.io` | You.com Search API base URL |
+| `YDC_VERIFY_SSL` | `true` | Verify You.com TLS certificates |
+
 ## TLS / HTTPS
 
 The server speaks plain HTTP on `MCP_PORT`. There is **no built-in HTTPS listener** — terminate TLS at a reverse proxy (nginx, Caddy, Traefik) or a load balancer, which is also where you set HSTS, client-cert policies, and TLS versions.
@@ -128,7 +141,7 @@ curl -X POST https://your-server/auth/token \
 ```
 The JWT carries the API key's own scopes (read-only unless the key was granted write).
 
-**OAuth discovery & endpoints:** `/.well-known/oauth-authorization-server`, `/oauth/authorize`, `/oauth/token` (and `/oauth/register` only when `OAUTH_ENABLE_DCR=true`).
+**OAuth discovery & endpoints:** `/.well-known/oauth-authorization-server`, `/.well-known/oauth-protected-resource` (RFC 9728), `/oauth/authorize`, `/oauth/token`, `/oauth/revoke` (and `/oauth/register` only when `OAUTH_ENABLE_DCR=true`).
 
 ## Environment-specific examples
 
@@ -171,8 +184,8 @@ In production the server **refuses to start** if `AUTH_SECRET_KEY` is unset (and
 ## Validation & troubleshooting
 
 ```bash
-# Health (no auth) — shows status + service checks
-curl -s http://localhost:3000/health | jq .
+# Readiness (no auth) — status + Wazuh/Indexer service checks
+curl -s http://localhost:3000/ready | jq .
 
 # Prometheus metrics (CPU/memory gauges, request counters)
 curl -s http://localhost:3000/metrics | head
@@ -192,7 +205,7 @@ curl -k -u "$WAZUH_INDEXER_USER:$WAZUH_INDEXER_PASS" "https://$WAZUH_INDEXER_HOS
 
 Configuration changes require a restart:
 ```bash
-docker compose restart wazuh-mcp-remote-server
+docker compose restart wazuh-main-server
 ```
 
 ## Claude Desktop integration

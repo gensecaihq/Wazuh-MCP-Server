@@ -980,7 +980,6 @@ Ask Claude: "Check if Wazuh is accessible and working properly"
         "endpoints_tested": [
           "/agents",
           "/rules",
-          "/alerts",
           "/cluster/nodes"
         ],
         "all_responding": true
@@ -1009,7 +1008,7 @@ Ask Claude: "Check if Wazuh is accessible and working properly"
       "data_access": {
         "status": "pass",
         "agents_readable": true,
-        "alerts_readable": true,
+        "indexer_readable": true,
         "rules_readable": true
       },
       "performance": {

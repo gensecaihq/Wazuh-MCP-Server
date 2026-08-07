@@ -50,13 +50,13 @@ grep ALLOWED_ORIGINS .env
 ```bash
 # Check service status
 docker compose ps
-docker compose logs wazuh-mcp-remote-server
+docker compose logs wazuh-main-server
 
 # Verify port availability
 netstat -ln | grep 3000
 
 # Check if container is healthy
-docker inspect wazuh-mcp-remote-server --format='{{.State.Health.Status}}'
+docker inspect wazuh-main-server --format='{{.State.Health.Status}}'
 ```
 
 **Common Causes:**
@@ -82,7 +82,7 @@ grep -E "WAZUH_USER|WAZUH_HOST" .env
 
 ```bash
 # Check API key in server logs
-docker compose logs wazuh-mcp-remote-server | grep "API key"
+docker compose logs wazuh-main-server | grep "API key"
 
 # Exchange API key for token
 curl -X POST http://localhost:3000/auth/token \
@@ -114,7 +114,7 @@ openssl s_client -connect your-wazuh-server:55000 </dev/null 2>/dev/null | opens
 curl -k -u admin:password https://wazuh-server:55000/
 
 # Check server logs for connection errors
-docker compose logs wazuh-mcp-remote-server | grep -i "wazuh"
+docker compose logs wazuh-main-server | grep -i "wazuh"
 ```
 
 ### Wazuh Indexer (Vulnerabilities)
@@ -145,7 +145,7 @@ WAZUH_INDEXER_PASS=your-password
 
 ```bash
 # Check container resource usage
-docker stats wazuh-mcp-remote-server --no-stream
+docker stats wazuh-main-server --no-stream
 
 # View configured limits
 grep -E "memory|cpus" compose.yml
@@ -167,13 +167,13 @@ curl http://localhost:3000/metrics | grep request_duration
 
 ```bash
 # Follow live logs
-docker compose logs -f --timestamps wazuh-mcp-remote-server
+docker compose logs -f --timestamps wazuh-main-server
 
 # Search for errors
-docker compose logs wazuh-mcp-remote-server | grep -i error
+docker compose logs wazuh-main-server | grep -i error
 
 # Export logs for analysis
-docker compose logs --since=24h wazuh-mcp-remote-server > server.log
+docker compose logs --since=24h wazuh-main-server > server.log
 ```
 
 ---
@@ -181,14 +181,14 @@ docker compose logs --since=24h wazuh-mcp-remote-server > server.log
 ## Health Check
 
 ```bash
-# Full health status
-curl -s http://localhost:3000/health | jq .
+# Full readiness status (Wazuh/Indexer dependency checks)
+curl -s http://localhost:3000/ready | jq .
 
 # Prometheus metrics
 curl -s http://localhost:3000/metrics | head -50
 
 # Container health
-docker inspect wazuh-mcp-remote-server --format='{{json .State.Health}}' | jq .
+docker inspect wazuh-main-server --format='{{json .State.Health}}' | jq .
 ```
 
 ---

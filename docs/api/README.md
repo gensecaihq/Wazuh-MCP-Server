@@ -30,11 +30,12 @@ Identify and analyze security vulnerabilities across your environment.
 - **get_wazuh_critical_vulnerabilities** - Critical vulnerabilities only
 - **get_wazuh_vulnerability_summary** - Vulnerability statistics and trends
 
-### 🔍 [Security Analysis](security-analysis.md) (5 tools)
+### 🔍 [Security Analysis](security-analysis.md) (6 tools)
 Security analysis and threat intelligence capabilities.
 
 - **analyze_security_threat** - Threat analysis
 - **check_ioc_reputation** - IoC reputation checking
+- **search_external_context** - Web search for extra context around an indicator/topic (opt-in via `YDC_API_KEY`)
 - **perform_risk_assessment** - Comprehensive risk analysis
 - **get_top_security_threats** - Top threats by severity
 - **generate_security_report** - Automated security reporting

@@ -1,13 +1,27 @@
-# Wazuh MCP Server
+<div align="center">
 
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Python 3.11+](https://img.shields.io/badge/Python-3.11+-blue.svg)](https://www.python.org/downloads/)
-[![MCP 2026-07-28](https://img.shields.io/badge/MCP-2026--07--28-green.svg)](https://modelcontextprotocol.io/specification/2026-07-28)
-[![Docker](https://img.shields.io/badge/Docker-Ready-blue.svg)](https://github.com/gensecaihq/Wazuh-MCP-Server)
+# 🛡️ Wazuh MCP Server
 
-**Talk to your SIEM.** Query alerts, hunt threats, check vulnerabilities, and trigger active responses across your entire Wazuh deployment — through natural conversation with any AI assistant.
+### Talk to your SIEM in plain language.
 
-> **v4.3.0** | 55 security tools | Wazuh 4.8.0–4.14.7 | [Changelog](CHANGELOG.md)
+**Query alerts, hunt threats, triage vulnerabilities, and run active responses across your entire Wazuh deployment — through natural conversation with any AI assistant.**
+
+[![CI](https://github.com/gensecaihq/Wazuh-MCP-Server/actions/workflows/ci.yml/badge.svg)](https://github.com/gensecaihq/Wazuh-MCP-Server/actions/workflows/ci.yml)
+[![Security Audit](https://github.com/gensecaihq/Wazuh-MCP-Server/actions/workflows/security.yml/badge.svg)](https://github.com/gensecaihq/Wazuh-MCP-Server/actions/workflows/security.yml)
+[![Release](https://img.shields.io/github/v/release/gensecaihq/Wazuh-MCP-Server?color=2ea44f&label=release)](https://github.com/gensecaihq/Wazuh-MCP-Server/releases/latest)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+
+[![Python 3.11+](https://img.shields.io/badge/Python-3.11%2B-3776AB?logo=python&logoColor=white)](https://www.python.org/downloads/)
+[![MCP 2026-07-28](https://img.shields.io/badge/MCP-2026--07--28-6E56CF)](https://modelcontextprotocol.io/specification/2026-07-28)
+[![Wazuh 4.8.0–4.14.7](https://img.shields.io/badge/Wazuh-4.8.0–4.14.7-005792?logo=wazuh&logoColor=white)](WAZUH_COMPATIBILITY.md)
+[![GHCR image](https://img.shields.io/badge/ghcr.io-image-2496ED?logo=docker&logoColor=white)](https://github.com/gensecaihq/Wazuh-MCP-Server/pkgs/container/wazuh-mcp-server)
+[![Stars](https://img.shields.io/github/stars/gensecaihq/Wazuh-MCP-Server?style=flat&color=f5a623)](https://github.com/gensecaihq/Wazuh-MCP-Server/stargazers)
+
+**55 security tools** · **dual-era MCP** (2026-07-28 + legacy) · **multi-cluster** · **fully air-gappable** · **production-hardened**
+
+[**Quick Start**](#quick-start) · [**Tools**](#55-security-tools) · [**Security**](#security) · [**Docs**](docs/) · [**Changelog**](CHANGELOG.md) · [**Upgrading**](UPGRADING.md)
+
+</div>
 
 ---
 
@@ -156,7 +170,7 @@ This server sits between an LLM and your SIEM. Security is not optional.
 | **Audit Logging** | Every destructive tool call (block IP, isolate host, kill process) is logged with client ID, session, timestamp, and full arguments. |
 | **Output Sanitization** | Credentials, tokens, and API keys in alert `full_log` fields are redacted before reaching the LLM. Prevents credential leakage through AI responses. |
 | **Input Validation** | Every parameter validated: regex agent IDs, `ipaddress` module for IPs, shell metacharacter blocking for active response, Elasticsearch Query DSL (no string interpolation). |
-| **Rate Limiting** | Per-client sliding window with escalating block duration (10s → 5min). |
+| **Rate Limiting** | Per-principal sliding window (keyed on the authenticated client + trusted-proxy IP), with a short retry-after backoff — seconds until the oldest request leaves the window, not a fixed multi-minute block. |
 | **Circuit Breakers** | Wazuh API failures trigger fail-fast for 60s, auto-recover. Single trial in HALF_OPEN state. |
 | **Log Sanitization** | Global filter redacts passwords, tokens, secrets from all server logs. |
 | **Container Hardening** | Non-root user, read-only filesystem, `CAP_DROP ALL`, `no-new-privileges`. |
@@ -240,9 +254,12 @@ optional `cluster_id` argument plus a `list_wazuh_clusters` tool:
 |----------|--------|-------------|
 | `/mcp` | POST/GET/DELETE | MCP Streamable HTTP (recommended) |
 | `/sse` | GET | Legacy Server-Sent Events |
-| `/health` | GET | Health check (no auth required) |
+| `/health` | GET | Liveness probe — 200 while the process is up (no dependency checks; use for the container healthcheck) |
+| `/ready` | GET | Readiness probe — checks Wazuh Manager/Indexer reachability; 503 when a dependency is down |
 | `/metrics` | GET | Prometheus metrics |
-| `/auth/token` | POST | Exchange API key for JWT |
+| `/auth/token` | POST | Exchange API key for JWT (bearer mode) |
+| `/.well-known/oauth-authorization-server` | GET | OAuth 2.0 discovery (oauth mode) |
+| `/.well-known/oauth-protected-resource` | GET | OAuth protected-resource metadata, RFC 9728 (oauth mode) |
 | `/docs` | GET | OpenAPI documentation |
 
 ---

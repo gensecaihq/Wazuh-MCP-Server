@@ -28,16 +28,12 @@ Search through Wazuh manager logs with advanced pattern matching and filtering c
 - Case-insensitive by default
 - Supports partial word matching
 
-#### Pattern Matching
-- Wildcards: `"conn*"` matches "connection", "connected", etc.
-- Exact phrases: `"connection timeout"`
-- Multiple terms: `"error connection"` (AND logic)
+#### Matching
 
-#### Advanced Operators
-- Boolean OR: `"error OR warning"`
-- Boolean AND: `"error AND timeout"`
-- Exclusion: `"error NOT network"`
-- Regular expressions: `/error:\s+\d+/`
+`search_wazuh_manager_logs` maps `query` to the Wazuh Manager `search` parameter, which
+is a **plain substring match** over log lines — case-insensitive, no boolean operators,
+wildcards, or regular expressions. Pass a single term or phrase (e.g. `"connection timeout"`)
+and filter further with the `limit` parameter or by piping the output.
 
 ### Usage Examples
 

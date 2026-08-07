@@ -7,12 +7,12 @@ Reference for Wazuh security analysis and threat intelligence tools. These tools
 Six capabilities:
 - **Threat Analysis**: Search alerts for threat indicators (IPs, domains, hashes)
 - **IOC Reputation**: Indicator of Compromise lookup against alert history
+- **External Context Search**: Opt-in web search (You.com) for context around an indicator or topic
 - **Risk Assessment**: Multi-factor risk scoring from agents, vulnerabilities, alerts, and SCA
 - **Threat Ranking**: Top threats with source IPs, affected agents, timeline, and composite scores
 - **Security Reporting**: Reports differentiated by type (daily/weekly/monthly/incident) with recommendations
-- **Compliance Checks**: SCA-based compliance assessment with framework-aware filtering
 
-> **Note:** These tools return structured data from Wazuh APIs and Elasticsearch queries with server-side enrichment. They do not integrate external threat intelligence feeds (VirusTotal, AbuseIPDB, etc.) or use AI/ML models. The LLM client can further analyze the returned data.
+> **Note:** Except for `search_external_context` (an opt-in web search enabled via `YDC_API_KEY`), these tools return structured data from the Wazuh APIs and Indexer queries with server-side enrichment — they do not call external threat-intelligence feeds (VirusTotal, AbuseIPDB, etc.) or use AI/ML models. The LLM client can further analyze the returned data.
 
 ---
 
@@ -77,6 +77,36 @@ Check how frequently an indicator appears in Wazuh alert history and the maximum
 ```
 
 Risk levels: `"high"` (max level >= 10), `"medium"` (>= 5), `"low"` (< 5).
+
+---
+
+## search_external_context
+
+Search the web (via You.com) for additional context around a security topic or indicator.
+**Opt-in:** disabled unless `YDC_API_KEY` is set — otherwise it returns `enabled: false` with an
+empty result and a hint. Runs behind its own circuit breaker, isolated from the Wazuh API.
+
+### Parameters
+
+| Parameter | Type | Default | Required | Description |
+|-----------|------|---------|----------|-------------|
+| `query` | string | — | Yes | Security topic or indicator to search for |
+| `count` | integer | `5` | No | Number of results (1–10) |
+
+### Response
+
+```json
+{
+  "data": {
+    "query": "CVE-2026-XXXX exploitation",
+    "enabled": true,
+    "results": [
+      { "title": "…", "url": "https://…", "description": "…", "snippets": ["…"] }
+    ],
+    "search_uuid": "…"
+  }
+}
+```
 
 ---
 

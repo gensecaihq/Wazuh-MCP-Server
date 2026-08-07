@@ -157,7 +157,7 @@ Retrieve only critical vulnerabilities requiring immediate attention.
 
 | Parameter | Type | Default | Required | Description |
 |-----------|------|---------|----------|-------------|
-| `limit` | integer | `50` | No | Maximum number of critical vulnerabilities to retrieve (1-100) |
+| `limit` | integer | `50` | No | Maximum number of critical vulnerabilities to retrieve (1-500) |
 
 ### Usage Examples
 
@@ -256,7 +256,7 @@ Generate statistical summary and trends for vulnerability management reporting.
 
 | Parameter | Type | Default | Required | Description |
 |-----------|------|---------|----------|-------------|
-| `time_range` | string | `"7d"` | No | Time range for trend analysis: 1d, 7d, 30d, 90d |
+| `time_range` | string | `"7d"` | No | Time range for trend analysis: 1d, 7d, 30d |
 
 ### Time Range Options
 
@@ -265,7 +265,6 @@ Generate statistical summary and trends for vulnerability management reporting.
 | `1d` | Last 24 hours | Daily security briefings |
 | `7d` | Last week | Weekly security reports |
 | `30d` | Last month | Monthly compliance reports |
-| `90d` | Last quarter | Quarterly security reviews |
 
 ### Usage Examples
 
@@ -293,7 +292,7 @@ Ask Claude: "Show me vulnerability trends for the last quarter"
 ```
 
 This queries:
-- `time_range`: "90d"
+- `time_range`: "30d"
 - Comprehensive trend analysis
 
 ### Response Format

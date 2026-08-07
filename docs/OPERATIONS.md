@@ -10,10 +10,11 @@ Day-to-day operations and maintenance tasks.
 # Standard deployment
 docker compose up -d
 
-# With deployment script (recommended)
-python deploy.py          # Cross-platform
-./deploy-production.sh    # Linux/macOS
-deploy.bat                # Windows
+# With the cross-platform deployment helper (configures MCP_API_KEY in .env)
+python deploy.py
+
+# (Legacy scripts deploy-production.sh / install.sh / deploy.bat are deprecated —
+#  use `docker compose up -d` or `python deploy.py`.)
 
 # Force rebuild
 docker compose up -d --build --force-recreate
@@ -26,16 +27,16 @@ docker compose up -d --build --force-recreate
 docker compose ps --format table
 
 # View logs
-docker compose logs -f --timestamps wazuh-mcp-remote-server
+docker compose logs -f --timestamps wazuh-main-server
 
 # Restart service
-docker compose restart wazuh-mcp-remote-server
+docker compose restart wazuh-main-server
 
 # Stop services
 docker compose down --timeout 30
 
 # Scale service (load testing)
-docker compose up --scale wazuh-mcp-remote-server=2 -d
+docker compose up --scale wazuh-main-server=2 -d
 ```
 
 ### Cleanup
@@ -62,11 +63,11 @@ docker system prune -f
 # Quick health check
 curl -s http://localhost:3000/health | jq '.status'
 
-# Detailed health
-curl -s http://localhost:3000/health | jq .
+# Detailed readiness (Wazuh/Indexer checks)
+curl -s http://localhost:3000/ready | jq .
 
 # Container health status
-docker inspect wazuh-mcp-remote-server --format='{{.State.Health.Status}}'
+docker inspect wazuh-main-server --format='{{.State.Health.Status}}'
 ```
 
 ### Prometheus Metrics
@@ -86,10 +87,10 @@ curl -s http://localhost:3000/metrics | grep active_connections
 
 ```bash
 # Real-time stats
-docker stats wazuh-mcp-remote-server
+docker stats wazuh-main-server
 
 # Formatted output
-docker stats wazuh-mcp-remote-server --format "table {{.Name}}\t{{.CPUPerc}}\t{{.MemUsage}}\t{{.NetIO}}"
+docker stats wazuh-main-server --format "table {{.Name}}\t{{.CPUPerc}}\t{{.MemUsage}}\t{{.NetIO}}"
 ```
 
 ---
@@ -100,36 +101,36 @@ docker stats wazuh-mcp-remote-server --format "table {{.Name}}\t{{.CPUPerc}}\t{{
 
 ```bash
 # Follow live logs
-docker compose logs -f wazuh-mcp-remote-server
+docker compose logs -f wazuh-main-server
 
 # Last 100 lines
-docker compose logs --tail=100 wazuh-mcp-remote-server
+docker compose logs --tail=100 wazuh-main-server
 
 # With timestamps
-docker compose logs -f --timestamps wazuh-mcp-remote-server
+docker compose logs -f --timestamps wazuh-main-server
 ```
 
 ### Exporting Logs
 
 ```bash
 # Last 24 hours
-docker compose logs --since=24h wazuh-mcp-remote-server > server.log
+docker compose logs --since=24h wazuh-main-server > server.log
 
 # Specific time range
-docker compose logs --since="2024-01-01T00:00:00" --until="2024-01-02T00:00:00" wazuh-mcp-remote-server > server.log
+docker compose logs --since="2024-01-01T00:00:00" --until="2024-01-02T00:00:00" wazuh-main-server > server.log
 ```
 
 ### Log Filtering
 
 ```bash
 # Errors only
-docker compose logs wazuh-mcp-remote-server | grep -i error
+docker compose logs wazuh-main-server | grep -i error
 
 # Wazuh connections
-docker compose logs wazuh-mcp-remote-server | grep -i wazuh
+docker compose logs wazuh-main-server | grep -i wazuh
 
 # Authentication events
-docker compose logs wazuh-mcp-remote-server | grep -i auth
+docker compose logs wazuh-main-server | grep -i auth
 ```
 
 ---
@@ -163,7 +164,7 @@ tar -czf backup-full-$(date +%Y%m%d).tar.gz .env compose.yml logs/
 
 ```bash
 # Check for vulnerabilities
-docker scout cves wazuh-mcp-remote-server:latest
+docker scout cves wazuh-main-server:latest
 
 # Force security update
 docker compose build --pull --no-cache
@@ -190,11 +191,13 @@ docker compose up -d
 
 | Endpoint | Method | Description |
 |----------|--------|-------------|
-| `/auth/token` | POST | Exchange API key for JWT |
-| `/.well-known/oauth-authorization-server` | GET | OAuth discovery |
+| `/auth/token` | POST | Exchange API key for JWT (bearer mode) |
+| `/.well-known/oauth-authorization-server` | GET | OAuth 2.0 discovery (RFC 8414) |
+| `/.well-known/oauth-protected-resource` | GET | OAuth protected-resource metadata (RFC 9728) |
 | `/oauth/authorize` | GET | OAuth authorization |
 | `/oauth/token` | POST | OAuth token exchange |
-| `/oauth/register` | POST | Dynamic Client Registration |
+| `/oauth/revoke` | POST | OAuth token revocation (RFC 7009) |
+| `/oauth/register` | POST | Dynamic Client Registration (only when `OAUTH_ENABLE_DCR=true`) |
 
 ### Quick API Tests
 
@@ -244,7 +247,6 @@ RATE_LIMIT_WINDOW=60        # Window in seconds
 
 # Session management
 SESSION_TTL_SECONDS=3600    # Session timeout
-MAX_SESSIONS=1000           # Maximum concurrent sessions
 ```
 
 ---
