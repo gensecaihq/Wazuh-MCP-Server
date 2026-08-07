@@ -63,6 +63,34 @@ jobs:
           # Bots to exclude
           BOTS = {'dependabot[bot]', 'github-actions[bot]', 'deepsource-io[bot]', 'google-labs-jules[bot]'}
 
+          import re as _re
+          # Additive: seed from the contributors already acknowledged in the README so a
+          # transient API gap, a deleted issue, or discussions pagination can never
+          # un-acknowledge an existing contributor. Fresh API data below only adds.
+          try:
+              with open('README.md', encoding='utf-8') as _f:
+                  _existing = _f.read()
+              _m = _re.search(r'<!-- CONTRIBUTORS-START -->(.*?)<!-- CONTRIBUTORS-END -->', _existing, _re.DOTALL)
+              if _m:
+                  for _line in _m.group(1).splitlines():
+                      _lm = _re.search(r'\[@([A-Za-z0-9_-]+)\]', _line)
+                      if not _lm:
+                          continue
+                      _login = _lm.group(1)
+                      if _login in BOTS:
+                          continue
+                      if 'Code' in _line:
+                          contributors[_login].add('code')
+                      if 'Issues' in _line:
+                          contributors[_login].add('issues')
+                      if 'PRs' in _line or 'Pull' in _line:
+                          contributors[_login].add('prs')
+                      if 'Discussions' in _line:
+                          contributors[_login].add('discussions')
+                      contributors[_login]  # ensure present even if no badge parsed
+          except Exception as _e:
+              print(f"Could not seed from existing README: {_e}")
+
           def fetch_paginated(url):
               """Fetch all pages from a paginated GitHub API endpoint."""
               results = []
