@@ -50,6 +50,7 @@ from wazuh_mcp_server.security import (
     validate_ip_address,
     validate_iso27001_control,
     validate_limit,
+    validate_policy_id,
     validate_query,
     validate_report_type,
     validate_rule_groups,
@@ -619,6 +620,9 @@ wazuh_config = WazuhConfig(
     wazuh_indexer_pass=config.WAZUH_INDEXER_PASS if config.WAZUH_INDEXER_PASS else None,
     wazuh_indexer_ssl=config.WAZUH_INDEXER_SSL,
     wazuh_indexer_verify_ssl=config.WAZUH_INDEXER_VERIFY_SSL,
+    request_timeout_seconds=config.REQUEST_TIMEOUT_SECONDS,
+    max_connections=config.MAX_CONNECTIONS,
+    max_alerts_per_query=config.MAX_ALERTS_PER_QUERY,
 )
 
 # Initialize Wazuh client
@@ -2726,7 +2730,7 @@ async def handle_tools_call(params: Dict[str, Any], session: MCPSession) -> Dict
 
         elif tool_name == "get_sca_policy_checks":
             agent_id = validate_agent_id(arguments.get("agent_id"), required=True)
-            policy_id = validate_input(arguments.get("policy_id"), "policy_id", required=True)
+            policy_id = validate_policy_id(arguments.get("policy_id"), required=True)
             result = await wazuh_client.get_sca_policy_checks(agent_id, policy_id)
             _success = True
             return _tool_result(f"SCA Policy Checks [{policy_id}]:\n{json.dumps(result, indent=2, default=str)}")
@@ -3403,8 +3407,9 @@ async def mcp_endpoint(
         # Handle POST request (JSON-RPC)
         elif request.method == "POST":
             try:
-                body = await request.json()
-            except json.JSONDecodeError:
+                # Depth-capped parse: deep nesting raises RecursionError, not JSONDecodeError.
+                body = parse_json_body_safe(await request.body(), max_depth=MAX_JSON_DEPTH)
+            except (json.JSONDecodeError, ValueError):
                 return JSONResponse(
                     content=create_error_response(None, MCP_ERRORS["PARSE_ERROR"], "Invalid JSON").dict(),
                     status_code=400,
@@ -3508,6 +3513,13 @@ async def mcp_endpoint(
                         )
 
                 # Handle request
+                if not isinstance(body, dict):
+                    return JSONResponse(
+                        content=create_error_response(
+                            None, MCP_ERRORS["INVALID_REQUEST"], "Request body must be a JSON object"
+                        ).dict(),
+                        status_code=400,
+                    )
                 try:
                     mcp_request = MCPRequest(**body)
                     response = await process_mcp_request(mcp_request, session)
@@ -3518,7 +3530,7 @@ async def mcp_endpoint(
                             "Access-Control-Expose-Headers": "MCP-Session-Id",
                         },
                     )
-                except ValidationError as e:
+                except (ValidationError, TypeError) as e:
                     return JSONResponse(
                         content=create_error_response(
                             body.get("id") if isinstance(body, dict) else None,
@@ -4044,7 +4056,12 @@ async def get_auth_token(request: Request):
     Validates against configured API keys (MCP_API_KEY env var or auto-generated).
     """
     try:
-        body = await request.json()
+        try:
+            body = parse_json_body_safe(await request.body(), max_depth=MAX_JSON_DEPTH)
+        except (json.JSONDecodeError, ValueError):
+            raise HTTPException(status_code=400, detail="Invalid JSON")
+        if not isinstance(body, dict):
+            raise HTTPException(status_code=400, detail="Request body must be a JSON object")
         api_key = body.get("api_key")
 
         if not api_key:
@@ -4064,16 +4081,19 @@ async def get_auth_token(request: Request):
         # Mint the JWT with the API key's actual scopes (fail closed to read-only),
         # so a read-only key cannot be upgraded to write at token issuance.
         granted_scopes = key_obj.scopes or ["wazuh:read"]
+        lifetime = timedelta(hours=config.TOKEN_LIFETIME_HOURS)
         token = create_access_token(
             data={
-                "sub": "wazuh_mcp_user",
+                # sub carries the key id so distinct keys are distinguishable principals
+                "sub": getattr(key_obj, "id", None) or "wazuh_mcp_user",
                 "iat": datetime.now(timezone.utc).timestamp(),
                 "scope": " ".join(granted_scopes),
             },
             secret_key=config.AUTH_SECRET_KEY,
+            expires_delta=lifetime,
         )
 
-        return {"access_token": token, "token_type": "bearer", "expires_in": 86400}  # 24 hours
+        return {"access_token": token, "token_type": "bearer", "expires_in": int(lifetime.total_seconds())}
 
     except json.JSONDecodeError:
         raise HTTPException(status_code=400, detail="Invalid JSON")

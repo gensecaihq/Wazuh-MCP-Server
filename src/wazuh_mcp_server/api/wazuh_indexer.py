@@ -302,7 +302,7 @@ class WazuhIndexerClient:
 
         return {
             "time_range": {"gte": timestamp_start, "lte": timestamp_end},
-            "total_alerts": resp.get("hits", {}).get("total", {}).get("value", 0),
+            "total_alerts": self._total_hits(resp.get("hits", {})),
             "top_rules": [_rule_row(b) for b in aggs.get("by_rule", {}).get("buckets", [])],
             "by_level": [
                 {"level": b.get("key"), "count": b.get("doc_count", 0)}

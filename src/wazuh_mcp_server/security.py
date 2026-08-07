@@ -156,6 +156,26 @@ def validate_rule_id(value: Any, required: bool = False, param_name: str = "rule
     return rule_id
 
 
+POLICY_ID_PATTERN = re.compile(r"^[A-Za-z0-9_.-]{1,64}$")
+
+
+def validate_policy_id(value: Any, required: bool = True, param_name: str = "policy_id") -> Optional[str]:
+    """Validate a Wazuh SCA policy ID (e.g. 'cis_debian10', 'cis_apple_macOS_12.0')."""
+    if value is None or str(value).strip() == "":
+        if required:
+            raise ToolValidationError(param_name, "is required", "Provide a valid SCA policy ID (e.g., 'cis_debian10')")
+        return None
+
+    policy_id = str(value).strip()
+    if not POLICY_ID_PATTERN.match(policy_id):
+        raise ToolValidationError(
+            param_name,
+            f"invalid format '{policy_id}'",
+            "Policy ID may contain letters, digits, dot, underscore, and hyphen (max 64 chars)",
+        )
+    return policy_id
+
+
 def validate_time_range(value: Any, param_name: str = "time_range") -> str:
     """Validate time range enum value."""
     if value is None:

@@ -119,10 +119,17 @@ class OAuthManager:
         self._register_claude_client()
 
     def _register_claude_client(self):
-        """Pre-register Claude Desktop as a known OAuth client."""
+        """Pre-register Claude Desktop as a known OAuth client.
+
+        Registered as a PUBLIC client (no secret, token_endpoint_auth_method="none"):
+        a confidential secret would never be disclosed to the client, so requiring it at
+        the token endpoint (client_requires_secret) would make the pre-registered client
+        unusable. Security is provided by the mandatory PKCE S256 exchange, which is the
+        correct posture for a public client.
+        """
         claude_client = OAuthClient(
             client_id="claude-desktop",
-            client_secret=secrets.token_urlsafe(32),
+            client_secret="",
             client_name="Claude",
             redirect_uris=[
                 "https://claude.ai/api/mcp/auth_callback",
@@ -131,9 +138,10 @@ class OAuthManager:
             grant_types=["authorization_code", "refresh_token"],
             response_types=["code"],
             scope="wazuh:read wazuh:write",
+            token_endpoint_auth_method="none",
         )
         self.clients[claude_client.client_id] = claude_client
-        logger.info("Pre-registered Claude Desktop OAuth client")
+        logger.info("Pre-registered Claude Desktop OAuth client (public / PKCE)")
 
     def get_issuer_url(self, request: Request) -> str:
         """Get the OAuth issuer URL.

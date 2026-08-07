@@ -199,6 +199,11 @@ class ServerConfig:
     WAZUH_INDEXER_SSL: bool = True
     WAZUH_INDEXER_VERIFY_SSL: bool = True
 
+    # Wazuh client tuning (applied to the WazuhClient built in server.py)
+    REQUEST_TIMEOUT_SECONDS: int = 30
+    MAX_CONNECTIONS: int = 10
+    MAX_ALERTS_PER_QUERY: int = 1000
+
     # Logging
     LOG_LEVEL: str = "INFO"
 
@@ -277,6 +282,13 @@ class ServerConfig:
             WAZUH_INDEXER_PASS=os.getenv("WAZUH_INDEXER_PASS", ""),
             WAZUH_INDEXER_SSL=indexer_ssl,
             WAZUH_INDEXER_VERIFY_SSL=os.getenv("WAZUH_INDEXER_VERIFY_SSL", "true").lower() == "true",
+            REQUEST_TIMEOUT_SECONDS=validate_positive_int(
+                os.getenv("REQUEST_TIMEOUT_SECONDS", "30"), "REQUEST_TIMEOUT_SECONDS", max_val=300
+            ),
+            MAX_CONNECTIONS=validate_positive_int(os.getenv("MAX_CONNECTIONS", "10"), "MAX_CONNECTIONS", max_val=100),
+            MAX_ALERTS_PER_QUERY=validate_positive_int(
+                os.getenv("MAX_ALERTS_PER_QUERY", "1000"), "MAX_ALERTS_PER_QUERY", max_val=10000
+            ),
             LOG_LEVEL=log_level,
             ENVIRONMENT=environment,
         )
