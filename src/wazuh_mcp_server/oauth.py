@@ -109,6 +109,11 @@ class OAuthManager:
         # Revocation denylist (token -> expiry) so revoked-but-unexpired tokens cannot
         # slip back in via the stateless JWT fallback. Cleaned up alongside expired tokens.
         self.revoked_tokens: Dict[str, datetime] = {}
+        # Revocation denylist keyed on the token's canonical identity (jti -> expiry).
+        # A signed JWT has many valid string spellings (base64url padding / non-canonical
+        # trailing bits) that PyJWT all accepts, so a raw-string denylist alone can be
+        # bypassed by re-spelling a revoked token. The jti is spelling-independent.
+        self.revoked_jtis: Dict[str, datetime] = {}
         # Proxies whose x-forwarded-* headers we trust when deriving the issuer URL.
         self._trusted_proxies = {p.strip() for p in os.getenv("TRUSTED_PROXIES", "").split(",") if p.strip()} | {
             "127.0.0.1",
@@ -387,12 +392,21 @@ class OAuthManager:
         if not token_obj:
             # Replay: a syntactically-valid refresh token that's no longer in the store
             # (already rotated/revoked). Revoke the whole grant for safety, per OAuth BCP.
-            if refresh_token in self.revoked_tokens:
+            # Match on jti so a re-spelled (padded) replay is still detected.
+            replay_jti = None
+            replay_payload = self._safe_decode(refresh_token)
+            if replay_payload is not None:
+                replay_jti = replay_payload.get("jti")
+            if refresh_token in self.revoked_tokens or (replay_jti and replay_jti in self.revoked_jtis):
                 self._revoke_client_tokens(client_id)
             raise ValueError("invalid_grant")
 
-        # Mark the consumed token as revoked so a later replay is detected above.
+        # Mark the consumed token as revoked (by string AND jti) so a later replay is
+        # detected above regardless of how the token is re-spelled.
         self.revoked_tokens[refresh_token] = token_obj.expires_at
+        consumed_payload = self._safe_decode(refresh_token)
+        if consumed_payload is not None and consumed_payload.get("jti"):
+            self.revoked_jtis[consumed_payload["jti"]] = token_obj.expires_at
 
         if token_obj.is_expired():
             raise ValueError("invalid_grant")
@@ -440,31 +454,50 @@ class OAuthManager:
             "scope": token_obj.scope,
         }
 
+    def _safe_decode(self, token: str) -> Optional[Dict[str, Any]]:
+        """Decode+verify a token's signature, ignoring expiry. Returns claims or None.
+
+        Expiry is ignored so revocation can still record a canonical identity (jti) for a
+        token that is about to expire; validate_access_token enforces expiry separately.
+        """
+        try:
+            return jwt.decode(token, self.secret_key, algorithms=["HS256"], options={"verify_exp": False})
+        except JWTError:
+            return None
+
     def validate_access_token(self, token: str) -> Optional[OAuthToken]:
         """Validate access token."""
-        # Revoked tokens are rejected even if otherwise valid / JWT-decodable.
+        # Fast path: exact-string denylist.
         if token in self.revoked_tokens:
             return None
 
-        # First check in-memory tokens
+        # Verify the signature (and expiry) up front. Revocation must be checked against
+        # the token's CANONICAL identity (jti), not its raw string: PyJWT accepts many
+        # valid spellings of the same signed token (base64url padding / trailing bits), so
+        # an attacker could otherwise re-spell a revoked token to slip past the denylist.
+        try:
+            payload = jwt.decode(token, self.secret_key, algorithms=["HS256"])
+        except JWTError:
+            return None
+
+        jti = payload.get("jti")
+        if jti and jti in self.revoked_jtis:
+            return None
+
+        # Prefer the in-memory record (exact-string match); else rebuild from the verified claims.
         token_obj = self.access_tokens.get(token)
         if token_obj and not token_obj.is_expired():
             return token_obj
 
-        # Try to decode as JWT
-        try:
-            payload = jwt.decode(token, self.secret_key, algorithms=["HS256"])
-            if payload.get("type") == "access":
-                return OAuthToken(
-                    token=token,
-                    token_type="access",
-                    client_id=payload.get("client_id", ""),
-                    scope=payload.get("scope", ""),
-                    created_at=datetime.fromtimestamp(payload.get("iat", 0), timezone.utc),
-                    expires_at=datetime.fromtimestamp(payload.get("exp", 0), timezone.utc),
-                )
-        except JWTError:
-            pass
+        if payload.get("type") == "access":
+            return OAuthToken(
+                token=token,
+                token_type="access",
+                client_id=payload.get("client_id", ""),
+                scope=payload.get("scope", ""),
+                created_at=datetime.fromtimestamp(payload.get("iat", 0), timezone.utc),
+                expires_at=datetime.fromtimestamp(payload.get("exp", 0), timezone.utc),
+            )
 
         return None
 
@@ -476,14 +509,16 @@ class OAuthManager:
             if token_obj is not None:
                 self.revoked_tokens[token] = token_obj.expires_at
                 revoked = True
-        if not revoked:
-            # Not in store (e.g. stateless JWT) — still deny it going forward.
-            try:
-                payload = jwt.decode(token, self.secret_key, algorithms=["HS256"])
-                self.revoked_tokens[token] = datetime.fromtimestamp(payload.get("exp", 0), timezone.utc)
-                revoked = True
-            except JWTError:
-                pass
+        # Always denylist by canonical identity (jti) too, so NO alternate spelling of this
+        # signed token survives revocation — not just the exact string presented here.
+        payload = self._safe_decode(token)
+        if payload is not None:
+            exp = datetime.fromtimestamp(payload.get("exp", 0), timezone.utc)
+            self.revoked_tokens[token] = exp
+            jti = payload.get("jti")
+            if jti:
+                self.revoked_jtis[jti] = exp
+            revoked = True
         return revoked
 
     def _revoke_client_tokens(self, client_id: str) -> None:
@@ -492,6 +527,9 @@ class OAuthManager:
             for tok, obj in list(store.items()):
                 if obj.client_id == client_id:
                     self.revoked_tokens[tok] = obj.expires_at
+                    payload = self._safe_decode(tok)
+                    if payload is not None and payload.get("jti"):
+                        self.revoked_jtis[payload["jti"]] = obj.expires_at
                     del store[tok]
 
     def delete_client(self, client_id: str) -> bool:
@@ -531,6 +569,7 @@ class OAuthManager:
         self.refresh_tokens = {k: v for k, v in self.refresh_tokens.items() if not v.is_expired()}
         # A revoked token only needs to stay on the denylist until it would have expired.
         self.revoked_tokens = {k: exp for k, exp in self.revoked_tokens.items() if exp and exp > now}
+        self.revoked_jtis = {k: exp for k, exp in self.revoked_jtis.items() if exp and exp > now}
 
 
 def create_oauth_router(oauth_manager: OAuthManager) -> APIRouter:
