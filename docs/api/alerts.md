@@ -329,9 +329,15 @@ Advanced full-text search across all Wazuh security events and logs.
 
 | Parameter | Type | Default | Required | Description |
 |-----------|------|---------|----------|-------------|
-| `query` | string | - | **Yes** | Search query or pattern |
-| `time_range` | string | `"24h"` | No | Time range for event search |
+| `query` | string | - | **Yes** | Free-text search (Indexer `simple_query_string`: AND/OR/NOT, quoted phrases, trailing `*` prefix — no leading wildcards or regex) |
+| `time_range` | string | `"24h"` | No | Time range (`1h`, `6h`, `12h`, `1d`, `24h`, `7d`, `30d`) |
 | `limit` | integer | `100` | No | Maximum number of events to retrieve |
+| `rule_id` | string | `null` | No | Filter by rule ID |
+| `agent_id` | string | `null` | No | Filter by agent ID |
+| `level` | string | `null` | No | Minimum severity threshold (e.g. `10` or `10+`) |
+| `srcip` | string | `null` | No | Filter by source IP (`data.srcip`) |
+| `dstip` | string | `null` | No | Filter by destination IP (`data.dstip`) |
+| `compact` | boolean | `true` | No | Return compact results |
 
 ### Search Query Syntax
 
