@@ -53,7 +53,7 @@ jobs:
         fi
     
     - name: Upload security reports
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@v7
       with:
         name: dependency-security-reports
         path: pip-audit-report.json
@@ -89,7 +89,7 @@ jobs:
       continue-on-error: false
     
     - name: Upload code security reports
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@v7
       with:
         name: code-security-reports
         path: bandit-report.json
@@ -127,7 +127,7 @@ jobs:
       continue-on-error: false
     
     - name: Upload Docker security reports
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@v7
       with:
         name: docker-security-reports
         path: |
