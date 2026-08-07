@@ -530,6 +530,30 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.error(f"Failed to start metrics collection: {e}")
 
+    # Scaling caveat: the OAuth token/refresh store, the revocation denylist, and the
+    # rate limiters are all per-process, in-memory state. Across multiple workers/replicas
+    # a token revoked on one node is still accepted on another (the stateless-JWT fallback),
+    # refresh-replay detection is per-node, and rate-limit buckets don't aggregate. Until a
+    # shared store (e.g. Redis) backs these, deploy a SINGLE worker or pin clients to one
+    # node with sticky sessions. Warn loudly when a multi-worker env var is detected.
+    _worker_count = os.getenv("WEB_CONCURRENCY") or os.getenv("UVICORN_WORKERS") or os.getenv("GUNICORN_WORKERS")
+    try:
+        _multi_worker = int(_worker_count) > 1 if _worker_count else False
+    except (TypeError, ValueError):
+        _multi_worker = False
+    if _multi_worker:
+        logger.warning(
+            "⚠️  Multiple workers detected (%s) but OAuth token/revocation state and rate limiting "
+            "are per-process. Token revocation and rate limits will NOT be consistent across workers. "
+            "Run a single worker, add sticky sessions, or back these stores with Redis.",
+            _worker_count,
+        )
+    elif cfg.is_oauth:
+        logger.info(
+            "ℹ️  OAuth token store, revocation denylist, and rate limiter are per-process. "
+            "Deploy a single worker (or a shared store) so revocation and rate limits stay consistent."
+        )
+
     # Initialize Wazuh client (will be available after yield)
     logger.info("✅ Server startup complete with high availability features enabled")
 
