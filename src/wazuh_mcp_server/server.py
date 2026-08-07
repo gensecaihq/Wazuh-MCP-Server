@@ -166,9 +166,13 @@ async def _do_verify_authentication(authorization: Optional[str], config) -> Opt
                 # Return AuthToken with OAuth scopes (fail closed to read-only)
                 scope_str = getattr(token_obj, "scope", "") or ""
                 scopes = scope_str.split() if scope_str else ["wazuh:read"]
+                # Stable per-principal id for rate-limit bucketing: prefer the OAuth
+                # client_id, else the token subject, so distinct clients get distinct
+                # buckets instead of collapsing into one shared "oauth" bucket.
+                oauth_principal = getattr(token_obj, "client_id", None) or getattr(token_obj, "sub", None)
                 return AuthToken(
                     token=token,
-                    api_key_id="oauth",
+                    api_key_id=f"oauth:{oauth_principal}" if oauth_principal else "oauth",
                     created_at=datetime.now(timezone.utc),
                     scopes=scopes,
                 )
@@ -3910,10 +3914,11 @@ async def readiness_check():
     readiness gating, not for liveness (see /health).
     """
     try:
-        # Test Wazuh connectivity
+        # Test Wazuh connectivity with an UNCACHED probe so a fresh Manager outage
+        # isn't masked by the 5-minute cache on get_manager_info().
         wazuh_status = "healthy"
         try:
-            await wazuh_client.get_manager_info()
+            await wazuh_client.ping_manager()
         except Exception:
             wazuh_status = "unhealthy"
 
@@ -3922,12 +3927,17 @@ async def readiness_check():
         if wazuh_client._indexer_client:
             try:
                 health = await wazuh_client._indexer_client.health_check()
-                if health.get("status") in ("green", "yellow"):
+                hs = health.get("status")
+                if hs in ("green", "yellow"):
                     indexer_status = "healthy"
-                elif health.get("status") == "red":
+                elif hs == "red":
                     indexer_status = "degraded"
                 else:
-                    indexer_status = "unknown"
+                    # health_check() swallows connection errors and returns
+                    # status="unavailable" (or None) instead of raising, so an Indexer
+                    # outage surfaces here — not in the except below. Treat it as
+                    # unhealthy so readiness degrades instead of silently staying 200.
+                    indexer_status = "unhealthy"
             except Exception:
                 indexer_status = "unhealthy"
 
@@ -3947,10 +3957,13 @@ async def readiness_check():
             auth_info["oauth_endpoints"] = ["/oauth/authorize", "/oauth/token", "/oauth/register"]
             auth_info["oauth_discovery"] = "/.well-known/oauth-authorization-server"
 
-        # Determine overall status from component health
+        # Determine overall status from component health. The Indexer backs every
+        # alert/vuln tool, so when it is configured any non-healthy state (unhealthy,
+        # degraded/red, unknown) must degrade readiness — otherwise the orchestrator
+        # keeps routing traffic to a node whose core tools all fail.
         if wazuh_status != "healthy":
             overall_status = "degraded"
-        elif isinstance(indexer_status, str) and indexer_status.startswith("unhealthy"):
+        elif indexer_status not in ("healthy", "not_configured"):
             overall_status = "degraded"
         else:
             overall_status = "healthy"

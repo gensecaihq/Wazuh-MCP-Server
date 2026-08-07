@@ -102,21 +102,37 @@ class CircuitBreaker:
             return result
 
         except self.config.expected_exception as e:
-            # A 429 is an upstream rate-limit (transient throttle), not a service outage —
-            # counting it would turn a soft throttle into a hard circuit-open. Re-raise
-            # for the retry layer without recording a circuit failure, but end any in-flight
-            # trial cleanly: leaving it HALF_OPEN with the gate released lets concurrent
-            # callers run untracked, and a stray success would prematurely close the circuit.
-            if isinstance(e, httpx.HTTPStatusError) and e.response.status_code == 429:
-                await self._end_trial_unproven(func.__name__, "429 throttle")
-                raise
+            if isinstance(e, httpx.HTTPStatusError):
+                status = e.response.status_code
+                # A 429 is an upstream rate-limit (transient throttle), not a service outage —
+                # counting it would turn a soft throttle into a hard circuit-open. Re-raise
+                # for the retry layer without recording a circuit failure, but end any in-flight
+                # trial cleanly: leaving it HALF_OPEN with the gate released lets concurrent
+                # callers run untracked, and a stray success would prematurely close the circuit.
+                if status == 429:
+                    await self._end_trial_unproven(func.__name__, "429 throttle")
+                    raise
+                # A 4xx client error is a *completed* HTTP response: the dependency is alive
+                # and correctly rejecting bad input. Treat it as proof of liveness so a user
+                # probing an invalid id during the half-open trial doesn't strand the breaker
+                # OPEN. Only 5xx (and transport errors below) are genuine service failures.
+                if 400 <= status < 500:
+                    await self._on_liveness_proven(func.__name__)
+                    raise
             await self._on_failure(func.__name__, e)
             raise
         except Exception as e:
-            # Unexpected exceptions are not counted as monitored failures, but a trial that
-            # raised one has NOT proven recovery. Release the single-trial gate and re-arm —
-            # otherwise the breaker stays HALF_OPEN with the gate stuck set and every later
-            # call short-circuits to 503 until the process restarts.
+            # A domain-layer error raised *after* a completed HTTP response (marked with
+            # _service_alive, e.g. a 4xx wrapped as ValueError, or an unparseable body) also
+            # proves the dependency is reachable — don't strand the breaker OPEN on it.
+            if getattr(e, "_service_alive", False):
+                logger.debug(f"Application error in {func.__name__} after a completed response: {e}")
+                await self._on_liveness_proven(func.__name__)
+                raise
+            # Truly unexpected exceptions (no proof of an HTTP round-trip) are not counted as
+            # monitored failures, but a trial that raised one has NOT proven recovery. Release
+            # the single-trial gate and re-arm — otherwise the breaker stays HALF_OPEN with the
+            # gate stuck set and every later call short-circuits to 503 until the process restarts.
             logger.error(f"Unexpected error in {func.__name__}: {e}")
             await self._end_trial_unproven(func.__name__, f"unexpected {type(e).__name__}")
             raise
@@ -134,6 +150,21 @@ class CircuitBreaker:
                 self.state = CircuitBreakerState.OPEN
                 self.last_failure_time = time.time()
                 logger.info(f"Circuit breaker {func_name} half-open trial ended unproven ({reason}); returning to OPEN")
+
+    async def _on_liveness_proven(self, func_name: str) -> None:
+        """A completed HTTP response (a 4xx client error) proves the dependency is reachable.
+
+        Close a half-open trial (recovery proven). In CLOSED state a client error is neither a
+        success nor a monitored failure, so leave the failure count untouched — a stream of
+        client errors must not erase a real 5xx failure streak.
+        """
+        async with self._lock:
+            self._half_open_trial_in_progress = False
+            if self.state == CircuitBreakerState.HALF_OPEN:
+                self.state = CircuitBreakerState.CLOSED
+                self.failure_count = 0
+                self.last_failure_time = None
+                logger.info(f"Circuit breaker {func_name} reset to CLOSED (liveness proven by HTTP response)")
 
     def _should_attempt_reset(self) -> bool:
         """Check if enough time has passed to attempt reset."""

@@ -180,5 +180,182 @@ class TestConfigVarsWired:
         assert client.config.max_connections == 25
 
 
+# ============================ WAVE 2 ============================
+
+
+class _FakeResp:
+    def raise_for_status(self):
+        return None
+
+    def json(self):
+        return {"data": {}}
+
+
+class _FakeHttp:
+    async def request(self, *a, **k):
+        return _FakeResp()
+
+
+# ---- W2: cold-start init race — concurrent first requests initialize once ----
+class TestColdStartInitRace:
+    @pytest.mark.asyncio
+    async def test_concurrent_first_requests_initialize_once(self):
+        import asyncio
+
+        from wazuh_mcp_server.api.wazuh_client import WazuhClient
+        from wazuh_mcp_server.config import WazuhConfig
+
+        client = WazuhClient(WazuhConfig(wazuh_host="h", wazuh_user="u", wazuh_pass="p"))
+        client._circuit_breaker = None  # call _execute_request directly, bypass breaker
+        calls = {"n": 0}
+
+        async def fake_initialize():
+            calls["n"] += 1
+            await asyncio.sleep(0.02)  # widen the race window
+            client.client = _FakeHttp()
+            client.token = "tok"
+
+        client.initialize = fake_initialize
+        results = await asyncio.gather(*[client._execute_request("GET", "/x") for _ in range(12)])
+        assert calls["n"] == 1
+        assert all(r == {"data": {}} for r in results)
+
+
+# ---- W2: body Content-Length precheck + oversized body → 413 ----
+class TestBodySizeDoS:
+    @pytest.mark.asyncio
+    async def test_oversized_body_rejected(self, monkeypatch):
+        import httpx
+
+        monkeypatch.setattr(mcp_server.config, "AUTH_MODE", "none")
+        big = "x" * (1024 * 1024 + 1024)  # just over the 1 MB cap
+        async with httpx.AsyncClient(
+            transport=httpx.ASGITransport(app=mcp_server.app), base_url="http://testserver"
+        ) as client:
+            resp = await client.post("/mcp", content=big, headers={"Content-Type": "application/json"})
+        assert resp.status_code == 413
+
+
+# ---- W2: middleware rate limiter exempts probes / self-limited endpoints ----
+class TestRateLimiterReconciliation:
+    def test_exempt_and_self_limited_path_sets(self):
+        from wazuh_mcp_server.security import RATE_LIMIT_EXEMPT_PATHS, RATE_LIMIT_SELF_LIMITED_PATHS
+
+        assert {"/health", "/ready", "/metrics"} <= RATE_LIMIT_EXEMPT_PATHS
+        assert {"/", "/mcp", "/sse"} <= RATE_LIMIT_SELF_LIMITED_PATHS
+
+    @pytest.mark.asyncio
+    async def test_probe_endpoint_not_middleware_rate_limited(self, monkeypatch):
+        import httpx
+
+        # Force the middleware limiter to deny everything.
+        monkeypatch.setattr(mcp_server.security_manager.rate_limiter, "is_allowed", lambda key: (False, 30))
+        async with httpx.AsyncClient(
+            transport=httpx.ASGITransport(app=mcp_server.app), base_url="http://testserver"
+        ) as client:
+            # /health is exempt → not 429 even though the limiter denies all.
+            health = await client.get("/health")
+        assert health.status_code == 200
+
+
+# ---- W2: JWT principal key is stable per-subject, not a shared "jwt_auth" ----
+class TestPrincipalKey:
+    @pytest.mark.asyncio
+    async def test_jwt_sub_becomes_api_key_id(self, monkeypatch):
+        from wazuh_mcp_server.auth import create_access_token, verify_bearer_token
+
+        secret = "test-secret-key-at-least-32-characters-long"
+        # verify_bearer_token decodes with get_config().AUTH_SECRET_KEY (the shared
+        # singleton, i.e. mcp_server.config); sign the tokens with the same key.
+        monkeypatch.setattr(mcp_server.config, "AUTH_SECRET_KEY", secret)
+        tok_a = create_access_token({"sub": "key-A", "scope": "wazuh:read"}, secret)
+        tok_b = create_access_token({"sub": "key-B", "scope": "wazuh:read"}, secret)
+
+        a = await verify_bearer_token(f"Bearer {tok_a}")
+        b = await verify_bearer_token(f"Bearer {tok_b}")
+        assert a.api_key_id == "jwt:key-A"
+        assert b.api_key_id == "jwt:key-B"
+        assert a.api_key_id != b.api_key_id
+
+
+# ---- W2: circuit breaker treats a 4xx during the half-open trial as liveness ----
+class TestCircuitBreaker4xxDuringTrial:
+    @pytest.mark.asyncio
+    async def test_service_alive_error_closes_half_open_trial(self):
+        from wazuh_mcp_server.resilience import CircuitBreaker, CircuitBreakerConfig, CircuitBreakerState
+
+        cb = CircuitBreaker(
+            CircuitBreakerConfig(failure_threshold=1, recovery_timeout=0, expected_exception=(ConnectionError,))
+        )
+
+        async def _raise(exc):
+            raise exc
+
+        with pytest.raises(ConnectionError):
+            await cb._call(_raise, ConnectionError("down"))
+        assert cb.state == CircuitBreakerState.OPEN
+
+        # Trial hits a 4xx (client error), surfaced as a _service_alive-marked ValueError.
+        err = ValueError("HTTP 404")
+        err._service_alive = True
+        with pytest.raises(ValueError):
+            await cb._call(_raise, err)
+
+        # Server answered → recovery proven → breaker CLOSED, not stranded OPEN.
+        assert cb.state == CircuitBreakerState.CLOSED
+        assert cb._half_open_trial_in_progress is False
+
+
+# ---- W2: /ready degrades to 503 when a configured Indexer is unavailable ----
+class TestReadyDegradesOnIndexerOutage:
+    @pytest.mark.asyncio
+    async def test_indexer_unavailable_returns_503(self, monkeypatch):
+        import httpx
+
+        async def ok():
+            return {"data": {"affected_items": [{"version": "4.14.7"}]}}
+
+        class _StubIndexer:
+            async def health_check(self):
+                # health_check() never raises — it returns this on an outage.
+                return {"status": "unavailable"}
+
+        monkeypatch.setattr(mcp_server.wazuh_client, "ping_manager", ok)
+        monkeypatch.setattr(mcp_server.wazuh_client, "_indexer_client", _StubIndexer())
+        async with httpx.AsyncClient(
+            transport=httpx.ASGITransport(app=mcp_server.app), base_url="http://testserver"
+        ) as client:
+            resp = await client.get("/ready")
+        assert resp.status_code == 503
+        assert resp.json()["services"]["wazuh_indexer"] == "unhealthy"
+
+
+# ---- W2: summary tools report the true total + truncation flag ----
+class TestSummaryTruncationTruth:
+    @pytest.mark.asyncio
+    async def test_alert_summary_reports_true_total_and_truncation(self):
+        from wazuh_mcp_server.api.wazuh_client import WazuhClient
+        from wazuh_mcp_server.config import WazuhConfig
+
+        client = WazuhClient(WazuhConfig(wazuh_host="h", wazuh_user="u", wazuh_pass="p"))
+
+        class _Idx:
+            async def get_alerts(self, **kwargs):
+                # 3 sampled docs, but 50,000 truly matched.
+                return {
+                    "data": {
+                        "affected_items": [{"rule": {"id": "1"}}] * 3,
+                        "total_affected_items": 50000,
+                    }
+                }
+
+        client._indexer_client = _Idx()
+        out = (await client.get_alert_summary("24h", "rule.id"))["data"]
+        assert out["total_alerts"] == 50000
+        assert out["alerts_sampled"] == 3
+        assert out["truncated"] is True
+        assert "truncation_warning" in out
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

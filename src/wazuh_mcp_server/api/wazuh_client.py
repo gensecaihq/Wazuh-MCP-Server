@@ -154,6 +154,10 @@ class WazuhClient:
         self.client: Optional[httpx.AsyncClient] = None
         # Lock to prevent concurrent re-authentication races
         self._auth_lock = asyncio.Lock()
+        # Lock to prevent concurrent cold-start initialization races. Without it, N
+        # concurrent first requests each call initialize(), which aclose()s and
+        # replaces an httpx client another request may be mid-flight on.
+        self._init_lock = asyncio.Lock()
         # Rate limiting with O(1) deque operations
         self._rate_limiter = asyncio.Semaphore(config.max_connections)
         self._request_times: deque = deque(maxlen=200)  # Pre-sized deque for efficiency
@@ -606,11 +610,16 @@ class WazuhClient:
 
     async def _execute_request(self, method: str, endpoint: str, **kwargs) -> Dict[str, Any]:
         """Execute the actual HTTP request to Wazuh API."""
-        # Ensure client is initialized
+        # Ensure client is initialized. Double-checked lock so concurrent first
+        # requests don't each re-init (which would close an in-use client).
         if not self.client:
-            await self.initialize()
-        elif not self.token:
-            await self._authenticate()
+            async with self._init_lock:
+                if not self.client:
+                    await self.initialize()
+        if not self.token:
+            async with self._auth_lock:
+                if not self.token:
+                    await self._authenticate()
 
         url = f"{self.config.base_url}{endpoint}"
         headers = {"Authorization": f"Bearer {self.token}"}
@@ -669,9 +678,14 @@ class WazuhClient:
                 logger.error(f"Wazuh API server error: {e.response.status_code}")
                 raise
             else:
-                # Client errors (4xx except 401): not retryable, wrap as ValueError
-                logger.error(f"Wazuh API request failed: {endpoint} returned HTTP {e.response.status_code}")
-                raise ValueError(f"Wazuh API request failed: {endpoint} returned HTTP {e.response.status_code}")
+                # Client errors (4xx except 401): not retryable, wrap as ValueError. Mark it
+                # _service_alive so the circuit breaker treats it as a completed HTTP response
+                # (liveness proven) rather than an unproven trial — a user probing a bad agent
+                # id must not strand the breaker OPEN. Log at info: it's user input, not an outage.
+                logger.info(f"Wazuh API request failed: {endpoint} returned HTTP {e.response.status_code}")
+                err = ValueError(f"Wazuh API request failed: {endpoint} returned HTTP {e.response.status_code}")
+                err._service_alive = True
+                raise err
         except httpx.ConnectError as e:
             # Distinguish SSL errors from generic connection failures
             err_str = str(e).lower()
@@ -694,10 +708,35 @@ class WazuhClient:
         cache_key = "manager_info"
         return await self._get_cached(cache_key, "/")
 
+    async def ping_manager(self) -> Dict[str, Any]:
+        """Uncached liveness probe against the Manager root endpoint.
+
+        Readiness gating must reflect the Manager's CURRENT reachability; the 5-minute
+        cache on get_manager_info() would otherwise mask a fresh outage for up to 300s.
+        """
+        return await self._request("GET", "/")
+
     def _time_range_to_start(self, time_range: str) -> str:
         """Convert a time_range string like '24h' or '7d' to an ISO 8601 start timestamp."""
         hours = _TIME_RANGE_HOURS.get(time_range, 24)
         return (datetime.now(timezone.utc) - timedelta(hours=hours)).isoformat()
+
+    @staticmethod
+    def _alerts_and_total(result: Dict[str, Any]) -> Tuple[list, int, bool]:
+        """Unpack a get_alerts() result into (sampled_alerts, true_total, truncated).
+
+        get_alerts caps affected_items at `limit` but reports the real match count in
+        total_affected_items (track_total_hits). Summary tools MUST report the real total,
+        not len(affected_items) — otherwise a busy SIEM's magnitudes are silently wrong and
+        everything past the first page is invisible. `truncated` says the in-Python analysis
+        below (grouping, pattern counts) only saw a sample, not the whole result set.
+        """
+        data = result.get("data", {})
+        alerts = data.get("affected_items", []) or []
+        true_total = data.get("total_affected_items", len(alerts))
+        if not isinstance(true_total, int) or true_total < len(alerts):
+            true_total = len(alerts)
+        return alerts, true_total, true_total > len(alerts)
 
     async def get_alert_summary(self, time_range: str, group_by: str) -> Dict[str, Any]:
         """Get alert summary — aggregated from Wazuh Indexer."""
@@ -705,7 +744,7 @@ class WazuhClient:
             raise IndexerNotConfiguredError()
         start = self._time_range_to_start(time_range)
         result = await self._indexer_client.get_alerts(limit=1000, timestamp_start=start)
-        alerts = result.get("data", {}).get("affected_items", [])
+        alerts, total_alerts, truncated = self._alerts_and_total(result)
         groups: Dict[str, int] = {}
         for alert in alerts:
             value: Any = alert
@@ -717,8 +756,17 @@ class WazuhClient:
             "data": {
                 "time_range": time_range,
                 "group_by": group_by,
-                "total_alerts": len(alerts),
+                "total_alerts": total_alerts,
+                "alerts_sampled": len(alerts),
+                "truncated": truncated,
                 "groups": groups,
+                **(
+                    {
+                        "truncation_warning": f"Grouping reflects the newest {len(alerts)} of {total_alerts} matching alerts."
+                    }
+                    if truncated
+                    else {}
+                ),
             }
         }
 
@@ -728,7 +776,7 @@ class WazuhClient:
             raise IndexerNotConfiguredError()
         start = self._time_range_to_start(time_range)
         result = await self._indexer_client.get_alerts(limit=1000, timestamp_start=start)
-        alerts = result.get("data", {}).get("affected_items", [])
+        alerts, total_alerts, truncated = self._alerts_and_total(result)
         rule_counts: Dict[str, Dict[str, Any]] = {}
         for alert in alerts:
             rule = alert.get("rule", {})
@@ -748,6 +796,19 @@ class WazuhClient:
                 "min_frequency": min_frequency,
                 "patterns": patterns,
                 "total_patterns": len(patterns),
+                "total_alerts": total_alerts,
+                "alerts_analyzed": len(alerts),
+                "truncated": truncated,
+                **(
+                    {
+                        "truncation_warning": (
+                            f"Pattern counts reflect the newest {len(alerts)} of {total_alerts} matching alerts; "
+                            "frequencies are lower bounds."
+                        )
+                    }
+                    if truncated
+                    else {}
+                ),
             }
         }
 
@@ -901,12 +962,14 @@ class WazuhClient:
             raise IndexerNotConfiguredError()
         # Use Elasticsearch query_string for efficient server-side search
         result = await self._indexer_client.get_alerts(limit=100, query_text=indicator)
-        alerts = result.get("data", {}).get("affected_items", [])
+        alerts, matching_alerts, truncated = self._alerts_and_total(result)
         return {
             "data": {
                 "indicator": indicator,
                 "type": indicator_type,
-                "matching_alerts": len(alerts),
+                "matching_alerts": matching_alerts,
+                "alerts_sampled": len(alerts),
+                "truncated": truncated,
                 "alerts": alerts[:20],
             }
         }
@@ -917,8 +980,7 @@ class WazuhClient:
             raise IndexerNotConfiguredError()
         # Use Elasticsearch query_string for server-side search
         result = await self._indexer_client.get_alerts(limit=500, query_text=indicator)
-        alerts = result.get("data", {}).get("affected_items", [])
-        occurrences = len(alerts)
+        alerts, occurrences, truncated = self._alerts_and_total(result)
         max_level = 0
         for alert in alerts:
             level = alert.get("rule", {}).get("level", 0)
@@ -930,6 +992,8 @@ class WazuhClient:
                 "indicator": indicator,
                 "type": indicator_type,
                 "occurrences": occurrences,
+                "occurrences_sampled": len(alerts),
+                "truncated": truncated,
                 "max_alert_level": max_level,
                 "risk": risk,
             }
@@ -1029,21 +1093,21 @@ class WazuhClient:
             try:
                 start = self._time_range_to_start("24h")
                 result = await self._indexer_client.get_alerts(limit=500, timestamp_start=start, level="10")
-                high_alerts = result.get("data", {}).get("affected_items", [])
-                alert_summary["high_severity_alerts_24h"] = len(high_alerts)
-                if len(high_alerts) > 10:
+                high_alerts, high_total, _ = self._alerts_and_total(result)
+                alert_summary["high_severity_alerts_24h"] = high_total
+                if high_total > 10:
                     risk_factors.append(
                         {
                             "factor": "high_severity_alerts",
-                            "count": len(high_alerts),
+                            "count": high_total,
                             "severity": "high",
                         }
                     )
-                elif len(high_alerts) > 0:
+                elif high_total > 0:
                     risk_factors.append(
                         {
                             "factor": "elevated_alert_activity",
-                            "count": len(high_alerts),
+                            "count": high_total,
                             "severity": "medium",
                         }
                     )
@@ -1116,7 +1180,7 @@ class WazuhClient:
             raise IndexerNotConfiguredError()
         start = self._time_range_to_start(time_range)
         result = await self._indexer_client.get_alerts(limit=1000, timestamp_start=start)
-        alerts = result.get("data", {}).get("affected_items", [])
+        alerts, total_alerts, truncated = self._alerts_and_total(result)
 
         rule_data: Dict[str, Dict[str, Any]] = {}
         for alert in alerts:
@@ -1186,9 +1250,21 @@ class WazuhClient:
         return {
             "data": {
                 "time_range": time_range,
+                "total_alerts": total_alerts,
                 "total_alerts_analyzed": len(alerts),
+                "truncated": truncated,
                 "threats": threats[:limit],
                 "total_unique_rules": len(rule_data),
+                **(
+                    {
+                        "truncation_warning": (
+                            f"Threat ranking reflects the newest {len(alerts)} of {total_alerts} matching alerts; "
+                            "counts and rankings are lower bounds."
+                        )
+                    }
+                    if truncated
+                    else {}
+                ),
             }
         }
 
@@ -1231,14 +1307,16 @@ class WazuhClient:
             try:
                 start = self._time_range_to_start(tr)
                 alerts_result = await self._indexer_client.get_alerts(limit=500, timestamp_start=start)
-                alerts = alerts_result.get("data", {}).get("affected_items", [])
+                alerts, total_alerts, truncated = self._alerts_and_total(alerts_result)
                 level_dist: Dict[str, int] = {}
                 for a in alerts:
                     lvl = a.get("rule", {}).get("level", 0)
                     bucket = "critical" if lvl >= 12 else "high" if lvl >= 10 else "medium" if lvl >= 7 else "low"
                     level_dist[bucket] = level_dist.get(bucket, 0) + 1
                 report["sections"]["alerts"] = {
-                    "total": len(alerts),
+                    "total": total_alerts,
+                    "sampled": len(alerts),
+                    "truncated": truncated,
                     "by_severity": level_dist,
                     "time_range": tr,
                 }

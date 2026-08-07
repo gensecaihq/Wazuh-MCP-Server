@@ -16,6 +16,7 @@ from typing import Any, Dict, List, Optional, Set
 
 import httpx
 from fastapi import HTTPException, Request
+from fastapi.responses import JSONResponse
 
 logger = logging.getLogger(__name__)
 
@@ -897,6 +898,15 @@ class SecurityValidator:
         return False
 
 
+# Unauthenticated liveness/readiness/metrics probes — never rate-limited by the
+# coarse middleware limiter (an orchestrator health-checking must not get 429'd).
+RATE_LIMIT_EXEMPT_PATHS = frozenset({"/health", "/healthz", "/ready", "/readyz", "/live", "/livez", "/metrics"})
+
+# Endpoints that run their own principal-keyed rate limiter inside the handler.
+# Applying the middleware's raw-IP limiter on top would defeat the principal keying.
+RATE_LIMIT_SELF_LIMITED_PATHS = frozenset({"/", "/mcp", "/sse", "/messages"})
+
+
 class SecurityManager:
     """Centralized security management."""
 
@@ -954,23 +964,41 @@ class SecurityManager:
     async def validate_request(self, request: Request) -> None:
         """Comprehensive request validation."""
         client_ip = self.get_client_ip(request)
+        path = request.url.path
 
-        # Check rate limiting
-        allowed, retry_after = self.rate_limiter.is_allowed(client_ip)
-        if not allowed:
-            self.metrics.rate_limit_violations += 1
-            raise HTTPException(
-                status_code=429,
-                detail="Rate limit exceeded",
-                headers={"Retry-After": str(retry_after)} if retry_after else {},
-            )
+        # Rate limiting. Skip endpoints that run their own principal-keyed limiter
+        # (so a proxy that isn't in TRUSTED_PROXIES doesn't collapse every tenant
+        # into one raw-IP bucket) and unauthenticated liveness/readiness probes.
+        if path not in RATE_LIMIT_EXEMPT_PATHS and path not in RATE_LIMIT_SELF_LIMITED_PATHS:
+            allowed, retry_after = self.rate_limiter.is_allowed(client_ip)
+            if not allowed:
+                self.metrics.rate_limit_violations += 1
+                raise HTTPException(
+                    status_code=429,
+                    detail="Rate limit exceeded",
+                    headers={"Retry-After": str(retry_after)} if retry_after else {},
+                )
 
-        # Read request body for validation
+        # Content-Length precheck: reject an oversized body BEFORE buffering it, so
+        # an unauthenticated client can't OOM the process with a multi-GB upload.
+        max_size = self.validator.max_payload_size
+        if request.method in ("POST", "PUT", "PATCH"):
+            content_length = request.headers.get("content-length")
+            if content_length is not None:
+                try:
+                    if int(content_length) > max_size:
+                        raise HTTPException(status_code=413, detail="Payload too large")
+                except ValueError:
+                    pass  # malformed header; the post-read length check still applies
+
+        # Read request body for validation (cached by Starlette for the endpoint).
         body = None
         if request.method == "POST":
             try:
-                body = await request.body()
-                body = body.decode("utf-8") if body else None
+                raw = await request.body()
+                if len(raw) > max_size:
+                    raise HTTPException(status_code=413, detail="Payload too large")
+                body = raw.decode("utf-8") if raw else None
             except (UnicodeDecodeError, RuntimeError) as e:
                 logger.debug(f"Failed to read request body: {e}")
                 body = None
@@ -1072,8 +1100,15 @@ async def security_middleware(request: Request, call_next):
 
         return response
 
-    except HTTPException:
-        raise
+    except HTTPException as exc:
+        # A BaseHTTPMiddleware runs OUTSIDE FastAPI's ExceptionMiddleware, so an
+        # HTTPException raised here would escape to ServerErrorMiddleware and become a
+        # 500 instead of its intended status (413/429/503). Convert it to a response.
+        return JSONResponse(
+            status_code=exc.status_code,
+            content={"detail": exc.detail},
+            headers=getattr(exc, "headers", None) or None,
+        )
     except Exception as e:
         logger.error(f"Security middleware error: {e}")
-        raise HTTPException(status_code=500, detail="Internal server error")
+        return JSONResponse(status_code=500, content={"detail": "Internal server error"})

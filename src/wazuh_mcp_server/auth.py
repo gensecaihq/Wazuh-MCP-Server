@@ -369,10 +369,19 @@ async def verify_bearer_token(authorization: str) -> AuthToken:
         scope_string = payload.get("scope", "")
         scopes = scope_string.split() if scope_string else ["wazuh:read"]
 
+        # Derive a stable per-principal id for rate-limit bucketing. Prefer the JWT
+        # subject (the API key id); fall back to a token hash so distinct tokens
+        # without a sub still land in distinct buckets rather than one shared one.
+        sub = payload.get("sub")
+        if sub:
+            principal_id = f"jwt:{sub}"
+        else:
+            principal_id = f"jwt:{hashlib.sha256(token.encode()).hexdigest()[:16]}"
+
         # Create AuthToken object from JWT payload
         return AuthToken(
             token=token,
-            api_key_id="jwt_auth",
+            api_key_id=principal_id,
             created_at=created_at,
             expires_at=expires_at,
             scopes=scopes,

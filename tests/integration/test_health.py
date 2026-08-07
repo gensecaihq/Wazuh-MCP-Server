@@ -46,7 +46,8 @@ async def test_ready_reports_dependency_failure_as_503(monkeypatch):
     async def boom():
         raise RuntimeError("wazuh down")
 
-    monkeypatch.setattr(mcp_server.wazuh_client, "get_manager_info", boom)
+    # /ready uses the uncached ping_manager probe so a fresh outage isn't cache-masked.
+    monkeypatch.setattr(mcp_server.wazuh_client, "ping_manager", boom)
     async with _client() as client:
         resp = await client.get("/ready")
     assert resp.status_code == 503
@@ -58,7 +59,7 @@ async def test_ready_healthy_when_manager_reachable(monkeypatch):
     async def ok():
         return {"data": {"affected_items": [{"version": "4.14.7"}]}}
 
-    monkeypatch.setattr(mcp_server.wazuh_client, "get_manager_info", ok)
+    monkeypatch.setattr(mcp_server.wazuh_client, "ping_manager", ok)
     # No indexer configured in the test client → indexer_status not_configured (healthy overall).
     monkeypatch.setattr(mcp_server.wazuh_client, "_indexer_client", None)
     async with _client() as client:
