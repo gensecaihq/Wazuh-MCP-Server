@@ -1809,18 +1809,15 @@ class WazuhClient:
             if weighted_pairs:
                 total_w = sum(w for _, w in weighted_pairs)
                 weighted_avg = int(sum(s * w for s, w in weighted_pairs) / total_w) if total_w else None
+                # Count the scored controls in this domain whose confidence is low/none.
+                # The old generator ignored its loop variable and re-evaluated the SAME
+                # first-matching control for every pair, so this was always 0 or len(pairs).
                 low_conf = sum(
                     1
-                    for _, _ in weighted_pairs
-                    if next(
-                        (
-                            c["confidence"]
-                            for c in control_statuses
-                            if c["control_id"].startswith(domain) and c["score"] is not None
-                        ),
-                        "none",
-                    )
-                    in ("low", "none")
+                    for c in control_statuses
+                    if c["control_id"].startswith(domain)
+                    and c["score"] is not None
+                    and c["confidence"] in ("low", "none")
                 )
             else:
                 weighted_avg = None
@@ -2049,9 +2046,11 @@ class WazuhClient:
                                 "critical_vulnerabilities": [
                                     {
                                         "cve": v.get("cve"),
-                                        "name": v.get("name"),
+                                        # name/version live under package.* in the normalized
+                                        # vuln doc; the old top-level reads always yielded null.
+                                        "name": (v.get("package") or {}).get("name"),
                                         "severity": v.get("severity"),
-                                        "version": v.get("version"),
+                                        "version": (v.get("package") or {}).get("version"),
                                     }
                                     for v in vulns
                                     if (v.get("severity") or "").lower() == "critical"
@@ -2540,11 +2539,21 @@ class WazuhClient:
         """Check if IP is blocked by searching active response alerts via Elasticsearch."""
         if not self._indexer_client:
             raise IndexerNotConfiguredError()
-        # Use Elasticsearch query_string to search for both the IP and firewall-drop
+        # Use Elasticsearch query_string to search for both the IP and firewall-drop.
+        # Scope to the requested agent when given, instead of ignoring agent_id and
+        # reporting a fleet-wide block status for a per-agent question.
         query = f'"{ip_address}" AND "firewall-drop"'
-        result = await self._indexer_client.get_alerts(limit=50, query_text=query)
-        alerts = result.get("data", {}).get("affected_items", [])
-        return {"data": {"ip_address": ip_address, "blocked": len(alerts) > 0, "matching_alerts": len(alerts)}}
+        result = await self._indexer_client.get_alerts(limit=50, query_text=query, agent_id=agent_id)
+        _, total, _ = self._alerts_and_total(result)
+        return {
+            "data": {
+                "ip_address": ip_address,
+                "agent_id": agent_id,
+                "scope": "agent" if agent_id else "fleet",
+                "blocked": total > 0,
+                "matching_alerts": total,
+            }
+        }
 
     async def check_agent_isolation(self, agent_id: str) -> Dict[str, Any]:
         """Check agent isolation status by examining agent connectivity and alert history."""

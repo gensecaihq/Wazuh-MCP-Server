@@ -8,6 +8,7 @@ Production-ready with Streamable HTTP and legacy SSE transport, authentication, 
 import asyncio
 import json
 import logging
+import math
 import os
 import re as _re
 import threading
@@ -739,7 +740,13 @@ def validate_origin_header(origin: Optional[str], allowed_origins_config: str) -
     for allowed in allowed_origins_list:
         allowed = allowed.strip()
         if allowed == "*":
-            return  # Wildcard allows everything
+            # Honor the wildcard bypass ONLY in development. In production a literal "*"
+            # must not disable DNS-rebinding protection — the CORS layer already refuses
+            # it there (validate_cors_origins), so keep the two layers consistent and
+            # require an exact match instead of blanket-allowing every Origin.
+            if os.getenv("ENVIRONMENT", "development").lower() == "development":
+                return
+            continue
         if allowed == origin:
             return  # Exact match
 
@@ -814,14 +821,17 @@ def _rate_limited_response(retry_after: Optional[int]) -> HTTPException:
     return HTTPException(status_code=429, detail="Rate limit exceeded", headers=headers)
 
 
-def _normalize_jsonrpc_id(value: Any) -> Optional[Union[str, int]]:
-    """JSON-RPC ids must be string, number, or null. Coerce anything else (float, list,
-    object — malformed but attacker-controllable) to None so building an error response
-    can't itself raise and 500 with no body."""
+def _normalize_jsonrpc_id(value: Any) -> Optional[Union[str, int, float]]:
+    """JSON-RPC ids must be string, number, or null. A Number may be a float, so preserve
+    finite floats (echoing a mismatched id back breaks the client's request/response
+    correlation). Coerce anything else — list, object, or a non-finite float that isn't
+    valid JSON — to None so building an error response can't itself raise and 500."""
     if isinstance(value, bool):  # bool is an int subclass; not a valid id
         return None
     if isinstance(value, int):
         return value
+    if isinstance(value, float):
+        return value if math.isfinite(value) else None
     if isinstance(value, str):
         return value
     return None
@@ -1044,12 +1054,16 @@ async def handle_initialize(params: Dict[str, Any], session: MCPSession) -> Dict
         # Default to latest legacy version
         negotiated_version = MCP_PROTOCOL_VERSION
 
-    # Server capabilities - only declare what we actually implement
+    # Server capabilities - only declare what we actually implement. listChanged is
+    # False for all: the tool/prompt/resource lists are static and we never emit a
+    # notifications/*/list_changed, so claiming true would make a spec-compliant client
+    # wait for updates that never come. completions/complete IS implemented, so advertise it.
     server_capabilities = {
         "logging": {},
-        "prompts": {"listChanged": True},
-        "resources": {"subscribe": False, "listChanged": True},  # Not fully implemented yet
-        "tools": {"listChanged": True},
+        "prompts": {"listChanged": False},
+        "resources": {"subscribe": False, "listChanged": False},
+        "tools": {"listChanged": False},
+        "completions": {},
     }
 
     # Server information
@@ -1495,7 +1509,10 @@ async def handle_completion_complete(params: Dict[str, Any], session: MCPSession
     argument = params.get("argument", {})
 
     ref_type = ref.get("type")
-    ref_name = ref.get("name")
+    # Prompt refs identify by `name`; resource refs identify by `uri` (per MCP spec).
+    # Reading only `name` left ref_name None for a ref/resource, so ref_name.lower()
+    # below raised AttributeError → -32603. Coerce to a safe string.
+    ref_name = ref.get("name") or ref.get("uri") or ""
     arg_name = argument.get("name", "")
     arg_value = argument.get("value", "")
 

@@ -54,7 +54,11 @@ class TestJsonRpcIdNormalization:
 
         assert _normalize_jsonrpc_id(5) == 5
         assert _normalize_jsonrpc_id("abc") == "abc"
-        assert _normalize_jsonrpc_id(1.5) is None
+        # A JSON-RPC Number id may be a float; a finite float is preserved so the
+        # client's request/response correlation isn't broken.
+        assert _normalize_jsonrpc_id(1.5) == 1.5
+        # Non-finite floats aren't valid JSON, so they still normalize to None.
+        assert _normalize_jsonrpc_id(float("inf")) is None
         assert _normalize_jsonrpc_id([1, 2]) is None
         assert _normalize_jsonrpc_id({"x": 1}) is None
         assert _normalize_jsonrpc_id(True) is None

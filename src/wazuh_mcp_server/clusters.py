@@ -63,6 +63,19 @@ def _resolve_env(value: Any) -> Any:
     return value
 
 
+def _as_bool(value: Any, default: bool) -> bool:
+    """Coerce a clusters-file value to bool. An env ref resolves to a STRING, and
+    bool("false") is True — so a "${VERIFY_SSL}" of "false" would silently stay on.
+    Parse the string form instead of relying on truthiness."""
+    if value is None:
+        return default
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return bool(value)
+    return str(value).strip().lower() in ("true", "1", "yes", "y", "on")
+
+
 class ClusterRegistry:
     """Holds one WazuhClient per configured cluster plus the default cluster id."""
 
@@ -109,13 +122,13 @@ def _cluster_config(entry: Dict[str, Any]) -> WazuhConfig:
         wazuh_user=resolved["wazuh_user"],
         wazuh_pass=resolved["wazuh_pass"],
         wazuh_port=int(resolved.get("wazuh_port", 55000)),
-        verify_ssl=bool(resolved.get("verify_ssl", True)),
+        verify_ssl=_as_bool(resolved.get("verify_ssl"), True),
         wazuh_indexer_host=resolved.get("indexer_host"),
         wazuh_indexer_port=int(resolved.get("indexer_port", 9200)),
         wazuh_indexer_user=resolved.get("indexer_user"),
         wazuh_indexer_pass=resolved.get("indexer_pass"),
-        wazuh_indexer_ssl=bool(resolved.get("indexer_ssl", True)),
-        wazuh_indexer_verify_ssl=bool(resolved.get("indexer_verify_ssl", True)),
+        wazuh_indexer_ssl=_as_bool(resolved.get("indexer_ssl"), True),
+        wazuh_indexer_verify_ssl=_as_bool(resolved.get("indexer_verify_ssl"), True),
         request_timeout_seconds=int(resolved.get("request_timeout_seconds", 30)),
     )
 

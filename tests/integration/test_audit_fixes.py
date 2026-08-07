@@ -529,5 +529,137 @@ def _async_val(value):
     return _coro()
 
 
+# ============================ WAVE 4 — P2/P3 ============================
+
+
+class TestCompletionRefResource:
+    @pytest.mark.asyncio
+    async def test_ref_resource_uri_does_not_crash(self):
+        from wazuh_mcp_server.server import handle_completion_complete
+
+        # A ref/resource identifies by `uri` (not `name`); the old code did None.lower().
+        out = await handle_completion_complete(
+            {"ref": {"type": "ref/resource", "uri": "wazuh://agents"}, "argument": {"name": "id", "value": "0"}},
+            _session(),
+        )
+        assert "completion" in out
+        assert out["completion"]["values"] == ["001", "002", "003", "004", "005"]
+
+
+class TestOriginWildcardProduction:
+    def test_wildcard_rejected_in_production(self, monkeypatch):
+        from wazuh_mcp_server.server import validate_origin_header
+
+        monkeypatch.setenv("ENVIRONMENT", "production")
+        with pytest.raises(Exception):  # HTTPException 403
+            validate_origin_header("https://evil.example", "*")
+
+    def test_wildcard_allowed_in_development(self, monkeypatch):
+        from wazuh_mcp_server.server import validate_origin_header
+
+        monkeypatch.setenv("ENVIRONMENT", "development")
+        # No raise = allowed.
+        validate_origin_header("https://anything.example", "*")
+
+
+class TestClustersBoolParsing:
+    def test_string_false_is_false(self):
+        from wazuh_mcp_server.clusters import _as_bool
+
+        assert _as_bool("false", True) is False
+        assert _as_bool("0", True) is False
+        assert _as_bool("true", False) is True
+        assert _as_bool(None, True) is True
+        assert _as_bool(True, False) is True
+
+
+class TestOAuthMetadataRfc8414:
+    def _mgr(self, dcr):
+        from types import SimpleNamespace
+
+        from wazuh_mcp_server.oauth import OAuthManager
+
+        return OAuthManager(
+            SimpleNamespace(
+                AUTH_SECRET_KEY="test-secret-key-at-least-32-characters-long",
+                OAUTH_ENABLE_DCR=dcr,
+                OAUTH_ACCESS_TOKEN_TTL=3600,
+                OAUTH_REFRESH_TOKEN_TTL=86400,
+                OAUTH_AUTHORIZATION_CODE_TTL=600,
+                OAUTH_ISSUER_URL="https://mcp.example",
+            )
+        )
+
+    def test_registration_endpoint_omitted_when_dcr_off(self):
+        from types import SimpleNamespace
+
+        meta = self._mgr(dcr=False).get_metadata(
+            SimpleNamespace(url=SimpleNamespace(scheme="https", netloc="mcp.example"), headers={})
+        )
+        assert "registration_endpoint" not in meta
+        assert "none" in meta["token_endpoint_auth_methods_supported"]
+
+    def test_registration_endpoint_present_when_dcr_on(self):
+        from types import SimpleNamespace
+
+        meta = self._mgr(dcr=True).get_metadata(
+            SimpleNamespace(url=SimpleNamespace(scheme="https", netloc="mcp.example"), headers={})
+        )
+        assert meta["registration_endpoint"].endswith("/oauth/register")
+
+
+class TestCheckBlockedIpScopesAgent:
+    @pytest.mark.asyncio
+    async def test_agent_id_is_passed_to_query(self):
+        from wazuh_mcp_server.api.wazuh_client import WazuhClient
+        from wazuh_mcp_server.config import WazuhConfig
+
+        client = WazuhClient(WazuhConfig(wazuh_host="h", wazuh_user="u", wazuh_pass="p"))
+        seen = {}
+
+        class _Idx:
+            async def get_alerts(self, **kwargs):
+                seen.update(kwargs)
+                return {"data": {"affected_items": [{}], "total_affected_items": 1}}
+
+        client._indexer_client = _Idx()
+        out = (await client.check_blocked_ip("8.8.8.8", agent_id="007"))["data"]
+        assert seen["agent_id"] == "007"
+        assert out["scope"] == "agent"
+        assert out["blocked"] is True
+
+
+class TestControlDetailVulnPackageFields:
+    @pytest.mark.asyncio
+    async def test_critical_vuln_reads_package_name_version(self):
+        from wazuh_mcp_server.api.wazuh_client import WazuhClient
+        from wazuh_mcp_server.config import WazuhConfig
+
+        client = WazuhClient(WazuhConfig(wazuh_host="h", wazuh_user="u", wazuh_pass="p", wazuh_indexer_host="x"))
+
+        async def fake_request(method, endpoint, **kwargs):
+            if endpoint == "/agents":
+                return {"data": {"affected_items": [{"id": "001", "name": "web-01"}]}}
+            return {"data": {"affected_items": []}}
+
+        class _Idx:
+            async def get_vulnerabilities(self, **kwargs):
+                return {
+                    "data": {
+                        "affected_items": [
+                            {"cve": "CVE-1", "severity": "Critical", "package": {"name": "openssl", "version": "1.1"}}
+                        ]
+                    }
+                }
+
+        client._request = fake_request
+        client._indexer_client = _Idx()
+        detail = await client.get_iso27001_control_detail("A.8.8", agent_id="001")
+        block = detail["data"]["controls"][0]
+        crit = block["evidence"]["critical_vulnerabilities"][0]
+        assert crit["name"] == "openssl"
+        assert crit["version"] == "1.1"
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

@@ -296,7 +296,12 @@ class RedisSessionStore(SessionStore):
     async def close(self):
         """Close Redis connection."""
         if self._redis:
-            await self._redis.close()
+            # redis-py 5.x deprecates close() in favor of aclose() for the async client;
+            # fall back to close() for older versions still in the wild.
+            if hasattr(self._redis, "aclose"):
+                await self._redis.aclose()
+            else:
+                await self._redis.close()
             logger.info("Redis connection closed")
 
 

@@ -165,20 +165,26 @@ class OAuthManager:
         """Get OAuth 2.0 Authorization Server Metadata (RFC 8414)."""
         issuer = self.get_issuer_url(request)
 
-        return {
+        metadata = {
             "issuer": issuer,
             "authorization_endpoint": f"{issuer}/oauth/authorize",
             "token_endpoint": f"{issuer}/oauth/token",
-            "registration_endpoint": f"{issuer}/oauth/register" if self.config.OAUTH_ENABLE_DCR else None,
             "revocation_endpoint": f"{issuer}/oauth/revoke",
             "response_types_supported": ["code"],
             "grant_types_supported": ["authorization_code", "refresh_token"],
-            "token_endpoint_auth_methods_supported": ["client_secret_post", "client_secret_basic"],
+            # "none" is advertised because the pre-registered Claude client is a public,
+            # PKCE-secured client that presents no secret at the token endpoint.
+            "token_endpoint_auth_methods_supported": ["none", "client_secret_post", "client_secret_basic"],
             "scopes_supported": ["wazuh:read", "wazuh:write"],
             "code_challenge_methods_supported": ["S256"],
             "authorization_response_iss_parameter_supported": True,
             "service_documentation": f"{issuer}/docs",
         }
+        # RFC 8414: omit registration_endpoint entirely when DCR is disabled, rather than
+        # advertising it as null (a null endpoint is not a valid metadata value).
+        if self.config.OAUTH_ENABLE_DCR:
+            metadata["registration_endpoint"] = f"{issuer}/oauth/register"
+        return metadata
 
     @staticmethod
     def _validate_redirect_uri(uri: str) -> None:
