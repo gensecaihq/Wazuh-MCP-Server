@@ -28,6 +28,11 @@ YDC_DEFAULT_BASE_URL = "https://ydc-index.io"
 # Reporting window for ISO 27001 alert-backed controls (dashboard/gap analysis).
 _ISO27001_ALERT_WINDOW_DAYS = 30
 
+# Total ISO 27001:2022 Annex A controls (A.5 Organizational 37 + A.6 People 8 +
+# A.7 Physical 14 + A.8 Technological 34). Only a subset is mapped to Wazuh telemetry;
+# surfaced alongside controls_mapped so scores are never read as whole-framework compliance.
+_ISO27001_TOTAL_ANNEX_A_CONTROLS = 93
+
 # ISO 27001:2022 Annex A control map — links each control to Wazuh data sources
 # data_source: "sca" | "alerts" | "vulnerabilities" | "agents" | "stats" | "none"
 _ISO27001_CONTROL_MAP: Dict[str, Dict] = {
@@ -1468,31 +1473,39 @@ class WazuhClient:
 
     @staticmethod
     def _format_compliance_result(framework: str, keywords: list, agent_data: list) -> Dict[str, Any]:
-        """Format SCA results with framework-relevant filtering and summary scores."""
+        """Summarize SCA configuration-hardening coverage for a framework.
+
+        Honesty constraints (this is a compliance-adjacent tool, so a misleading result is
+        the most dangerous kind of wrong):
+        - It never emits pass/fail. SCA/CIS checks measure configuration hardening, which is
+          input to a controls assessment, not the assessment itself.
+        - If the framework has specific policy keywords but NO matching SCA policy is loaded
+          on any checked agent, it returns not_assessable instead of silently scoring generic
+          CIS benchmarks and labelling them (e.g.) "HIPAA" — which would fabricate a verdict.
+        """
         results = []
         total_pass = 0
         total_fail = 0
         total_checks = 0
+        any_framework_policy = False
 
         for agent in agent_data:
             sca_items = agent.get("sca_items", [])
-            # Filter policies relevant to the framework (if keywords available)
             if keywords:
                 relevant = [
                     p
                     for p in sca_items
                     if any(kw in (p.get("policy_id", "") + " " + p.get("name", "")).lower() for kw in keywords)
                 ]
-                # If no framework-specific policies found, include all (generic CIS benchmarks apply broadly)
-                if not relevant:
-                    relevant = sca_items
             else:
                 relevant = sca_items
+            if relevant:
+                any_framework_policy = True
 
             agent_pass = sum(p.get("pass", 0) for p in relevant)
             agent_fail = sum(p.get("fail", 0) for p in relevant)
             agent_total = sum(p.get("total_checks", 0) for p in relevant)
-            agent_score = int(agent_pass / agent_total * 100) if agent_total > 0 else 0
+            agent_score = int(agent_pass / agent_total * 100) if agent_total > 0 else None
 
             total_pass += agent_pass
             total_fail += agent_fail
@@ -1502,7 +1515,7 @@ class WazuhClient:
                 {
                     "agent_id": agent.get("agent_id"),
                     "agent_name": agent.get("agent_name"),
-                    "score": agent_score,
+                    "hardening_coverage_pct": agent_score,
                     "pass": agent_pass,
                     "fail": agent_fail,
                     "total_checks": agent_total,
@@ -1519,13 +1532,32 @@ class WazuhClient:
                 }
             )
 
-        overall_score = int(total_pass / total_checks * 100) if total_checks > 0 else 0
+        # No SCA policy maps to this framework → we cannot honestly assess it from SCA data.
+        if keywords and not any_framework_policy:
+            return {
+                "data": {
+                    "framework": framework,
+                    "assessment": "not_assessable",
+                    "reason": (
+                        f"No SCA/CIS policy matching {framework} is loaded on the checked agent(s). "
+                        f"This tool measures configuration hardening and cannot substitute for a {framework} "
+                        "controls assessment. Load a framework-specific SCA policy or assess out of band."
+                    ),
+                    "agents_checked": len(agent_data),
+                }
+            }
+
+        coverage = int(total_pass / total_checks * 100) if total_checks > 0 else None
 
         return {
             "data": {
                 "framework": framework,
-                "overall_score": overall_score,
-                "overall_status": "pass" if overall_score >= 70 else "fail",
+                "assessment": "hardening_coverage",
+                "hardening_coverage_pct": coverage,
+                "disclaimer": (
+                    "Percentage of mapped SCA/CIS configuration checks passing. This is a hardening "
+                    "coverage indicator, NOT a pass/fail compliance certification."
+                ),
                 "total_checks": total_checks,
                 "total_pass": total_pass,
                 "total_fail": total_fail,
@@ -1624,15 +1656,24 @@ class WazuhClient:
         # must score the vuln controls as no_data — not silently as full compliance.
         vuln_summary: Dict[str, int] = {"critical": 0, "high": 0, "medium": 0, "low": 0}
         vuln_query_ok = False
+        vuln_agents_counted = 0
         if self._indexer_client:
             try:
-                target_id = agent_id or (agents[0].get("id") if agents else None)
-                if target_id:
-                    vuln_res = await self._indexer_client.get_vulnerabilities(agent_id=target_id, limit=500)
+                if agent_id:
+                    # Explicit single-agent scope requested.
+                    vuln_targets = [agent_id]
+                else:
+                    # Aggregate across ALL active agents, not just agents[0]. A.8.8 is the
+                    # heaviest-weighted control (weight 4); scoring it from a single agent
+                    # made the whole dashboard hostage to one host's vuln posture.
+                    vuln_targets = [a.get("id") for a in agents if a.get("id")]
+                for tid in vuln_targets:
+                    vuln_res = await self._indexer_client.get_vulnerabilities(agent_id=tid, limit=500)
                     for v in vuln_res.get("data", {}).get("affected_items", []):
                         sev = (v.get("severity") or "").lower()
                         if sev in vuln_summary:
                             vuln_summary[sev] += 1
+                    vuln_agents_counted += 1
                     vuln_query_ok = True
             except Exception:
                 logger.warning(
@@ -1703,9 +1744,15 @@ class WazuhClient:
                 groups = ctrl["rule_groups"]
                 cnt = sum(alert_groups.get(g, 0) for g in groups) if groups else len(alerts)
                 evidence_count = cnt
-                # Monitoring coverage score: active = good, but high alert volume may indicate issues
-                score = min(100, cnt * 5) if cnt > 0 else 0
-                status = "active" if cnt > 0 else "no_data"
+                # Alert-based controls measure whether DETECTION is active, not effectiveness.
+                # The old score = min(100, cnt*5) was inverted — more malware/auth-failure
+                # alerts produced a HIGHER "compliance" score, and a clean environment scored 0.
+                # Raw alert volume is not a compliance measure (we have no resolution data to
+                # tell handled from unhandled), so we no longer emit a volume-derived score:
+                # report detection coverage as a status and leave the score unscored (None),
+                # keeping it out of the weighted compliance aggregate.
+                score = None
+                status = "monitoring_active" if cnt > 0 else "no_data"
 
             elif source == "vulnerabilities":
                 if not vuln_query_ok:
@@ -1834,23 +1881,53 @@ class WazuhClient:
         passing_devices = sum(1 for d in endpoint_devices if d["sca_status"] == "pass")
         total_devices = len(endpoint_devices)
         board_summary = (
-            f"{passing_devices}/{total_devices} endpoint device(s) meet the ISO 27001 A.8.1 configuration baseline. "
-            f"{'All devices compliant.' if passing_devices == total_devices else f'{total_devices - passing_devices} device(s) require remediation.'} "
-            f"Critical vulnerabilities outstanding: {vuln_summary.get('critical', 0)}."
+            f"{passing_devices}/{total_devices} endpoint device(s) meet the ISO 27001 A.8.1 configuration-hardening "
+            f"baseline (SCA/CIS checks). "
+            f"{'All sampled devices meet the hardening baseline.' if passing_devices == total_devices else f'{total_devices - passing_devices} device(s) need hardening remediation.'} "
+            f"Critical vulnerabilities outstanding: {vuln_summary.get('critical', 0)}. "
+            "This reflects configuration hardening only, not full ISO 27001 compliance."
             if total_devices > 0
             else "No active endpoint agents found."
         )
 
+        # Posture band — a coverage indicator, deliberately NOT a pass/fail compliance
+        # verdict. Only 14 of the 93 Annex A controls are mapped to Wazuh data, so a
+        # "pass" here would be read as whole-framework compliance, which it is not.
+        controls_mapped = len(_ISO27001_CONTROL_MAP)
+        if overall_score is None:
+            posture = "insufficient_data"
+        elif overall_score >= 75:
+            posture = "strong_where_measured"
+        elif overall_score >= 50:
+            posture = "moderate_where_measured"
+        else:
+            posture = "weak_where_measured"
+
         return {
             "data": {
                 "framework": "ISO27001:2022",
+                "assessment_type": "control_coverage_indicator",
+                "disclaimer": (
+                    f"This is a control-coverage indicator, NOT a compliance certification. Only "
+                    f"{controls_mapped} of 93 ISO 27001:2022 Annex A controls are mapped to Wazuh "
+                    "telemetry (A.7 Physical has none). Scores reflect only the mapped, technically "
+                    "measurable controls and must not be read as whole-framework compliance."
+                ),
+                "controls_mapped": controls_mapped,
+                "controls_total": _ISO27001_TOTAL_ANNEX_A_CONTROLS,
+                "coverage_pct_of_framework": int(controls_mapped / _ISO27001_TOTAL_ANNEX_A_CONTROLS * 100),
                 "overall_weighted_score": overall_score,
-                "overall_status": "pass" if (overall_score or 0) >= 75 else "fail",
+                "posture": posture,
                 "overall_confidence": overall_confidence,
                 "scoring": {
                     "method": "weighted_average",
-                    "pass_threshold": 75,
-                    "note": "Scores are weighted by control importance (A.8.8 vulnerabilities weight=4, A.8.1/A.8.5/A.8.7/A.8.8/A.8.9/A.8.16 weight=3, others lower)",
+                    "note": (
+                        "Weighted by control importance over the MAPPED controls only (A.8.8 "
+                        "vulnerabilities weight=4). Alert-based controls report detection coverage "
+                        "and are not scored on volume. No pass/fail verdict is emitted."
+                    ),
+                    "vuln_agents_aggregated": vuln_agents_counted,
+                    "sca_agents_sampled": len(sca_results),
                 },
                 "active_agents": len(agents),
                 "vulnerability_summary": vuln_summary,

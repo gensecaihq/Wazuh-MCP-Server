@@ -440,5 +440,94 @@ class TestServerInstructionsTrustBoundary:
         assert "block_ip" in mcp_server.SERVER_INSTRUCTIONS
 
 
+# ==================== WAVE 3 — compliance honesty ====================
+
+
+class TestComplianceHonesty:
+    def test_unmapped_framework_is_not_assessable(self):
+        from wazuh_mcp_server.api.wazuh_client import WazuhClient
+
+        # HIPAA keywords with only generic CIS policies present → cannot honestly assess.
+        agent_data = [
+            {
+                "agent_id": "001",
+                "agent_name": "web-01",
+                "sca_items": [
+                    {"policy_id": "cis_debian10", "name": "CIS Debian", "pass": 90, "fail": 10, "total_checks": 100}
+                ],
+            }
+        ]
+        out = WazuhClient._format_compliance_result("HIPAA", ["hipaa", "health"], agent_data)["data"]
+        assert out["assessment"] == "not_assessable"
+        assert "overall_status" not in out  # never a fabricated pass/fail
+
+    def test_mapped_framework_reports_coverage_not_passfail(self):
+        from wazuh_mcp_server.api.wazuh_client import WazuhClient
+
+        agent_data = [
+            {
+                "agent_id": "001",
+                "agent_name": "web-01",
+                "sca_items": [
+                    {"policy_id": "cis_debian10", "name": "CIS Debian", "pass": 80, "fail": 20, "total_checks": 100}
+                ],
+            }
+        ]
+        out = WazuhClient._format_compliance_result("ISO27001", ["cis", "iso"], agent_data)["data"]
+        assert out["assessment"] == "hardening_coverage"
+        assert out["hardening_coverage_pct"] == 80
+        assert "overall_status" not in out
+        assert "disclaimer" in out
+
+    @pytest.mark.asyncio
+    async def test_iso_dashboard_surfaces_coverage_not_passfail(self):
+        from types import SimpleNamespace
+
+        from wazuh_mcp_server.api.wazuh_client import WazuhClient
+        from wazuh_mcp_server.config import WazuhConfig
+
+        client = WazuhClient(
+            WazuhConfig(wazuh_host="h", wazuh_user="u", wazuh_pass="p", wazuh_indexer_host="localhost")
+        )
+
+        async def fake_request(method, endpoint, **kwargs):
+            if endpoint == "/agents":
+                return {"data": {"affected_items": [{"id": "001", "name": "web-01"}]}}
+            if endpoint == "/manager/stats/analysisd":
+                return {"data": {"affected_items": [{"total_events_decoded": 5}]}}
+            return {"data": {"affected_items": []}}
+
+        async def fake_alerts(**kwargs):
+            # A pile of malware alerts must NOT raise the score (old inverted bug).
+            return {"data": {"affected_items": [{"rule": {"groups": ["malware"]}}] * 40, "total_affected_items": 40}}
+
+        client._request = fake_request
+        client.get_alerts = fake_alerts
+        client._indexer_client = SimpleNamespace(
+            get_vulnerabilities=lambda **k: _async_val({"data": {"affected_items": []}})
+        )
+        data = (await client.get_iso27001_dashboard())["data"]
+        assert data["assessment_type"] == "control_coverage_indicator"
+        assert data["controls_mapped"] == data["controls_mapped"]  # present
+        assert data["controls_total"] == 93
+        assert "overall_status" not in data
+        assert data["posture"] in (
+            "insufficient_data",
+            "weak_where_measured",
+            "moderate_where_measured",
+            "strong_where_measured",
+        )
+        # Alert-based controls are unscored (not inverted by volume).
+        alert_controls = [c for c in data["controls"] if c["data_source"] == "alerts"]
+        assert alert_controls and all(c["score"] is None for c in alert_controls)
+
+
+def _async_val(value):
+    async def _coro():
+        return value
+
+    return _coro()
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
