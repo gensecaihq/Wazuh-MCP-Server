@@ -357,5 +357,88 @@ class TestSummaryTruncationTruth:
         assert "truncation_warning" in out
 
 
+# ============================ WAVE 3 — LLM safety ============================
+
+
+def _ar_client(monkeypatch=None, protected=""):
+    from wazuh_mcp_server.api.wazuh_client import WazuhClient
+    from wazuh_mcp_server.config import WazuhConfig
+
+    if monkeypatch is not None:
+        monkeypatch.setenv("WAZUH_PROTECTED_IPS", protected)
+    return WazuhClient(WazuhConfig(wazuh_host="10.0.0.1", wazuh_user="u", wazuh_pass="p"))
+
+
+class TestBlockIpGuardrails:
+    @pytest.mark.asyncio
+    async def test_refuses_without_explicit_target(self):
+        client = _ar_client()
+        with pytest.raises(ValueError, match="explicit target"):
+            await client.block_ip("8.8.8.8")
+
+    @pytest.mark.asyncio
+    async def test_refuses_protected_manager_ip(self):
+        client = _ar_client()  # manager host is 10.0.0.1
+        with pytest.raises(ValueError, match="protected target"):
+            await client.block_ip("10.0.0.1", agent_id="001")
+
+    @pytest.mark.asyncio
+    async def test_refuses_loopback(self):
+        client = _ar_client()
+        with pytest.raises(ValueError, match="protected target"):
+            await client.block_ip("127.0.0.1", agent_id="001")
+
+    @pytest.mark.asyncio
+    async def test_env_protected_cidr(self, monkeypatch):
+        client = _ar_client(monkeypatch, protected="203.0.113.0/24")
+        with pytest.raises(ValueError, match="protected target"):
+            await client.block_ip("203.0.113.9", agent_id="001")
+
+    @pytest.mark.asyncio
+    async def test_explicit_agent_target_reaches_execute(self, monkeypatch):
+        client = _ar_client()
+        captured = {}
+
+        async def fake_exec(data):
+            captured.update(data)
+            return {"data": {"total_affected_items": 1}}
+
+        client.execute_active_response = fake_exec
+        await client.block_ip("8.8.8.8", agent_id="007")
+        assert captured["agent_list"] == ["007"]
+
+
+class TestActiveResponseNoOpDetection:
+    @pytest.mark.asyncio
+    async def test_zero_affected_is_failure(self):
+        client = _ar_client()
+
+        async def fake_request(method, endpoint, **kwargs):
+            # Unconfigured AR command: HTTP 200 but nothing happened.
+            return {"data": {"total_affected_items": 0, "total_failed_items": 0, "failed_items": []}}
+
+        client._request = fake_request
+        with pytest.raises(ValueError, match="0 agents"):
+            await client.execute_active_response({"command": "!host-isolation", "agent_list": ["001"]})
+
+
+class TestActionConfirmationGate:
+    @pytest.mark.asyncio
+    async def test_write_tool_requires_confirm_when_enabled(self, monkeypatch, stub_cluster):
+        monkeypatch.setenv("WAZUH_REQUIRE_ACTION_CONFIRMATION", "true")
+        # The gate raises before the tool body (like scope enforcement), caught upstream.
+        with pytest.raises(ValueError, match="confirm"):
+            await handle_tools_call(
+                {"name": "wazuh_block_ip", "arguments": {"ip_address": "8.8.8.8", "agent_id": "001"}},
+                _session(scopes=("wazuh:read", "wazuh:write")),
+            )
+
+
+class TestServerInstructionsTrustBoundary:
+    def test_instructions_declare_untrusted_output(self):
+        assert "UNTRUSTED DATA" in mcp_server.SERVER_INSTRUCTIONS
+        assert "block_ip" in mcp_server.SERVER_INSTRUCTIONS
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

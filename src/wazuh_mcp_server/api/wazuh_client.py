@@ -1,6 +1,7 @@
 """Wazuh API client optimized for Wazuh 4.8.0 to 4.14.7 compatibility with latest features."""
 
 import asyncio
+import ipaddress
 import json
 import logging
 import math
@@ -178,6 +179,13 @@ class WazuhClient:
         # undo script named here. Without one they fail safe rather than re-blocking.
         self._ar_firewall_undo_command = self._normalize_ar_command(os.getenv("WAZUH_AR_FIREWALL_UNDO_COMMAND"))
         self._ar_hostdeny_undo_command = self._normalize_ar_command(os.getenv("WAZUH_AR_HOSTDENY_UNDO_COMMAND"))
+
+        # Protected-target denylist for block_ip: infrastructure whose blocking would be
+        # self-inflicted DoS (default gateway, DNS, the Wazuh manager itself). An attacker
+        # who can emit a log line on a monitored host could otherwise trick the LLM into
+        # "block <critical-ip>". Always includes the manager host; extend via env
+        # WAZUH_PROTECTED_IPS (comma-separated IPs / CIDRs). Loopback is always protected.
+        self._protected_networks = self._build_protected_networks(os.getenv("WAZUH_PROTECTED_IPS", ""))
 
         # Circuit breaker for API resilience — only trip on connection/server errors,
         # not on user-input errors (ValueError) which shouldn't degrade the circuit
@@ -456,16 +464,29 @@ class WazuhClient:
         total_failed = resp_data.get("total_failed_items", 0)
         failed_items = resp_data.get("failed_items", [])
 
-        if total_affected == 0 and total_failed > 0:
-            # Build error details from failed_items
+        if total_affected == 0:
+            # Zero agents affected is a FAILURE, not success. Wazuh returns HTTP 200 with
+            # total_affected_items == 0 both when a command failed on every agent AND when
+            # the AR command doesn't exist / isn't configured (e.g. the custom
+            # host-isolation / kill-process / quarantine scripts aren't deployed). Reporting
+            # that as success would be false containment during a live incident — so refuse.
             errors = []
             for item in failed_items:
                 err = item.get("error", {})
                 agent_ids = item.get("id", [])
                 errors.append(f"agents {agent_ids}: code {err.get('code')} - {err.get('message', 'unknown error')}")
-            error_detail = "; ".join(errors) if errors else "no agents affected"
+            if errors:
+                error_detail = "; ".join(errors)
+            elif total_failed == 0:
+                error_detail = (
+                    "no agents affected and none reported failed — the active-response command is "
+                    "likely not configured on the target agent(s). Deploy the required AR script."
+                )
+            else:
+                error_detail = "no agents affected"
             raise ValueError(
-                f"Active response command failed on all agents " f"(0 succeeded, {total_failed} failed): {error_detail}"
+                f"Active response command affected 0 agents "
+                f"({total_affected} succeeded, {total_failed} failed): {error_detail}"
             )
 
         # Log partial failures as warnings but still return success
@@ -2267,9 +2288,55 @@ class WazuhClient:
             return ip_address
         raise ValueError(f"Invalid IP address format for {param_name}: {ip_address}")
 
-    async def block_ip(self, ip_address: str, duration: int = 0, agent_id: str = None) -> Dict[str, Any]:
-        """Block IP via firewall-drop active response."""
+    def _build_protected_networks(self, extra: str) -> list:
+        """Build the block_ip protected-target list from env + the manager host + loopback."""
+        networks = [
+            ipaddress.ip_network("127.0.0.0/8"),
+            ipaddress.ip_network("::1/128"),
+        ]
+        # Protect the Wazuh manager's own address so the SOC can't cut itself off.
+        try:
+            networks.append(ipaddress.ip_network(f"{self.config.wazuh_host}/32", strict=False))
+        except ValueError:
+            pass  # hostname, not an IP — can't pin it here
+        for token in extra.split(","):
+            token = token.strip()
+            if not token:
+                continue
+            try:
+                networks.append(ipaddress.ip_network(token, strict=False))
+            except ValueError:
+                logger.warning(f"Ignoring invalid WAZUH_PROTECTED_IPS entry: {token!r}")
+        return networks
+
+    def _is_protected_target(self, ip_address: str) -> bool:
+        """True if ip_address falls inside a protected network (must never be blocked)."""
+        try:
+            addr = ipaddress.ip_address(ip_address)
+        except ValueError:
+            return False
+        return any(addr in net for net in self._protected_networks)
+
+    async def block_ip(
+        self, ip_address: str, duration: int = 0, agent_id: str = None, all_agents: bool = False
+    ) -> Dict[str, Any]:
+        """Block IP via firewall-drop active response.
+
+        Requires an explicit target: either a specific agent_id, or all_agents=True to
+        fan out fleet-wide. It no longer silently defaults to "all" — an attacker-embedded
+        "block <ip>" in a log line must not weaponize the whole fleet by omission.
+        """
         ip_address = self._validate_ip(ip_address)
+        if self._is_protected_target(ip_address):
+            raise ValueError(
+                f"Refusing to block protected target {ip_address}: it is loopback, the Wazuh "
+                "manager, or on the WAZUH_PROTECTED_IPS denylist. Blocking it would be self-inflicted DoS."
+            )
+        if not agent_id and not all_agents:
+            raise ValueError(
+                "block_ip requires an explicit target: pass agent_id for a single agent, or "
+                "all_agents=True to deliberately block fleet-wide."
+            )
         ip_address = self._sanitize_ar_argument(ip_address, "ip_address")
         arguments = [f"-srcip {ip_address}"]
         if duration and duration > 0:
