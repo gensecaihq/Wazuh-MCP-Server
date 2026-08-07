@@ -144,6 +144,10 @@ jobs:
         fetch-depth: 0
 
     - name: TruffleHog OSS
+      # Only on push/PR, where a commit range exists. On schedule / workflow_dispatch
+      # there is no diff (BASE == HEAD) and the action errors out; gitleaks below scans
+      # the full git history on every event, so secret coverage is maintained.
+      if: github.event_name == 'push' || github.event_name == 'pull_request'
       uses: trufflesecurity/trufflehog@v3.88.0
       with:
         path: ./
