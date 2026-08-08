@@ -17,6 +17,7 @@ concurrency:
 permissions:
   contents: read
   packages: write
+  security-events: write  # upload the image-scan SARIF to the Security tab
 
 env:
   REGISTRY: ghcr.io
@@ -73,14 +74,35 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
-      # Scan the actual published image (by digest) and fail on HIGH/CRITICAL.
-      # This replaces the dead in-Dockerfile Trivy stage, which never ran in the
-      # production build graph and defaulted to exit-code 0 (never gated anything).
+      # OCI image references must be lowercase, but github.repository (IMAGE_NAME) is
+      # mixed-case (Wazuh-MCP-Server). metadata-action lowercases its push tags, but the
+      # scan ref is built here, so lowercase it explicitly or trivy can't parse it.
+      - name: Compute lowercase image reference
+        id: imageref
+        run: echo "ref=${REGISTRY}/${IMAGE_NAME,,}@${DIGEST}" >> "$GITHUB_OUTPUT"
+        env:
+          REGISTRY: ${{ env.REGISTRY }}
+          IMAGE_NAME: ${{ env.IMAGE_NAME }}
+          DIGEST: ${{ steps.build.outputs.digest }}
+
+      # Scan the actual published image (by digest). Advisory + SARIF to the Security tab:
+      # this runs AFTER the push, so a hard fail here can't prevent a vulnerable publish —
+      # it would only turn the workflow red after the fact. A true pre-push gate would scan
+      # a locally-loaded image before `push: true` (follow-up). Replaces the dead
+      # in-Dockerfile Trivy stage, which never ran in the production build graph.
       - name: Scan published image for vulnerabilities
         uses: aquasecurity/trivy-action@v0.36.0
         with:
-          image-ref: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}@${{ steps.build.outputs.digest }}
-          format: table
-          exit-code: '1'
+          image-ref: ${{ steps.imageref.outputs.ref }}
+          format: sarif
+          output: trivy-image.sarif
           ignore-unfixed: true
           severity: HIGH,CRITICAL
+        continue-on-error: true
+
+      - name: Upload image-scan SARIF to the Security tab
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: trivy-image.sarif
+        if: always()
+        continue-on-error: true
