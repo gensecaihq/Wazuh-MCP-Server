@@ -71,14 +71,21 @@ def test_gcf_mode_is_lossless(monkeypatch):
 def test_gcf_mode_falls_back_to_json_on_error(monkeypatch):
     monkeypatch.setenv("RESPONSE_FORMAT", "gcf")
 
-    # A payload GCF cannot encode; the helper must not raise, and must fall back
-    # to a JSON rendering.
-    class Weird:
-        pass
+    # Inject an encoder failure; the helper must not raise, and must fall back to
+    # a valid JSON rendering of the result.
+    import gcf
 
-    payload = {"data": {"affected_items": [{"x": Weird()}]}}
-    out = render_result("Wazuh Alerts", payload, compact=True)
-    assert out.startswith("Wazuh Alerts:\n")
+    def boom(_data):
+        raise ValueError("encode failed")
+
+    monkeypatch.setattr(gcf, "encode_generic", boom)
+
+    out = render_result("Wazuh Alerts", SAMPLE, compact=True)
+
+    label, body = out.split("\n", 1)
+    assert label == "Wazuh Alerts:"
+    assert not body.startswith("GCF profile=generic")
+    assert json.loads(body) == SAMPLE
 
 
 def _authed_session():
