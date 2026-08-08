@@ -20,8 +20,9 @@ Retrieve comprehensive vulnerability information from Wazuh with flexible filter
 | Parameter | Type | Default | Required | Description |
 |-----------|------|---------|----------|-------------|
 | `agent_id` | string | `null` | No | Filter by specific agent ID (3-8 alphanumeric characters) |
-| `severity` | string | `null` | No | Filter by severity level |
+| `severity` | string | `null` | No | Filter by severity level (`low`, `medium`, `high`, `critical`) |
 | `limit` | integer | `100` | No | Maximum number of vulnerabilities to retrieve (1-500) |
+| `compact` | boolean | `true` | No | Return compact results |
 
 ### Severity Levels
 
@@ -30,8 +31,7 @@ Retrieve comprehensive vulnerability information from Wazuh with flexible filter
 | `critical` | 9.0-10.0 | Immediate | Emergency patching within 24-48 hours |
 | `high` | 7.0-8.9 | High | Patch within 7-14 days |
 | `medium` | 4.0-6.9 | Medium | Patch within 30-60 days |
-| `low` | 0.1-3.9 | Low | Patch during maintenance windows |
-| `informational` | 0.0 | Informational | Monitor, no immediate action required |
+| `low` | 0.0-3.9 | Low | Patch during maintenance windows |
 
 ### Usage Examples
 
@@ -116,8 +116,7 @@ This queries:
       "critical": 12,
       "high": 34,
       "medium": 78,
-      "low": 32,
-      "informational": 0
+      "low": 32
     },
     "by_status": {
       "open": 140,
@@ -158,6 +157,7 @@ Retrieve only critical vulnerabilities requiring immediate attention.
 | Parameter | Type | Default | Required | Description |
 |-----------|------|---------|----------|-------------|
 | `limit` | integer | `50` | No | Maximum number of critical vulnerabilities to retrieve (1-500) |
+| `compact` | boolean | `true` | No | Return compact results |
 
 ### Usage Examples
 

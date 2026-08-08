@@ -38,7 +38,7 @@ The Manager API is always reached over HTTPS on `WAZUH_PORT` (it is TLS-only).
 |----------|---------|-------------|
 | `WAZUH_PORT` | `55000` | Manager API port |
 | `WAZUH_VERIFY_SSL` | `true` | Verify the Manager's TLS certificate. Set `false` only for self-signed certs in development |
-| `WAZUH_ALLOW_SELF_SIGNED` | `false` | Explicitly allow self-signed Manager certificates |
+| `WAZUH_ALLOW_SELF_SIGNED` | `true` | Accept self-signed Manager certificates (Wazuh ships with them by default). Set `false` in production with a proper CA |
 
 ## Wazuh Indexer
 

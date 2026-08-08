@@ -63,7 +63,7 @@ docker compose up -d
 REDIS_URL=redis://redis:6379/0
 SESSION_TTL_SECONDS=1800  # 30 minutes
 
-# Deploy with Redis
+# Deploy with Redis (create compose.redis.yml first — see Redis Setup below)
 docker compose -f compose.yml -f compose.redis.yml up -d
 ```
 
@@ -75,6 +75,8 @@ docker compose -f compose.yml -f compose.redis.yml up -d
 | ✅ Automatic session expiration |
 
 ### Redis Setup
+
+Create a `compose.redis.yml` overlay next to `compose.yml`:
 
 ```yaml
 # compose.redis.yml
@@ -95,16 +97,15 @@ volumes:
 
 ### Verification
 
-```bash
-# Check session storage mode
-curl http://localhost:3000/health | jq '.session_storage'
+The active session store is logged at startup:
 
-# Output:
-# {
-#   "type": "InMemorySessionStore"  # or "RedisSessionStore"
-#   "sessions_count": 5
-# }
+```bash
+docker compose logs wazuh-main-server | grep -i "SessionStore"
+# InMemorySessionStore: "Initialized InMemorySessionStore (single-instance mode)"
+# RedisSessionStore:    "RedisSessionStore configured with TTL=1800s"
 ```
+
+Redis itself can be checked with `docker compose exec redis redis-cli ping` (expects `PONG`).
 
 ---
 
