@@ -285,16 +285,16 @@ src/wazuh_mcp_server/
 
 ## Take It Further: Autonomous Agentic SOC
 
-Combine this MCP server with [**Wazuh OpenClaw Autopilot**](https://github.com/gensecaihq/Wazuh-Openclaw-Autopilot) to build a fully autonomous Security Operations Center.
+Combine this MCP server with [**Wazuh Autopilot**](https://github.com/gensecaihq/Wazuh-Autopilot) to build an agentic Security Operations Center.
 
-While this server gives you conversational access to Wazuh, OpenClaw deploys AI agents that **work around the clock** — triaging alerts, correlating incidents, and recommending responses without human intervention.
+While this server gives you conversational access to Wazuh, Autopilot runs an eleven-agent AI SOC team on top of it **around the clock** — a seven-stage reactive pipeline (triage → correlation → investigation → response) plus four proactive specialists (vulnerability management, threat intel, threat hunting, detection engineering). Every containment action is gated behind two-tier human approval. Runs on OpenClaw, Hermes, or NVIDIA NemoClaw.
 
 ```
 Manual SOC:    Alert → Analyst reviews → Hours → Response
 Agentic SOC:   Alert → AI triages → Seconds → Response ready for approval
 ```
 
-[**Explore OpenClaw Autopilot**](https://github.com/gensecaihq/Wazuh-Openclaw-Autopilot)
+[**Explore Wazuh Autopilot**](https://github.com/gensecaihq/Wazuh-Autopilot)
 
 ---
 
