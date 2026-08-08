@@ -17,7 +17,6 @@ concurrency:
 permissions:
   contents: read
   packages: write
-  security-events: write  # upload the image-scan SARIF to the Security tab
 
 env:
   REGISTRY: ghcr.io
@@ -59,7 +58,47 @@ jobs:
             org.opencontainers.image.description=MCP-compliant remote server for Wazuh SIEM integration
             org.opencontainers.image.licenses=MIT
 
-      - name: Build and push
+      # OCI image references must be lowercase, but github.repository (IMAGE_NAME) is
+      # mixed-case (Wazuh-MCP-Server). Compute a lowercase name once and reuse it for the
+      # local scan tag (metadata-action already lowercases the push tags below).
+      - name: Compute lowercase image name
+        id: img
+        run: echo "name=${IMAGE_NAME,,}" >> "$GITHUB_OUTPUT"
+        env:
+          IMAGE_NAME: ${{ env.IMAGE_NAME }}
+
+      # Pre-push gate — build a single-arch (amd64) image and LOAD it into the local Docker
+      # daemon so it can be scanned before anything is published. `load: true` cannot handle
+      # a multi-arch manifest, hence single platform here; the multi-arch push below reuses
+      # the same gha build cache, so amd64 layers are not rebuilt.
+      - name: Build image for scanning (single-arch, load locally)
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          platforms: linux/amd64
+          load: true
+          push: false
+          tags: ${{ env.REGISTRY }}/${{ steps.img.outputs.name }}:scan-${{ github.sha }}
+          build-args: |
+            BUILD_DATE=${{ github.event.head_commit.timestamp }}
+            VERSION=${{ steps.meta.outputs.version }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      # BLOCKING scan of the loaded image. exit-code 1 on fixable HIGH/CRITICAL fails the
+      # job here, before the push step runs — so a vulnerable image is never published.
+      - name: Scan image for vulnerabilities (blocking)
+        uses: aquasecurity/trivy-action@v0.36.0
+        with:
+          image-ref: ${{ env.REGISTRY }}/${{ steps.img.outputs.name }}:scan-${{ github.sha }}
+          format: table
+          exit-code: '1'
+          ignore-unfixed: true
+          severity: HIGH,CRITICAL
+
+      # Only reached if the scan passed. Multi-arch build + push, reusing the cache from the
+      # scan build above (amd64 comes from cache; arm64 is built here).
+      - name: Build and push (multi-arch)
         id: build
         uses: docker/build-push-action@v7
         with:
@@ -73,36 +112,3 @@ jobs:
             VERSION=${{ steps.meta.outputs.version }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
-
-      # OCI image references must be lowercase, but github.repository (IMAGE_NAME) is
-      # mixed-case (Wazuh-MCP-Server). metadata-action lowercases its push tags, but the
-      # scan ref is built here, so lowercase it explicitly or trivy can't parse it.
-      - name: Compute lowercase image reference
-        id: imageref
-        run: echo "ref=${REGISTRY}/${IMAGE_NAME,,}@${DIGEST}" >> "$GITHUB_OUTPUT"
-        env:
-          REGISTRY: ${{ env.REGISTRY }}
-          IMAGE_NAME: ${{ env.IMAGE_NAME }}
-          DIGEST: ${{ steps.build.outputs.digest }}
-
-      # Scan the actual published image (by digest). Advisory + SARIF to the Security tab:
-      # this runs AFTER the push, so a hard fail here can't prevent a vulnerable publish —
-      # it would only turn the workflow red after the fact. A true pre-push gate would scan
-      # a locally-loaded image before `push: true` (follow-up). Replaces the dead
-      # in-Dockerfile Trivy stage, which never ran in the production build graph.
-      - name: Scan published image for vulnerabilities
-        uses: aquasecurity/trivy-action@v0.36.0
-        with:
-          image-ref: ${{ steps.imageref.outputs.ref }}
-          format: sarif
-          output: trivy-image.sarif
-          ignore-unfixed: true
-          severity: HIGH,CRITICAL
-        continue-on-error: true
-
-      - name: Upload image-scan SARIF to the Security tab
-        uses: github/codeql-action/upload-sarif@v3
-        with:
-          sarif_file: trivy-image.sarif
-        if: always()
-        continue-on-error: true
