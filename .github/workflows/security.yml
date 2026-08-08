@@ -81,18 +81,32 @@ jobs:
         bandit -c pyproject.toml -r src/ -f txt
         echo '```' >> $GITHUB_STEP_SUMMARY
     
-    - name: Run Semgrep
+    - name: Run Semgrep (advisory SAST)
       # semgrep/semgrep-action is archived/deprecated; run the maintained CLI instead.
+      # ADVISORY, not blocking: the registry ruleset (`--config auto`) is fetched fresh
+      # each run and is non-deterministic + prone to false positives (e.g. a Flask XSS
+      # rule matching this FastAPI app), so hard-failing on it would break main with no
+      # code change. Findings are uploaded as SARIF to the Security tab for triage;
+      # Bandit above is the deterministic BLOCKING Python SAST gate.
       run: |
         pip install semgrep
-        semgrep --config auto --error --sarif --output semgrep.sarif src/
-      continue-on-error: false
-    
+        semgrep --config auto --sarif --output semgrep.sarif src/
+      continue-on-error: true
+
+    - name: Upload Semgrep SARIF to the Security tab
+      uses: github/codeql-action/upload-sarif@v3
+      with:
+        sarif_file: semgrep.sarif
+      if: always()
+      continue-on-error: true
+
     - name: Upload code security reports
       uses: actions/upload-artifact@v7
       with:
         name: code-security-reports
-        path: bandit-report.json
+        path: |
+          bandit-report.json
+          semgrep.sarif
       if: always()
 
   docker-security:

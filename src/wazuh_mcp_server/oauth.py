@@ -164,7 +164,9 @@ class OAuthManager:
         if peer in self._trusted_proxies:
             scheme = request.headers.get("x-forwarded-proto", scheme)
             host = request.headers.get("x-forwarded-host", host)
-        return f"{scheme}://{host}"
+        # Reviewed false positive: FastAPI (not Flask), returned into a JSON metadata
+        # document (not HTML), and host is trusted-proxy-gated above. Suppress inline.
+        return f"{scheme}://{host}"  # nosemgrep
 
     def get_metadata(self, request: Request) -> Dict[str, Any]:
         """Get OAuth 2.0 Authorization Server Metadata (RFC 8414)."""
