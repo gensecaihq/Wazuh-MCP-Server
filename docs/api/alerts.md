@@ -136,7 +136,7 @@ Get statistical summaries of alerts grouped by specified criteria.
 
 | Parameter | Type | Default | Required | Description |
 |-----------|------|---------|----------|-------------|
-| `time_range` | string | `"24h"` | No | Time range for analysis: 1h, 6h, 24h, 7d, 30d |
+| `time_range` | string | `"24h"` | No | Time range for analysis: `1h`, `6h`, `12h`, `1d`, `24h`, `7d`, `30d` |
 | `group_by` | string | `"rule.level"` | No | Field to group alerts by |
 
 ### Grouping Options

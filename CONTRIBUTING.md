@@ -42,10 +42,9 @@ The implementation provides enterprise-grade integration between Claude Desktop 
 ## 🛠️ Development Setup
 
 ### Prerequisites
-- **Python 3.13+** recommended
+- **Python 3.11+** (the project baseline; newer versions work)
 - **Git** with GitHub access
-- **Docker 20.10+** with Compose v2.20+
-- **Node.js** (for pre-commit hooks)
+- **Docker** with Compose v2
 
 ### Quick Setup
 ```bash
@@ -57,8 +56,8 @@ cd Wazuh-MCP-Server
 python -m venv venv
 source venv/bin/activate  # Windows: venv\Scripts\activate
 
-# 3. Install development dependencies
-pip install -r requirements.txt
+# 3. Install the package with development dependencies (pytest, black, ruff)
+pip install -e ".[dev]"
 
 # 4. For Docker development (recommended)
 docker compose -f compose.dev.yml up -d --build
@@ -70,7 +69,7 @@ docker compose -f compose.dev.yml up -d --build
 cp .env.example .env
 
 # Edit with your Wazuh server details
-# See INSTALLATION.md for detailed configuration options
+# See docs/configuration.md for the full configuration reference
 ```
 
 ## 📂 Repository Structure
@@ -82,7 +81,8 @@ Wazuh-MCP-Server/
 │       ├── ci.yml             # Continuous Integration
 │       ├── release.yml        # Release automation
 │       ├── security.yml       # Security scanning
-│       └── branch-sync.yml    # Branch synchronization
+│       ├── docker-publish.yml # Container image build + scan + publish
+│       └── update-contributors.yml
 ├── src/wazuh_mcp_server/      # Main source code
 │   ├── __init__.py
 │   ├── __main__.py            # Entry point (python -m wazuh_mcp_server)
@@ -96,10 +96,9 @@ Wazuh-MCP-Server/
 │   ├── resilience.py          # Circuit breakers, retries, graceful shutdown
 │   ├── session_store.py       # Pluggable sessions (in-memory + Redis)
 │   └── api/                   # Wazuh Manager + Indexer clients
-├── tests/                     # Test suite
+├── tests/
+│   └── integration/           # Integration test suite
 ├── tools/                     # Development tools
-│   ├── branch-sync.py         # Branch synchronization
-│   └── version-manager.py     # Version management
 ├── Dockerfile                # Docker container configuration
 ├── compose.yml              # Docker Compose setup
 ├── compose.dev.yml          # Development Docker Compose
@@ -108,7 +107,7 @@ Wazuh-MCP-Server/
 ├── pyproject.toml          # Python project configuration
 ├── README.md               # Main documentation
 ├── CONTRIBUTING.md         # This file
-├── INSTALLATION.md         # Installation guide
+├── docs/                   # Guides and API reference
 └── .env.example           # Environment template
 ```
 
@@ -125,8 +124,8 @@ Wazuh-MCP-Server/
 - `deploy-production.sh` - Automated deployment script
 
 **Documentation**:
-- `README.md` - Main project documentation
-- `INSTALLATION.md` - Detailed installation guide
+- `README.md` - Main project documentation and quick start
+- `docs/configuration.md` - Full configuration reference
 - `MCP_COMPLIANCE_VERIFICATION.md` - MCP compliance details
 
 ## 🔄 Development Workflow
@@ -150,10 +149,10 @@ git commit -m "feat: add new security tool for vulnerability scanning"
 # Run tests
 pytest tests/ -v
 
-# Run linting
+# Run linting and formatting
 ruff check src/
 black src/
-mypy src/
+isort src/
 
 # Test the MCP remote server
 docker compose up -d --build
@@ -176,10 +175,7 @@ curl -H "Authorization: Bearer YOUR_TOKEN" \
 ### Test Structure
 ```
 tests/
-├── unit/                  # Unit tests
-├── integration/           # Integration tests
-├── fixtures/             # Test data
-└── conftest.py           # Pytest configuration
+└── integration/           # Integration tests (protocol, auth, tools, resilience)
 ```
 
 ### Running Tests
@@ -187,19 +183,16 @@ tests/
 # All tests
 pytest tests/ -v
 
-# Unit tests only
-pytest tests/unit/ -v
-
 # With coverage
 pytest tests/ --cov=src/wazuh_mcp_server --cov-report=html
 
 # Specific test file
-pytest tests/unit/test_wazuh_client.py -v
+pytest tests/integration/test_mcp_protocol.py -v
 ```
 
 ### Test Requirements
 - All new features must include tests
-- Maintain >90% code coverage
+- Do not decrease coverage — CI enforces a branch-coverage floor (`fail_under` in `pyproject.toml`)
 - Include both positive and negative test cases
 - Mock external dependencies (Wazuh API calls)
 
@@ -207,15 +200,14 @@ pytest tests/unit/test_wazuh_client.py -v
 
 ### Version Strategy
 - **Main Branch**: Semantic versioning `4.x.x`
-  - `4.0.0` - Current stable MCP remote server version
-  - `4.x.x` - Future releases with SSE transport
+  - `4.3.0` - Current stable release (see [CHANGELOG.md](CHANGELOG.md))
 
 ### Release Process
 1. **Automated Releases**: Triggered by version tags
    ```bash
    # Create and push version tag
-   git tag v4.0.1
-   git push origin v4.0.1
+   git tag v4.3.1
+   git push origin v4.3.1
 
    # GitHub Actions will automatically:
    # - Build Docker image
@@ -235,9 +227,9 @@ pytest tests/unit/test_wazuh_client.py -v
 ## 📝 Code Standards
 
 ### Python Code Style
-- **Black**: Code formatting (line length: 88)
-- **Ruff**: Linting and import sorting
-- **mypy**: Type checking
+- **Black**: Code formatting (line length: 120)
+- **Ruff**: Linting
+- **isort**: Import sorting (Black-compatible profile)
 - **Docstrings**: Google style for all public functions
 
 ### Git Commit Messages
@@ -290,7 +282,7 @@ When creating issues, use the appropriate template:
 Before asking for help:
 1. Check existing issues and discussions
 2. Review this contributing guide
-3. Check the USER_GUIDE.md for setup issues
+3. Check [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md) for setup issues
 4. Review the code and tests for similar patterns
 
 ## 🏆 Recognition

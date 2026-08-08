@@ -80,7 +80,7 @@ AUTH_MODE=bearer docker compose up -d
 
 **Step 1: Get API Key**
 ```bash
-docker compose logs wazuh-mcp-remote-server | grep "API key"
+docker compose logs wazuh-main-server | grep "API key"
 ```
 
 **Step 2: Exchange for JWT Token**

@@ -213,9 +213,15 @@ Perform advanced search across all Wazuh security events and logs for threat hun
 
 | Parameter | Type | Default | Required | Description |
 |-----------|------|---------|----------|-------------|
-| `query` | string | - | **Yes** | Search query or pattern |
-| `time_range` | string | `"24h"` | No | Time range for event search |
+| `query` | string | - | **Yes** | Free-text search (Indexer `simple_query_string`: AND/OR/NOT, quoted phrases, trailing `*` prefix — no leading wildcards or regex) |
+| `time_range` | string | `"24h"` | No | Time range (`1h`, `6h`, `12h`, `1d`, `24h`, `7d`, `30d`) |
 | `limit` | integer | `100` | No | Maximum number of events to retrieve (1-1000) |
+| `rule_id` | string | `null` | No | Filter by rule ID |
+| `agent_id` | string | `null` | No | Filter by agent ID |
+| `level` | string | `null` | No | Minimum severity threshold (e.g. `10` or `10+`) |
+| `srcip` | string | `null` | No | Filter by source IP (`data.srcip`) |
+| `dstip` | string | `null` | No | Filter by destination IP (`data.dstip`) |
+| `compact` | boolean | `true` | No | Return compact results |
 
 ### Time Range Options
 
@@ -223,34 +229,23 @@ Perform advanced search across all Wazuh security events and logs for threat hun
 |-------|-------------|----------|
 | `1h` | Last hour | Real-time incident response |
 | `6h` | Last 6 hours | Recent activity analysis |
-| `24h` | Last 24 hours | Daily threat hunting |
+| `12h` | Last 12 hours | Shift handover review |
+| `1d` / `24h` | Last 24 hours | Daily threat hunting |
 | `7d` | Last week | Weekly security review |
 | `30d` | Last month | Historical analysis |
-| `90d` | Last quarter | Compliance reporting |
 
-### Advanced Search Capabilities
+### Query Syntax
 
-#### IP Address Search
-- IPv4: `192.168.1.100`
-- IPv6: `2001:db8::1`
-- CIDR ranges: `192.168.1.0/24`
-- Multiple IPs: `192.168.1.100 OR 10.0.0.5`
+The query runs through the Indexer's `simple_query_string` with a restricted grammar:
 
-#### Domain and URL Search
-- Domains: `malicious.com`
-- Subdomains: `*.suspicious.org`
-- URLs: `http://malicious.com/payload`
-- Protocol specific: `https://` 
+- **Supported**: terms (`failed login`), `AND` / `OR` / `NOT` operators, quoted phrases (`"wget http://malicious.com"`), trailing-`*` prefix matching (`ssh*`)
+- **Not supported**: leading wildcards (`*.suspicious.org`), regex, `field:value` targeting, CIDR ranges — use the `srcip`/`dstip`/`rule_id`/`agent_id` parameters for structured filtering instead
 
-#### User and Process Search
-- Usernames: `admin`, `root`, `service_account`
-- Process names: `cmd.exe`, `powershell.exe`, `bash`
-- Command lines: `"wget http://malicious.com"`
-
-#### File and Hash Search
-- File paths: `/etc/passwd`, `C:\Windows\System32\`
-- File names: `malware.exe`, `suspicious.dll`
-- Hash values: SHA256, MD5, SHA1 hashes
+#### Search Targets
+- IP addresses as literal terms: `192.168.1.100`, or `192.168.1.100 OR 10.0.0.5` — use `srcip`/`dstip` for field-precise matching
+- Domains and URLs: `malicious.com`, `"http://malicious.com/payload"`
+- Users and processes: `admin`, `powershell.exe`, `"wget http://malicious.com"`
+- File paths and hashes as literal terms: `/etc/passwd`, `malware.exe`, a full SHA256/MD5/SHA1 string
 
 ### Usage Examples
 

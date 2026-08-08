@@ -188,7 +188,7 @@ Indexer-backed tools require `WAZUH_INDEXER_HOST`. When it isn't configured, tho
 ## 🎨 Tool Development
 
 ### Adding New Tools
-See [Development Guide](../development/api.md) for creating custom MCP tools.
+See [CONTRIBUTING.md](../../CONTRIBUTING.md) for creating custom MCP tools.
 
 ### Tool Categories
 Tools are organized by functionality:
@@ -241,9 +241,9 @@ Each tool category has detailed documentation:
 - Performance optimization tips
 
 ### General API Issues
-- **Connection problems**: Check [Connection Troubleshooting](../troubleshooting/connection.md)
-- **Authentication errors**: See [Security Configuration](../security/auth.md)
-- **Performance issues**: Review [Performance Tuning](../troubleshooting/performance.md)
+- **Connection problems**: Check [Troubleshooting](../TROUBLESHOOTING.md)
+- **Authentication errors**: See [Security Documentation](../security/README.md)
+- **Performance issues**: Review [Operations Guide](../OPERATIONS.md)
 
 ---
 

@@ -242,7 +242,7 @@ Environment variables:
 
 ```env
 # Rate limiting
-RATE_LIMIT_REQUESTS=200     # Requests per minute
+RATE_LIMIT_REQUESTS=200     # Requests allowed per window
 RATE_LIMIT_WINDOW=60        # Window in seconds
 
 # Session management

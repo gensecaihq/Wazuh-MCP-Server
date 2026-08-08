@@ -1681,7 +1681,7 @@ async def handle_tools_list(params: Dict[str, Any], session: MCPSession) -> Dict
     Filters tools based on session token scopes."""
     _cursor = params.get("cursor")  # Reserved for future pagination
     tools = [
-        # Alert Management Tools (4 tools)
+        # Alert Management Tools (5 tools)
         {
             "name": "get_wazuh_alerts",
             "description": "Retrieve Wazuh security alerts with optional filtering",
@@ -1783,13 +1783,13 @@ async def handle_tools_list(params: Dict[str, Any], session: MCPSession) -> Dict
         },
         {
             "name": "search_security_events",
-            "description": "Search for specific security events across all Wazuh data. Supports free-text search (Lucene syntax: AND, OR, NOT, field:value, wildcards, quoted phrases) and structured field filters. All filters are combined with AND logic.",
+            "description": "Search for specific security events across all Wazuh data. Supports free-text search (simple query syntax: AND, OR, NOT, quoted phrases, trailing-* prefix; no leading wildcards, regex, or field:value) and structured field filters. All filters are combined with AND logic.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
                     "query": {
                         "type": "string",
-                        "description": "Free-text search query (Lucene syntax: AND, OR, NOT, field:value, wildcards, quoted phrases). Searched across all alert fields via Elasticsearch query_string.",
+                        "description": "Free-text search query (AND, OR, NOT, quoted phrases, trailing-* prefix; leading wildcards, regex, and field:value are not supported — use the structured filter parameters instead). Searched across all alert fields via Elasticsearch simple_query_string.",
                     },
                     "time_range": {
                         "type": "string",
@@ -1927,7 +1927,7 @@ async def handle_tools_list(params: Dict[str, Any], session: MCPSession) -> Dict
                 "required": [],
             },
         },
-        # Security Analysis Tools (6 tools)
+        # Security Analysis Tools (7 tools)
         {
             "name": "analyze_security_threat",
             "description": "Analyze a security threat indicator using AI-powered analysis",

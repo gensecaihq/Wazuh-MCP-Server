@@ -49,30 +49,22 @@ Wazuh MCP Server implements multiple layers of security:
 
 ### Wazuh Server Authentication
 
-#### Basic Authentication (Default)
+The server authenticates to the Wazuh Manager API with a username and password:
+
 ```bash
 # .env
-WAZUH_AUTH_TYPE=basic
 WAZUH_USER=secure-service-account
 WAZUH_PASS=complex-password-123!@#
 ```
 
+Internally, the client exchanges these credentials at `/security/user/authenticate` for
+the Wazuh API's short-lived JWT and refreshes it automatically on expiry — the long-lived
+password is sent only at (re-)authentication, never on every request.
+
 **Security Requirements:**
-- Use dedicated service account
+- Use a dedicated service account (below), not the built-in `wazuh` admin user
 - Strong password (12+ characters, mixed case, numbers, symbols)
 - Regular password rotation (90 days recommended)
-
-#### JWT Token Authentication (Recommended)
-```bash
-# .env
-WAZUH_AUTH_TYPE=jwt
-WAZUH_JWT_TOKEN=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
-```
-
-**Security Benefits:**
-- Short-lived tokens (configurable expiration)
-- Automatic token refresh
-- Reduced credential exposure
 
 ### Service Account Configuration
 
@@ -129,14 +121,15 @@ server itself honors are for its **outbound** connections to Wazuh:
 
 ```bash
 # .env — outbound TLS to the Wazuh Manager / Indexer
-WAZUH_VERIFY_SSL=true            # verify the Manager cert (default)
-WAZUH_ALLOW_SELF_SIGNED=false    # allow a self-signed Manager cert
-WAZUH_INDEXER_VERIFY_SSL=true    # verify the Indexer cert (default)
+WAZUH_VERIFY_SSL=true            # verify the Manager cert (default: true)
+WAZUH_ALLOW_SELF_SIGNED=false    # default: true (accepts Wazuh's stock self-signed certs);
+                                 # set false in production with a proper CA
+WAZUH_INDEXER_VERIFY_SSL=true    # verify the Indexer cert (default: true)
 WAZUH_INDEXER_SSL=true           # use HTTPS to the Indexer
 ```
 
-For inbound TLS hardening, see your reverse proxy's documentation (a sample is in
-`docs/nginx-reverse-proxy.conf`).
+For inbound TLS hardening (certificates, minimum TLS version, cipher suites, HSTS),
+see your reverse proxy's documentation — e.g. nginx, Caddy, or Traefik.
 
 ### Certificate Best Practices
 
@@ -301,17 +294,24 @@ rsyslog -f /etc/rsyslog.d/wazuh-mcp.conf
 
 ### Health Checks
 
-#### Security Health Validation
+#### Health Validation
 ```bash
-# Run security-focused health check
 curl http://localhost:3000/health
-
-# Expected security checks:
-# ✅ ssl_config: SSL verification enabled
-# ✅ credentials: Secure credential storage
-# ✅ permissions: Proper file permissions
-# ✅ audit_logging: Audit logging enabled
 ```
+
+```json
+{
+  "status": "healthy",
+  "timestamp": "2026-08-08T12:00:00Z",
+  "version": "4.3.0",
+  "mcp_protocol_version": "2025-11-25",
+  "supported_protocol_versions": ["2026-07-28", "2025-11-25", "2025-06-18", "2025-03-26", "2024-11-05"]
+}
+```
+
+The endpoint reports liveness only. Verify the security posture directly: TLS settings
+via your `.env` (`WAZUH_VERIFY_SSL`, `WAZUH_ALLOW_SELF_SIGNED`), file permissions with
+`ls -la .env`, and auth events in the structured logs.
 
 ### Threat Detection
 
@@ -329,7 +329,7 @@ curl http://localhost:3000/health
 ```bash
 # Security alerts
 if grep -q "authentication.*failure" logs/security-audit.log; then
-    echo "ALERT: Authentication failures detected" | mail -s "Security Alert" admin@company.com
+    echo "ALERT: Authentication failures detected" | mail -s "Security Alert" soc@example.com
 fi
 ```
 
@@ -408,9 +408,9 @@ echo "Running Wazuh MCP Server security scan..."
 echo "Checking file permissions..."
 find . -name "*.env" -exec ls -la {} \;
 
-# Check TLS configuration
+# Check TLS configuration (verify the Wazuh Manager presents a valid cert)
 echo "Testing TLS configuration..."
-python tools/validate_setup.py --test-ssl
+openssl s_client -connect "${WAZUH_HOST:-localhost}:55000" -brief </dev/null
 
 # Check for secrets in files
 echo "Scanning for hardcoded secrets..."
@@ -439,7 +439,7 @@ sudo ufw deny in 55000/tcp    # Block incoming
 ## 📞 Security Support
 
 ### Security Issues
-- **Security vulnerabilities**: Report privately to security@company.com
+- **Security vulnerabilities**: Report privately via [GitHub Security Advisories](https://github.com/gensecaihq/Wazuh-MCP-Server/security/advisories/new) — see [SECURITY.md](../../SECURITY.md)
 - **Configuration issues**: Check [Configuration Guide](../configuration.md)
 - **Incident response**: Follow documented procedures
 

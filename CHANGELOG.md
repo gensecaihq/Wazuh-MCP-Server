@@ -36,14 +36,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`AUTH_SECRET_KEY` required in production**: with `ENVIRONMENT=production` and `AUTH_MODE != none`, the server refuses to start without it (prevents per-restart token invalidation and cross-instance auth failures).
 - **OAuth hardened**: mandatory S256 PKCE, single-use authorization codes, refresh-token rotation with replay detection, an effective revocation denylist, and DCR off by default with redirect-URI validation.
 - **Indexer queries** use `term` (not `match`) for exact keyword/IP filters; `hits.total` parsing tolerates both int and object forms; 401/403 returns a clear credentials message.
-- **Dependencies** trimmed (removed unused `fastmcp`, `passlib`, `aiofiles`) and pinned with upper bounds; tool count is now **54**.
+- **Dependencies** trimmed (removed unused `fastmcp`, `passlib`, `aiofiles`) and pinned with upper bounds; tool count is now **55** (including the optional `search_external_context`).
 
 ### Fixed
 - **ISO 27001 tools no longer query the removed Manager `/alerts` endpoint** (404 on Wazuh 4.8+): the dashboard, control detail, and alert-mapping paths now read alert evidence from the Indexer, with rule-group filtering, so alert-backed controls stop reporting false `no_evidence` gaps (#84).
 - **System metrics never collected**: `MetricsCollector` is now started/stopped in the app lifespan, so `/metrics` reports real CPU/memory (previously always `0`).
 - **Circuit breaker tripped on 429**: an upstream rate-limit no longer opens the breaker (5xx still does).
 - **`tools/list` `nextCursor: null`**: confirmed resolved — list responses omit the cursor field (#75).
-- Documentation corrected for accuracy: real env-var reference, 54-tool inventory, removed non-existent config keys, and the no-built-in-TLS (reverse-proxy) note.
+- Documentation corrected for accuracy: real env-var reference, 55-tool inventory, removed non-existent config keys, and the no-built-in-TLS (reverse-proxy) note.
 
 ## [4.2.1] - 2026-03-26
 
