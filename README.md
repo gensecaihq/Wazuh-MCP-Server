@@ -209,6 +209,20 @@ python -c "import secrets; print('wazuh_' + secrets.token_urlsafe(32))"
 | `ALLOWED_ORIGINS` | `https://claude.ai,...` | CORS origins (comma-separated) |
 | `TRUSTED_PROXIES` | — | Proxy IPs to trust for `X-Forwarded-For` (correct per-client rate limiting behind a proxy) |
 | `REDIS_URL` | — | Redis URL for multi-instance session storage |
+| `RESPONSE_FORMAT` | `json` | Wire format for alert/event/vulnerability results: `json` or `gcf` (see below) |
+
+### Response encoding (GCF)
+
+Alert, security-event, and vulnerability tools return uniform record collections
+under a `data.affected_items` array. Setting `RESPONSE_FORMAT=gcf` encodes those
+responses as a [Graph Compact Format](https://gcformat.com) generic wire instead
+of JSON, factoring the repeated field names into a single header so the response
+uses fewer tokens when it crosses the LLM boundary.
+
+It is opt-in, lossless, and every response stays complete (a format change only,
+no cross-turn deduplication, so no alert is ever omitted). If encoding fails for
+any reason the tool falls back to JSON. It composes with the existing `compact`
+field-projection parameter, and adds one zero-dependency package (`gcf-python`).
 
 > **Production note:** the server listens over plain HTTP — terminate TLS at a reverse proxy or load balancer. OAuth knobs (`OAUTH_ENABLE_DCR` — off by default, `OAUTH_*_TTL`) and rate-limit tuning (`RATE_LIMIT_REQUESTS`, `RATE_LIMIT_WINDOW`) are in the [Configuration Guide](docs/configuration.md).
 

@@ -44,6 +44,8 @@ dependencies = [
     "tenacity>=9.0.0,<10.0.0",
     # Utilities
     "python-dotenv>=1.0.0,<2.0.0",
+    # Optional GCF response encoding (zero-dependency, opt-in via RESPONSE_FORMAT=gcf)
+    "gcf-python==2.5.1",
 ]
 
 [project.optional-dependencies]
