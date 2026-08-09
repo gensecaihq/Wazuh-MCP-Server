@@ -30,6 +30,7 @@ from wazuh_mcp_server.api.wazuh_client import WazuhClient
 from wazuh_mcp_server.api.wazuh_indexer import IndexerNotConfiguredError
 from wazuh_mcp_server.auth import create_access_token
 from wazuh_mcp_server.config import WazuhConfig, get_config
+from wazuh_mcp_server.gcf_format import render_result
 from wazuh_mcp_server.monitoring import ACTIVE_CONNECTIONS, setup_monitoring_middleware
 from wazuh_mcp_server.resilience import GracefulShutdown
 from wazuh_mcp_server.security import (
@@ -2596,7 +2597,7 @@ async def handle_tools_call(params: Dict[str, Any], session: MCPSession) -> Dict
                 result = _compact_alerts_result(result)
             result = _add_truncation_warning(result, limit)
             _success = True
-            return _tool_result(f"Wazuh Alerts:\n{json.dumps(result, indent=2 if not compact else None, default=str)}")
+            return _tool_result(render_result("Wazuh Alerts", result, compact=compact))
 
         elif tool_name == "get_wazuh_alert_summary":
             time_range = validate_time_range(arguments.get("time_range"))
@@ -2678,9 +2679,7 @@ async def handle_tools_call(params: Dict[str, Any], session: MCPSession) -> Dict
                 result = _compact_alerts_result(result)
             result = _add_truncation_warning(result, limit)
             _success = True
-            return _tool_result(
-                f"Security Events:\n{json.dumps(result, indent=2 if not compact else None, default=str)}"
-            )
+            return _tool_result(render_result("Security Events", result, compact=compact))
 
         # Agent Management Tools
         elif tool_name == "get_wazuh_agents":
@@ -2735,9 +2734,7 @@ async def handle_tools_call(params: Dict[str, Any], session: MCPSession) -> Dict
                 result = _compact_vulns_result(result)
             result = _add_truncation_warning(result, limit)
             _success = True
-            return _tool_result(
-                f"Vulnerabilities:\n{json.dumps(result, indent=2 if not compact else None, default=str)}"
-            )
+            return _tool_result(render_result("Vulnerabilities", result, compact=compact))
 
         elif tool_name == "get_wazuh_critical_vulnerabilities":
             limit = validate_limit(arguments.get("limit"), max_val=500, default=50, param_name="limit")
@@ -2748,9 +2745,7 @@ async def handle_tools_call(params: Dict[str, Any], session: MCPSession) -> Dict
                 result = _compact_vulns_result(result)
             result = _add_truncation_warning(result, limit)
             _success = True
-            return _tool_result(
-                f"Critical Vulnerabilities:\n{json.dumps(result, indent=2 if not compact else None, default=str)}"
-            )
+            return _tool_result(render_result("Critical Vulnerabilities", result, compact=compact))
 
         elif tool_name == "get_wazuh_vulnerability_summary":
             time_range = validate_time_range(arguments.get("time_range"))
