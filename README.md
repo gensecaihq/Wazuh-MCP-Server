@@ -352,6 +352,7 @@ We welcome contributions. See [Issues](https://github.com/gensecaihq/Wazuh-MCP-S
 | <img src="https://github.com/lwsinclair.png" width="40" height="40" style="border-radius: 50%"/> | [@lwsinclair](https://github.com/lwsinclair) | 💻 Code, 🔀 PRs |
 | <img src="https://github.com/mouse-value-add.png" width="40" height="40" style="border-radius: 50%"/> | [@mouse-value-add](https://github.com/mouse-value-add) | 💻 Code, 🔀 PRs |
 | <img src="https://github.com/SiM22.png" width="40" height="40" style="border-radius: 50%"/> | [@SiM22](https://github.com/SiM22) | 💻 Code, 🔀 PRs |
+| <img src="https://github.com/blackwell-systems.png" width="40" height="40" style="border-radius: 50%"/> | [@blackwell-systems](https://github.com/blackwell-systems) | 🔀 PRs |
 | <img src="https://github.com/DrRSatzteil.png" width="40" height="40" style="border-radius: 50%"/> | [@DrRSatzteil](https://github.com/DrRSatzteil) | 🔀 PRs |
 | <img src="https://github.com/MilkyWay88.png" width="40" height="40" style="border-radius: 50%"/> | [@MilkyWay88](https://github.com/MilkyWay88) | 🔀 PRs |
 | <img src="https://github.com/taylorwalton.png" width="40" height="40" style="border-radius: 50%"/> | [@taylorwalton](https://github.com/taylorwalton) | 🔀 PRs |
