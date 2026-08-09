@@ -56,6 +56,7 @@ def test_default_is_json(monkeypatch):
 
 
 def test_gcf_mode_is_lossless(monkeypatch):
+    pytest.importorskip("gcf")  # optional [gcf] extra; skip when not installed
     monkeypatch.setenv("RESPONSE_FORMAT", "gcf")
     assert gcf_enabled() is True
     out = render_result("Wazuh Alerts", SAMPLE, compact=True)
@@ -69,6 +70,7 @@ def test_gcf_mode_is_lossless(monkeypatch):
 
 
 def test_gcf_mode_falls_back_to_json_on_error(monkeypatch):
+    pytest.importorskip("gcf")  # optional [gcf] extra; skip when not installed
     monkeypatch.setenv("RESPONSE_FORMAT", "gcf")
 
     # Inject an encoder failure; the helper must not raise, and must fall back to
@@ -131,6 +133,7 @@ class _StubAlertsClient:
 @pytest.mark.asyncio
 async def test_get_wazuh_alerts_end_to_end_gcf(monkeypatch):
     """Drive a real tool call through the dispatch with RESPONSE_FORMAT=gcf."""
+    pytest.importorskip("gcf")  # optional [gcf] extra; skip when not installed
     from wazuh_mcp_server import server as mcp_server
     from wazuh_mcp_server.clusters import ClusterRegistry
     from wazuh_mcp_server.server import handle_tools_call
