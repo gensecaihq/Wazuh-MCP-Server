@@ -36,3 +36,7 @@ cryptography>=50.0.0,<51.0.0
 # Optional: Redis-backed session store for multi-instance / serverless deployments.
 # Install alongside: pip install redis
 # redis[async]>=5.0.0,<7.0.0
+
+# Optional: GCF response encoding for record tools (RESPONSE_FORMAT=gcf).
+# Zero-dependency, pinned exact. Install alongside: pip install gcf-python==2.5.1
+# gcf-python==2.5.1

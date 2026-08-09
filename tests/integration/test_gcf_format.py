@@ -88,6 +88,21 @@ def test_gcf_mode_falls_back_to_json_on_error(monkeypatch):
     assert json.loads(body) == SAMPLE
 
 
+def test_gcf_mode_falls_back_to_json_when_encoder_missing(monkeypatch):
+    """gcf-python is an optional extra; RESPONSE_FORMAT=gcf without it must not break tools."""
+    import sys
+
+    monkeypatch.setenv("RESPONSE_FORMAT", "gcf")
+    # Simulate the package being absent: a None entry makes `from gcf import ...` raise ImportError.
+    monkeypatch.setitem(sys.modules, "gcf", None)
+
+    out = render_result("Wazuh Alerts", SAMPLE, compact=True)
+
+    label, body = out.split("\n", 1)
+    assert label == "Wazuh Alerts:"
+    assert json.loads(body) == SAMPLE
+
+
 def _authed_session():
     from wazuh_mcp_server.auth import AuthToken
     from wazuh_mcp_server.server import MCPSession

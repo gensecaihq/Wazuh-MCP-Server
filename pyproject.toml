@@ -44,13 +44,15 @@ dependencies = [
     "tenacity>=9.0.0,<10.0.0",
     # Utilities
     "python-dotenv>=1.0.0,<2.0.0",
-    # Optional GCF response encoding (zero-dependency, opt-in via RESPONSE_FORMAT=gcf)
-    "gcf-python==2.5.1",
 ]
 
 [project.optional-dependencies]
 redis = [
     "redis>=7.0.0",
+]
+# Opt-in GCF response encoding (RESPONSE_FORMAT=gcf); zero-dependency, pinned exact
+gcf = [
+    "gcf-python==2.5.1",
 ]
 dev = [
     "pytest>=7.0.0",
@@ -59,6 +61,7 @@ dev = [
     "black>=23.0.0",
     "isort>=5.12.0",
     "ruff>=0.1.0",
+    "gcf-python==2.5.1",
 ]
 
 [project.urls]

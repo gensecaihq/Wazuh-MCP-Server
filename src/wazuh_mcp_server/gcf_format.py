@@ -47,6 +47,11 @@ def render_result(label: str, result: Any, *, compact: bool) -> str:
             from gcf import encode_generic
 
             return f"{label}:\n{encode_generic(result)}"
+        except ImportError:
+            logger.warning(
+                "RESPONSE_FORMAT=gcf but gcf-python is not installed "
+                "(pip install 'wazuh-mcp-server[gcf]'); returning JSON output"
+            )
         except Exception:
             logger.warning("GCF encoding failed; returning JSON output")
 

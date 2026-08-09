@@ -220,9 +220,15 @@ of JSON, factoring the repeated field names into a single header so the response
 uses fewer tokens when it crosses the LLM boundary.
 
 It is opt-in, lossless, and every response stays complete (a format change only,
-no cross-turn deduplication, so no alert is ever omitted). If encoding fails for
-any reason the tool falls back to JSON. It composes with the existing `compact`
-field-projection parameter, and adds one zero-dependency package (`gcf-python`).
+no cross-turn deduplication, so no alert is ever omitted). If encoding fails —
+or the encoder isn't installed — the tool falls back to JSON. It composes with
+the existing `compact` field-projection parameter.
+
+The encoder ships as an optional extra (one zero-dependency package, pinned exact):
+
+```bash
+pip install "wazuh-mcp-server[gcf]"      # or: pip install gcf-python==2.5.1
+```
 
 > **Production note:** the server listens over plain HTTP — terminate TLS at a reverse proxy or load balancer. OAuth knobs (`OAUTH_ENABLE_DCR` — off by default, `OAUTH_*_TTL`) and rate-limit tuning (`RATE_LIMIT_REQUESTS`, `RATE_LIMIT_WINDOW`) are in the [Configuration Guide](docs/configuration.md).
 
