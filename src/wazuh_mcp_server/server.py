@@ -196,7 +196,9 @@ class MCPRequest(BaseModel):
     """MCP JSON-RPC 2.0 Request."""
 
     jsonrpc: str = Field(default="2.0", description="JSON-RPC version")
-    id: Optional[Union[str, int]] = Field(default=None, description="Request ID")
+    # JSON-RPC 2.0 permits a Number id, including a non-integral one; float must be allowed
+    # or a spec-valid `id: 1.5` fails validation and the error path itself 500s.
+    id: Optional[Union[str, int, float]] = Field(default=None, description="Request ID")
     method: str = Field(description="Method name")
     params: Optional[Dict[str, Any]] = Field(default=None, description="Method parameters")
 
@@ -211,7 +213,7 @@ class MCPResponse(BaseModel):
     """
 
     jsonrpc: str = Field(default="2.0", description="JSON-RPC version")
-    id: Optional[Union[str, int]] = Field(default=None, description="Request ID")
+    id: Optional[Union[str, int, float]] = Field(default=None, description="Request ID")
     result: Optional[Any] = Field(default=None, description="Result data")
     error: Optional[Dict[str, Any]] = Field(default=None, description="Error object")
 
@@ -636,13 +638,20 @@ app = FastAPI(
 # Get configuration
 config = get_config()
 
-# Create Wazuh configuration from server config
+# Create Wazuh configuration from server config.
+# WAZUH_ALLOW_SELF_SIGNED is a documented control ("set false in production with a proper CA")
+# but was never plumbed into the client, making it a no-op. Wire it in: httpx has no
+# "verify-but-accept-self-signed" middle ground, so accepting self-signed == not verifying.
+# effective verify = WAZUH_VERIFY_SSL AND NOT WAZUH_ALLOW_SELF_SIGNED. With the shipped defaults
+# (verify=true, allow_self_signed=true) this yields verify=false, matching stock Wazuh's
+# self-signed certs out of the box; setting WAZUH_ALLOW_SELF_SIGNED=false enforces strict verify.
+_wazuh_verify_ssl = config.WAZUH_VERIFY_SSL and not config.WAZUH_ALLOW_SELF_SIGNED
 wazuh_config = WazuhConfig(
     wazuh_host=config.WAZUH_HOST,
     wazuh_user=config.WAZUH_USER,
     wazuh_pass=config.WAZUH_PASS,
     wazuh_port=config.WAZUH_PORT,
-    verify_ssl=config.WAZUH_VERIFY_SSL,
+    verify_ssl=_wazuh_verify_ssl,
     # Wazuh Indexer settings (required for vulnerability tools in Wazuh 4.8.0+)
     wazuh_indexer_host=config.WAZUH_INDEXER_HOST if config.WAZUH_INDEXER_HOST else None,
     wazuh_indexer_port=config.WAZUH_INDEXER_PORT,
@@ -851,12 +860,15 @@ def create_error_response(
     elif data is None:
         error_data = {"correlation_id": get_correlation_id()}
     error = MCPError(code=code, message=message, data=error_data)
-    return MCPResponse(id=request_id, error=error.dict())
+    # Normalize the id defensively: legacy error paths pass the raw body id, which may be a
+    # list/object/non-finite float. Coercing to a valid JSON-RPC id here means building the
+    # error response can never itself raise and turn a client mistake into an HTTP 500.
+    return MCPResponse(id=_normalize_jsonrpc_id(request_id), error=error.dict())
 
 
 def create_success_response(request_id: Optional[Union[str, int]], result: Any) -> MCPResponse:
     """Create MCP success response."""
-    return MCPResponse(id=request_id, result=result)
+    return MCPResponse(id=_normalize_jsonrpc_id(request_id), result=result)
 
 
 def validate_protocol_version(version: Optional[str], strict: bool = False) -> str:
@@ -934,10 +946,13 @@ def _compact_alert(alert: dict) -> dict:
     compact = {}
     if "timestamp" in alert:
         compact["timestamp"] = alert["timestamp"]
-    agent = alert.get("agent", {})
+    # `key or {}` (not `.get(key, {})`): a Wazuh alert can carry an explicit JSON null for
+    # agent/rule/data, and `.get("data", {})` returns None for a present-but-null key, so a
+    # single malformed alert would AttributeError and fail the whole get_wazuh_alerts call.
+    agent = alert.get("agent") or {}
     if agent:
         compact["agent"] = {"id": agent.get("id", ""), "name": agent.get("name", "")}
-    rule = alert.get("rule", {})
+    rule = alert.get("rule") or {}
     if rule:
         compact["rule"] = {
             "id": rule.get("id", ""),
@@ -947,7 +962,7 @@ def _compact_alert(alert: dict) -> dict:
         }
         if rule.get("mitre"):
             compact["rule"]["mitre"] = rule["mitre"]
-    src = alert.get("data", {})
+    src = alert.get("data") or {}
     if src.get("srcip"):
         compact["srcip"] = src["srcip"]
     if src.get("dstip"):
@@ -1675,6 +1690,22 @@ def _arg_is_true(value: Any) -> bool:
 def _require_action_confirmation() -> bool:
     """Whether state-changing tools require an explicit confirm=true (env-gated, default off)."""
     return os.getenv("WAZUH_REQUIRE_ACTION_CONFIRMATION", "false").strip().lower() in ("true", "1", "yes")
+
+
+def _guard_manager_agent(agent_id: str, tool_name: str) -> None:
+    """Refuse host-level destructive active response aimed at the manager's own agent (000).
+
+    Agent 000 is the Wazuh manager itself. Isolating/killing/quarantining on it is a
+    self-inflicted DoS of the SOC control plane — a prime target for a prompt-injected model
+    steering an action off attacker-controlled alert text. Deny unless an operator explicitly
+    opts in via WAZUH_ALLOW_MANAGER_AR=true.
+    """
+    if str(agent_id).lstrip("0") == "" and str(agent_id) != "":  # "0", "00", "000" all normalize to the manager
+        if os.getenv("WAZUH_ALLOW_MANAGER_AR", "false").strip().lower() not in ("true", "1", "yes"):
+            raise ValueError(
+                f"Refusing to run '{tool_name}' against agent 000 (the Wazuh manager itself) — "
+                "this would disrupt the SOC control plane. Set WAZUH_ALLOW_MANAGER_AR=true to override."
+            )
 
 
 async def handle_tools_list(params: Dict[str, Any], session: MCPSession) -> Dict[str, Any]:
@@ -2493,6 +2524,18 @@ async def handle_tools_call(params: Dict[str, Any], session: MCPSession) -> Dict
 
     if not tool_name:
         raise ValueError("Tool name is required")
+    if not isinstance(tool_name, str):
+        # A non-string name would crash validate_input (len()) into a generic -32603;
+        # surface it as an invalid-params error instead.
+        raise ToolValidationError("name", "must be a string", "Pass the tool name as a string")
+
+    # Normalize arguments: an explicit JSON null (or any non-object) would otherwise reach
+    # `arguments.items()`/`.get()` and crash to an internal error. Treat missing/null as {}
+    # and reject a non-object payload cleanly.
+    if arguments is None:
+        arguments = {}
+    elif not isinstance(arguments, dict):
+        raise ToolValidationError("arguments", "must be an object", "Pass tool arguments as a JSON object")
 
     # Validate tool name
     validate_input(tool_name, max_length=100)
@@ -2910,19 +2953,24 @@ async def handle_tools_call(params: Dict[str, Any], session: MCPSession) -> Dict
                 else 0
             )
             agent_id = validate_agent_id(arguments.get("agent_id"))
-            all_agents = bool(arguments.get("all_agents", False))
+            # Strict boolean: raw bool("false") is True, which would turn an explicit
+            # all_agents="false" (LLMs routinely send stringly-typed booleans) into a
+            # fleet-wide block. validate_boolean maps "false"/"0"/"no"/"off" → False.
+            all_agents = validate_boolean(arguments.get("all_agents"), default=False, param_name="all_agents")
             result = await wazuh_client.block_ip(ip_address, duration, agent_id, all_agents=all_agents)
             _success = True
             return _tool_result(f"Block IP Result:\n{json.dumps(result, indent=2, default=str)}")
 
         elif tool_name == "wazuh_isolate_host":
             agent_id = validate_agent_id(arguments.get("agent_id"), required=True)
+            _guard_manager_agent(agent_id, tool_name)
             result = await wazuh_client.isolate_host(agent_id)
             _success = True
             return _tool_result(f"Isolate Host Result:\n{json.dumps(result, indent=2, default=str)}")
 
         elif tool_name == "wazuh_kill_process":
             agent_id = validate_agent_id(arguments.get("agent_id"), required=True)
+            _guard_manager_agent(agent_id, tool_name)
             process_id = arguments.get("process_id")
             if process_id is None:
                 raise ValueError("Parameter 'process_id' is required")
@@ -2933,6 +2981,7 @@ async def handle_tools_call(params: Dict[str, Any], session: MCPSession) -> Dict
 
         elif tool_name == "wazuh_disable_user":
             agent_id = validate_agent_id(arguments.get("agent_id"), required=True)
+            _guard_manager_agent(agent_id, tool_name)
             username = validate_username(arguments.get("username"), required=True)
             result = await wazuh_client.disable_user(agent_id, username)
             _success = True
@@ -2940,6 +2989,7 @@ async def handle_tools_call(params: Dict[str, Any], session: MCPSession) -> Dict
 
         elif tool_name == "wazuh_quarantine_file":
             agent_id = validate_agent_id(arguments.get("agent_id"), required=True)
+            _guard_manager_agent(agent_id, tool_name)
             file_path = validate_file_path(arguments.get("file_path"), required=True)
             result = await wazuh_client.quarantine_file(agent_id, file_path)
             _success = True
@@ -2947,6 +2997,7 @@ async def handle_tools_call(params: Dict[str, Any], session: MCPSession) -> Dict
 
         elif tool_name == "wazuh_active_response":
             agent_id = validate_agent_id(arguments.get("agent_id"), required=True)
+            _guard_manager_agent(agent_id, tool_name)
             command = validate_active_response_command(arguments.get("command"), required=True)
             parameters = arguments.get("parameters")
             result = await wazuh_client.run_active_response(agent_id, command, parameters)
@@ -2973,11 +3024,17 @@ async def handle_tools_call(params: Dict[str, Any], session: MCPSession) -> Dict
             return _tool_result(f"Host Deny Result:\n{json.dumps(result, indent=2, default=str)}")
 
         elif tool_name == "wazuh_restart":
-            target = arguments.get("target", "").strip()
+            target = str(arguments.get("target", "")).strip()
             if not target:
                 raise ValueError("Parameter 'target' is required. Use an agent ID or 'manager'.")
             if target != "manager":
-                validate_agent_id(target, required=True, param_name="target")
+                # Use the NORMALIZED id (zero-padded to Wazuh's 3-digit form); passing the raw
+                # value would send e.g. /agents/1/restart, which the API rejects. Restarting an
+                # agent's own service is not host-level destructive AR, so no manager guard here —
+                # but "0"/"000" via the agent path means the manager: route it through the keyword.
+                target = validate_agent_id(target, required=True, param_name="target")
+                if target == "000":
+                    target = "manager"
             result = await wazuh_client.restart_service(target)
             _success = True
             return _tool_result(f"Restart Result:\n{json.dumps(result, indent=2, default=str)}")

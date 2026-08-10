@@ -193,7 +193,10 @@ class WazuhIndexerClient:
         await self._ensure_initialized()
 
         url = f"{self.base_url}/{self._qualified(index)}/_search"
-        body: Dict[str, Any] = {"query": query, "size": size}
+        # track_total_hits=true so hits.total is the true match count, not the default 10k cap.
+        # The summary tools (alert summary, pattern analysis, top threats, IOC reputation) report
+        # this as the exact total; without it they silently plateau at "10000" on a busy SIEM.
+        body: Dict[str, Any] = {"query": query, "size": size, "track_total_hits": True}
         if sort:
             body["sort"] = sort
 
@@ -362,12 +365,15 @@ class WazuhIndexerClient:
             must_clauses.append({"terms": {"rule.groups": rule_groups}})
 
         if level:
-            # level is a minimum severity threshold (e.g. "10" means level >= 10)
+            # level is a minimum severity threshold (e.g. "10" means level >= 10).
+            # Coerce via str() first: an int level (10) — plausible from JSON — would hit
+            # AttributeError on .rstrip and the filter would be silently dropped, returning
+            # ALL alerts instead of level>=10. Raise on genuinely-bad input rather than swallow.
             try:
-                min_level = int(level.rstrip("+"))
-                must_clauses.append({"range": {"rule.level": {"gte": min_level}}})
-            except (ValueError, AttributeError):
-                pass
+                min_level = int(str(level).rstrip("+"))
+            except (ValueError, TypeError):
+                raise ValueError(f"Invalid level filter {level!r}: expected a number like '10' or '10+'")
+            must_clauses.append({"range": {"rule.level": {"gte": min_level}}})
 
         if srcip:
             # IPs are exact-match keyword fields — term avoids false positives from
@@ -455,7 +461,9 @@ class WazuhIndexerClient:
             must_clauses.append({"term": {"vulnerability.severity": severity_normalized}})
 
         if cve_id:
-            must_clauses.append({"term": {"vulnerability.id": cve_id}})
+            # CVE ids in the index are upper-case (CVE-2021-44228). A term query is exact and
+            # case-sensitive, so normalize the input or "cve-2021-44228" silently matches nothing.
+            must_clauses.append({"term": {"vulnerability.id": str(cve_id).upper()}})
 
         # Build the query
         if must_clauses:

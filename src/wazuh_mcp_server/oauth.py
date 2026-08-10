@@ -403,18 +403,24 @@ class OAuthManager:
                 self._revoke_client_tokens(client_id)
             raise ValueError("invalid_grant")
 
+        # Validate the grant BEFORE recording the token as consumed/revoked. A mismatched
+        # client_id or an expired token is a failed refresh, not a rotation — burning the
+        # token here would let a wrong-client_id request (a buggy client, or an attacker
+        # holding a stolen refresh token) permanently revoke a legitimate grant.
+        if token_obj.is_expired():
+            raise ValueError("invalid_grant")
+
+        if token_obj.client_id != client_id:
+            # Put the (still-valid) token back so a correct retry can rotate it.
+            self.refresh_tokens[refresh_token] = token_obj
+            raise ValueError("invalid_grant")
+
         # Mark the consumed token as revoked (by string AND jti) so a later replay is
         # detected above regardless of how the token is re-spelled.
         self.revoked_tokens[refresh_token] = token_obj.expires_at
         consumed_payload = self._safe_decode(refresh_token)
         if consumed_payload is not None and consumed_payload.get("jti"):
             self.revoked_jtis[consumed_payload["jti"]] = token_obj.expires_at
-
-        if token_obj.is_expired():
-            raise ValueError("invalid_grant")
-
-        if token_obj.client_id != client_id:
-            raise ValueError("invalid_grant")
 
         # Bound access_tokens to prevent unbounded memory growth
         if len(self.access_tokens) > 5000:

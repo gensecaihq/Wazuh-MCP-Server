@@ -458,8 +458,25 @@ class WazuhClient:
             else:
                 # Filter to numeric agent IDs only
                 numeric_agents = [str(a) for a in agent_items if str(a).isdigit()]
-                if numeric_agents:
-                    params["agents_list"] = ",".join(numeric_agents)
+                if not numeric_agents:
+                    # SAFETY: if the caller supplied targets but none are numeric agent IDs
+                    # (e.g. an LLM passed a hostname like "web-01"), we must NOT fall through
+                    # with an empty params — Wazuh's active-response controller defaults an
+                    # absent agents_list to '*' (ALL agents), which would fan a block/isolate/
+                    # kill out to the entire fleet. Refuse instead.
+                    raise ValueError(
+                        f"No valid numeric agent ID in target(s) {agent_items!r}. "
+                        "Active response requires numeric agent IDs (e.g. '001'); "
+                        "refusing to dispatch to avoid a fleet-wide action."
+                    )
+                params["agents_list"] = ",".join(numeric_agents)
+        if not params.get("agents_list"):
+            # Defense in depth: never send a targeting active-response PUT without an explicit
+            # agents_list — an empty/absent list is interpreted as ALL agents by the manager.
+            raise ValueError(
+                "Active response requires an explicit agent target (numeric agent ID or 'all'); "
+                "refusing to dispatch with an unspecified target."
+            )
         result = await self._request("PUT", "/active-response", json=data, params=params)
 
         # Check for partial/total failures in the response body

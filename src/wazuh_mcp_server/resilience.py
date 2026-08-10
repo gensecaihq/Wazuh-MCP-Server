@@ -136,6 +136,14 @@ class CircuitBreaker:
             logger.error(f"Unexpected error in {func.__name__}: {e}")
             await self._end_trial_unproven(func.__name__, f"unexpected {type(e).__name__}")
             raise
+        except BaseException as e:
+            # asyncio.CancelledError (and KeyboardInterrupt/SystemExit) are BaseException, NOT
+            # Exception, so they bypass the handlers above. A half-open trial cancelled mid-flight
+            # — client disconnect, server shutdown, or cancellation during the up-to-60s 429 sleep
+            # in the Wazuh client — would otherwise leave _half_open_trial_in_progress stuck True,
+            # stranding the breaker HALF_OPEN and 503-ing every later call until process restart.
+            await self._end_trial_unproven(func.__name__, f"cancelled/{type(e).__name__}")
+            raise
 
     async def _end_trial_unproven(self, func_name: str, reason: str) -> None:
         """End a half-open trial that neither succeeded nor counted as a monitored failure.

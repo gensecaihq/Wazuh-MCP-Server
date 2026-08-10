@@ -604,6 +604,10 @@ SENSITIVE_PATTERNS = [
     # user:pass@ embedded in a URL (e.g. https://admin:s3cret@indexer:9200)
     (r"([a-zA-Z][a-zA-Z0-9+.-]*://)[^\s:/@]+:[^\s@/]+@", r"\1[REDACTED]@"),
     (r"(bearer\s+)[a-zA-Z0-9._~+/=-]+", r"\1[REDACTED]"),
+    # `Basic <base64(user:pass)>` — how the Wazuh Manager client authenticates, so the
+    # single most likely credential to appear in a header/exception dump. Redact before the
+    # label rule below (which would otherwise stop at whitespace and leave the base64).
+    (r"(basic\s+)[a-zA-Z0-9+/=]+", r"\1[REDACTED]"),
     (r'(password["\']?\s*[:=]\s*["\']?)[^"\'\s,}]+', r"\1[REDACTED]"),
     (r'(token["\']?\s*[:=]\s*["\']?)[^"\'\s,}]+', r"\1[REDACTED]"),
     (r'(api[_-]?key["\']?\s*[:=]\s*["\']?)[^"\'\s,}]+', r"\1[REDACTED]"),
@@ -648,6 +652,11 @@ class SanitizingLogFilter(logging.Filter):
                 for arg in record.args:
                     if isinstance(arg, str):
                         sanitized_args.append(sanitize_log_message(arg))
+                    elif isinstance(arg, BaseException):
+                        # `logger.error("failed: %s", exc)` formats the exception via str();
+                        # httpx errors embed the request URL, which can carry user:pass@host.
+                        # Pre-sanitize its string form (str-formatted anyway) so creds don't leak.
+                        sanitized_args.append(sanitize_log_message(str(arg)))
                     else:
                         sanitized_args.append(arg)
                 record.args = tuple(sanitized_args)
@@ -906,6 +915,16 @@ RATE_LIMIT_EXEMPT_PATHS = frozenset({"/health", "/healthz", "/ready", "/readyz",
 # Applying the middleware's raw-IP limiter on top would defeat the principal keying.
 RATE_LIMIT_SELF_LIMITED_PATHS = frozenset({"/", "/mcp", "/sse", "/messages"})
 
+# JSON-RPC endpoints whose body must NOT be subjected to the coarse injection-pattern
+# body scan. This is a security *tool*: legitimate tool arguments routinely contain the
+# very strings the WAF heuristic flags (path-traversal indicators like ../, shell
+# metacharacters, SQL fragments) because analysts search for attack indicators. Every
+# JSON-RPC parameter is already strictly validated per-tool by the typed validators
+# (validate_ip, validate_query's restricted simple_query_string, enum whitelists, etc.),
+# so the body scan adds only false positives here. Size limits and header/query-param
+# scanning still apply.
+JSONRPC_BODY_SCAN_EXEMPT_PATHS = frozenset({"/mcp", "/messages"})
+
 
 class SecurityManager:
     """Centralized security management."""
@@ -1003,8 +1022,12 @@ class SecurityManager:
                 logger.debug(f"Failed to read request body: {e}")
                 body = None
 
-        # Validate for security threats
-        is_safe, reason = self.validator.validate_request(request, body)
+        # Validate for security threats. For JSON-RPC tool endpoints, skip the coarse body
+        # pattern-scan (per-parameter typed validation already covers these, and analysts
+        # legitimately submit attack-indicator strings) — but keep header/query scanning and
+        # the size limits enforced above.
+        body_for_scan = None if path in JSONRPC_BODY_SCAN_EXEMPT_PATHS else body
+        is_safe, reason = self.validator.validate_request(request, body_for_scan)
         if not is_safe:
             self.metrics.suspicious_requests += 1
             logger.warning(f"Suspicious request from {client_ip}: {reason}")
@@ -1041,7 +1064,14 @@ class ConnectionPoolManager:
 class MemoryManager:
     """Monitor and manage memory usage."""
 
-    def __init__(self, max_memory_mb: int = 512):
+    def __init__(self, max_memory_mb: int = None):
+        if max_memory_mb is None:
+            # Honor MAX_MEMORY_MB (same knob monitoring.py reads) so the kill-switch and the
+            # metrics threshold agree; fall back to 512 only when unset/invalid.
+            try:
+                max_memory_mb = int(os.getenv("MAX_MEMORY_MB", "512"))
+            except (TypeError, ValueError):
+                max_memory_mb = 512
         self.max_memory_bytes = max_memory_mb * 1024 * 1024
         self.last_check = time.time()
         self.check_interval = 30  # seconds
@@ -1081,9 +1111,12 @@ memory_manager = MemoryManager()
 async def security_middleware(request: Request, call_next):
     """Security middleware for FastAPI."""
     try:
-        # Memory check
-        if not memory_manager.check_memory_usage():
-            raise HTTPException(status_code=503, detail="Server overloaded")
+        # Memory check — but NEVER for liveness/readiness/metrics probes. Those must answer even
+        # under memory pressure; 503-ing /health here would fail the container healthcheck and
+        # trigger a restart loop, defeating the deliberate liveness-only design of the route.
+        if request.url.path not in RATE_LIMIT_EXEMPT_PATHS:
+            if not memory_manager.check_memory_usage():
+                raise HTTPException(status_code=503, detail="Server overloaded")
 
         # Security validation
         await security_manager.validate_request(request)
