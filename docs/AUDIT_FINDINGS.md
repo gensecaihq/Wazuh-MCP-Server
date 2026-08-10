@@ -129,5 +129,20 @@ These need larger design changes or are lower-impact; grouped for follow-up.
 - **Deploy:** `wazuh-mcp-server` is not yet published to PyPI (publishing is gated behind the
   `PUBLISH_PYPI` repo variable — a maintainer action); the container base image is tag-pinned rather
   than digest-pinned and `apk upgrade` floats package versions (reproducibility).
-- **Dead code:** `config_validator.py` (413 lines) is never invoked; `resilience.py`'s module-level
-  breakers are misconfigured but unused; several declared Prometheus metrics are never emitted.
+## Fixed in follow-up (dead-code cleanup)
+
+Verified unused (searched all of `src/` and `tests/`) and removed:
+
+- **`config_validator.py`** (413 lines) — imported nowhere; its "production validation" never ran.
+- **`resilience.py`** — the misconfigured, unused module-level breakers and decorators
+  (`wazuh_api_circuit_breaker`, `authentication_circuit_breaker`, `with_wazuh_resilience`,
+  `with_auth_resilience`) and the helper classes only they referenced (`TimeoutManager`,
+  `ErrorRecovery`, `BulkheadIsolation`, `HealthRecovery`) and orphaned concurrency constants. The
+  live `CircuitBreaker`/`RetryConfig`/`GracefulShutdown` (used by the Wazuh clients and server) are
+  untouched.
+- **`monitoring.py`** — the unreachable health-check subsystem (`HealthChecker`, `AlertManager`,
+  `HealthCheckResult`, the `check_*` functions, `health_endpoint`, `metrics_endpoint`; server.py
+  mounts its own `/health`, `/ready`, `/metrics`) and the four never-emitted metrics
+  (`WAZUH_API_CALLS`, `SSE_EVENTS_SENT`, `SESSION_ACTIVE`, `CIRCUIT_BREAKER_STATE`). `MetricsCollector`,
+  `PerformanceProfiler` (used by the request middleware), the `record_*` helpers, and `SERVER_INFO`
+  are kept.
