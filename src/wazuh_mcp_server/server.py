@@ -592,12 +592,13 @@ async def lifespan(app: FastAPI):
         auth_manager.tokens.clear()
         logger.info("Authentication tokens cleared")
 
-        # Clear sessions with proper cleanup
-        await sessions.clear()
-        # Close session store backend (e.g., Redis connection)
+        # Do NOT clear the session store on shutdown. In-memory sessions vanish with the process
+        # anyway, and a shared Redis store is the whole point of multi-instance deployments —
+        # wiping it here would 404 every OTHER instance's live sessions on a single pod restart or
+        # rolling deploy. Redis TTL handles expiry. Just close this instance's backend connection.
         if hasattr(sessions._store, "close"):
             await sessions._store.close()
-        logger.info("Sessions cleared")
+        logger.info("Session store backend closed (sessions preserved for other instances)")
 
         # Close Wazuh clients (all configured clusters) to release HTTP connections
         await cluster_registry.close()
@@ -1962,7 +1963,7 @@ async def handle_tools_list(params: Dict[str, Any], session: MCPSession) -> Dict
         # Security Analysis Tools (7 tools)
         {
             "name": "analyze_security_threat",
-            "description": "Analyze a security threat indicator using AI-powered analysis",
+            "description": "Analyze a security threat indicator by correlating it against recent Wazuh alert history",
             "inputSchema": {
                 "type": "object",
                 "properties": {
@@ -1977,7 +1978,7 @@ async def handle_tools_list(params: Dict[str, Any], session: MCPSession) -> Dict
         },
         {
             "name": "check_ioc_reputation",
-            "description": "Check reputation of an Indicator of Compromise (IoC)",
+            "description": "Count local Wazuh alert sightings of an indicator (IP/domain/hash). This reflects local activity, not an external threat-intel reputation feed; zero sightings means 'not seen locally', not 'known clean'.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
@@ -2211,7 +2212,7 @@ async def handle_tools_list(params: Dict[str, Any], session: MCPSession) -> Dict
         },
         {
             "name": "get_wazuh_log_collector_stats",
-            "description": "Get Wazuh log collector statistics",
+            "description": "Get Wazuh manager analysisd statistics (event decoding/rule matching throughput)",
             "inputSchema": {"type": "object", "properties": {}, "required": []},
         },
         {
@@ -2252,7 +2253,7 @@ async def handle_tools_list(params: Dict[str, Any], session: MCPSession) -> Dict
                         "type": "integer",
                         "minimum": 0,
                         "default": 0,
-                        "description": "Block duration in seconds (0 = permanent)",
+                        "description": "Block duration in seconds (0 = permanent). Advisory only: actual expiry is governed by the manager's active-response <timeout> configuration, not per-call.",
                     },
                     "agent_id": {
                         "type": "string",
@@ -2923,7 +2924,7 @@ async def handle_tools_call(params: Dict[str, Any], session: MCPSession) -> Dict
         elif tool_name == "get_wazuh_log_collector_stats":
             result = await wazuh_client.get_log_collector_stats()
             _success = True
-            return _tool_result(f"Log Collector Statistics:\n{json.dumps(result, indent=2, default=str)}")
+            return _tool_result(f"Analysisd Statistics:\n{json.dumps(result, indent=2, default=str)}")
 
         elif tool_name == "search_wazuh_manager_logs":
             query = validate_query(arguments.get("query"), required=True)
