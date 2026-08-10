@@ -39,9 +39,9 @@ services:
       # (only behind a trusted network/firewall).
       - "${MCP_BIND:-127.0.0.1}:${MCP_PORT:-3000}:3000"
     
-    # Modern health check with curl
+    # Modern health check with curl (follows the container's MCP_PORT, pinned to 3000 above)
     healthcheck:
-      test: ["CMD-SHELL", "curl -sf --max-time 5 http://localhost:3000/health | jq -e '.status == \"healthy\"' > /dev/null"]
+      test: ["CMD-SHELL", "curl -sf --max-time 5 http://localhost:${MCP_PORT:-3000}/health | jq -e '.status == \"healthy\"' > /dev/null"]
       interval: 15s
       timeout: 5s
       retries: 3

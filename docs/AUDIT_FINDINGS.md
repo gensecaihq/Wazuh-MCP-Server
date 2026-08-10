@@ -92,6 +92,25 @@ rotation, and the dual-era MCP protocol negotiation.
 - **Redis session store no longer wiped on shutdown** — a single pod restart previously 404'd every
   other instance's live sessions; TTL handles expiry.
 
+## Fixed in follow-up (deploy surface)
+
+- **`LOG_LEVEL=WARN` no longer crashes startup.** `__main__.py` passed the raw value to uvicorn,
+  which rejects `warn` (it wants `warning`); now normalized, with an `info` fallback for anything
+  unrecognized instead of a cryptic boot failure.
+- **Docker healthcheck follows `MCP_PORT`.** It hardcoded port 3000, so any `MCP_PORT` override made
+  the container permanently unhealthy; now uses `${MCP_PORT:-3000}` (Dockerfile and compose).
+- **OCI image labels populate.** `VERSION`/`BUILD_DATE` were declared before the first `FROM` and
+  never redeclared in the production stage, so `image.version`/`image.created` shipped empty and the
+  compose/CI build-args were silently ignored. Redeclared in-stage.
+- **CI tests the full supported range.** The Test job now runs a `3.11 / 3.12 / 3.13` matrix
+  (validated: all 266 tests pass on each) instead of only 3.13, matching the `>=3.11` floor.
+- **Release gate matches CI.** `release.yml` installs the `[gcf]` extra so a tag build exercises the
+  same test set (the GCF tests self-skip without it).
+- **Docs that 404'd / couldn't work fixed.** The README GCF install no longer points at an
+  unpublished PyPI package; `docs/OPERATIONS.md` drops the `--scale` command that conflicts with the
+  fixed `container_name` and explains how to actually scale. `compose.dev.yml` no longer claims a
+  hot-reload it doesn't implement. `security.yml` no longer gates on the defunct `mcp-remote` branch.
+
 ## Deferred (tracked, not addressed)
 
 These need larger design changes or are lower-impact; grouped for follow-up.
@@ -107,9 +126,8 @@ These need larger design changes or are lower-impact; grouped for follow-up.
   guard fails safe, and descriptions now note this).
 - **Read-tool scoping:** `get_iso27001_dashboard`/`perform_risk_assessment` apply `agent_id` only to
   part of their data.
-- **Deploy:** `wazuh-mcp-server` is not yet published to PyPI (README `pip install` 404s until the
-  `PUBLISH_PYPI` gate is enabled); the documented `--scale` command conflicts with `container_name`;
-  Dockerfile pre-`FROM` ARGs leave OCI version/created labels empty; the healthcheck hardcodes
-  port 3000; CI tests only Python 3.13 despite a 3.11+ floor.
+- **Deploy:** `wazuh-mcp-server` is not yet published to PyPI (publishing is gated behind the
+  `PUBLISH_PYPI` repo variable — a maintainer action); the container base image is tag-pinned rather
+  than digest-pinned and `apk upgrade` floats package versions (reproducibility).
 - **Dead code:** `config_validator.py` (413 lines) is never invoked; `resilience.py`'s module-level
   breakers are misconfigured but unused; several declared Prometheus metrics are never emitted.

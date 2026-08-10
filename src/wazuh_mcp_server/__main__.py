@@ -35,7 +35,16 @@ def main() -> None:
         # Get configuration from environment
         host = os.getenv("MCP_HOST", "0.0.0.0")
         port = int(os.getenv("MCP_PORT", "3000"))
-        log_level = os.getenv("LOG_LEVEL", "info").lower()
+        # Normalize LOG_LEVEL to a value uvicorn accepts. LOG_LEVEL=WARN (valid for the stdlib
+        # logging module and accepted elsewhere in the app) is NOT a valid uvicorn level and would
+        # crash startup with a cryptic "Server error"; map it, and fall back to info on anything
+        # unrecognized rather than aborting the boot.
+        _uvicorn_levels = {"critical", "error", "warning", "info", "debug", "trace"}
+        log_level = os.getenv("LOG_LEVEL", "info").strip().lower()
+        if log_level == "warn":
+            log_level = "warning"
+        if log_level not in _uvicorn_levels:
+            log_level = "info"
 
         from wazuh_mcp_server import __version__
 
