@@ -11,6 +11,29 @@ class ConfigurationError(Exception):
     pass
 
 
+_TRUE_TOKENS = frozenset({"1", "true", "yes", "y", "on"})
+_FALSE_TOKENS = frozenset({"0", "false", "no", "n", "off", ""})
+
+
+def env_bool(name: str, default: bool) -> bool:
+    """Parse a boolean environment variable, accepting the common truthy/falsy spellings.
+
+    A plain ``== "true"`` check silently treats ``WAZUH_VERIFY_SSL=1`` / ``=yes`` as False,
+    which would disable TLS verification (or send Indexer credentials over plain HTTP) for an
+    operator who meant to enable it. Accept 1/true/yes/y/on and 0/false/no/n/off; raise on
+    anything else so a typo fails loudly instead of defaulting to the insecure branch.
+    """
+    raw = os.getenv(name)
+    if raw is None:
+        return default
+    token = raw.strip().lower()
+    if token in _TRUE_TOKENS:
+        return True
+    if token in _FALSE_TOKENS:
+        return False
+    raise ConfigurationError(f"{name} must be a boolean (true/false/1/0/yes/no/on/off), got '{raw}'")
+
+
 def validate_port(value: str, name: str) -> int:
     """Validate port number is within valid range."""
     try:
@@ -226,14 +249,33 @@ class ServerConfig:
         # per-process key invalidates all tokens on restart and breaks multi-instance
         # deployments. Auto-generate only outside production (developer convenience).
         auth_secret = os.getenv("AUTH_SECRET_KEY", "").strip()
+        auth_required = environment == "production" and auth_mode != "none"
         if not auth_secret:
-            if environment == "production" and auth_mode != "none":
+            if auth_required:
                 raise ConfigurationError(
                     "AUTH_SECRET_KEY is required when ENVIRONMENT=production and AUTH_MODE is not 'none'.\n"
                     "Generate one with: openssl rand -hex 32\n"
                     "Set it identically across all instances so tokens survive restarts and load balancing."
                 )
             auth_secret = secrets.token_hex(32)
+        elif auth_required:
+            # A key was provided in production. Reject the shipped placeholder and any obvious
+            # stand-in, and require real entropy — otherwise `cp .env.example .env` yields a
+            # production server signing every token with a value published in the public repo.
+            lowered = auth_secret.lower()
+            looks_placeholder = (
+                "change_me" in lowered
+                or "changeme" in lowered
+                or lowered.startswith("<")
+                or "your-secret" in lowered
+                or "example" in lowered
+            )
+            if looks_placeholder or len(auth_secret) < 32:
+                raise ConfigurationError(
+                    "AUTH_SECRET_KEY is set to a placeholder or is too weak for production "
+                    f"(need a random value of at least 32 characters; got {len(auth_secret)}).\n"
+                    "Generate one with: openssl rand -hex 32"
+                )
 
         # Validate log level
         log_level = os.getenv("LOG_LEVEL", "INFO").upper()
@@ -243,9 +285,8 @@ class ServerConfig:
         # Indexer scheme: honor an explicit WAZUH_INDEXER_SSL, otherwise infer from the
         # host prefix (http:// -> plain HTTP). Defaults to HTTPS when no scheme is given.
         indexer_host_raw = os.getenv("WAZUH_INDEXER_HOST", "")
-        indexer_ssl_env = os.getenv("WAZUH_INDEXER_SSL")
-        if indexer_ssl_env is not None:
-            indexer_ssl = indexer_ssl_env.lower() == "true"
+        if os.getenv("WAZUH_INDEXER_SSL") is not None:
+            indexer_ssl = env_bool("WAZUH_INDEXER_SSL", True)
         else:
             indexer_ssl = not indexer_host_raw.strip().lower().startswith("http://")
 
@@ -258,7 +299,7 @@ class ServerConfig:
             ),
             AUTH_MODE=auth_mode,
             OAUTH_ISSUER_URL=os.getenv("OAUTH_ISSUER_URL", ""),
-            OAUTH_ENABLE_DCR=os.getenv("OAUTH_ENABLE_DCR", "false").lower() == "true",
+            OAUTH_ENABLE_DCR=env_bool("OAUTH_ENABLE_DCR", False),
             OAUTH_ACCESS_TOKEN_TTL=validate_positive_int(
                 os.getenv("OAUTH_ACCESS_TOKEN_TTL", "3600"), "OAUTH_ACCESS_TOKEN_TTL"
             ),
@@ -273,15 +314,15 @@ class ServerConfig:
             WAZUH_USER=os.getenv("WAZUH_USER", ""),
             WAZUH_PASS=os.getenv("WAZUH_PASS", ""),
             WAZUH_PORT=validate_port(os.getenv("WAZUH_PORT", "55000"), "WAZUH_PORT"),
-            WAZUH_VERIFY_SSL=os.getenv("WAZUH_VERIFY_SSL", "true").lower() == "true",
-            WAZUH_ALLOW_SELF_SIGNED=os.getenv("WAZUH_ALLOW_SELF_SIGNED", "true").lower() == "true",
+            WAZUH_VERIFY_SSL=env_bool("WAZUH_VERIFY_SSL", True),
+            WAZUH_ALLOW_SELF_SIGNED=env_bool("WAZUH_ALLOW_SELF_SIGNED", True),
             # Wazuh Indexer settings (for vulnerability tools in Wazuh 4.8.0+)
             WAZUH_INDEXER_HOST=normalize_host(indexer_host_raw),
             WAZUH_INDEXER_PORT=validate_port(os.getenv("WAZUH_INDEXER_PORT", "9200"), "WAZUH_INDEXER_PORT"),
             WAZUH_INDEXER_USER=os.getenv("WAZUH_INDEXER_USER", ""),
             WAZUH_INDEXER_PASS=os.getenv("WAZUH_INDEXER_PASS", ""),
             WAZUH_INDEXER_SSL=indexer_ssl,
-            WAZUH_INDEXER_VERIFY_SSL=os.getenv("WAZUH_INDEXER_VERIFY_SSL", "true").lower() == "true",
+            WAZUH_INDEXER_VERIFY_SSL=env_bool("WAZUH_INDEXER_VERIFY_SSL", True),
             REQUEST_TIMEOUT_SECONDS=validate_positive_int(
                 os.getenv("REQUEST_TIMEOUT_SECONDS", "30"), "REQUEST_TIMEOUT_SECONDS", max_val=300
             ),
