@@ -34,10 +34,12 @@ docker compose restart wazuh-main-server
 
 # Stop services
 docker compose down --timeout 30
-
-# Scale service (load testing)
-docker compose up --scale wazuh-main-server=2 -d
 ```
+
+> **Scaling:** the shipped `compose.yml` is single-instance by design (fixed `container_name`
+> and host port, loopback bind behind a reverse proxy). `docker compose up --scale` will not work
+> against it as-is. To run multiple instances, remove `container_name`, publish a port range, point
+> them at a shared `REDIS_URL` for session state, and load-balance with your reverse proxy.
 
 ### Cleanup
 

@@ -41,6 +41,12 @@ RUN pip install --no-cache-dir --upgrade pip setuptools wheel && \
 # Stage 2: Production image with latest Alpine
 FROM python:${PYTHON_VERSION}-alpine AS production
 
+# Redeclare build args inside this stage. ARGs declared before the first FROM are only in scope
+# for FROM lines; without this, the org.opencontainers.image.version/created LABELs below expand
+# to empty strings and the VERSION/BUILD_DATE build-args passed by compose/CI are silently ignored.
+ARG VERSION=4.3.0
+ARG BUILD_DATE
+
 LABEL stage=production
 
 # Install minimal runtime dependencies
@@ -92,9 +98,11 @@ ENV PATH="/home/wazuh/.local/bin:${PATH}" \
     LOG_LEVEL=INFO \
     ENVIRONMENT=production
 
-# Comprehensive health check with JSON validation and timeout handling
+# Comprehensive health check with JSON validation and timeout handling.
+# Uses ${MCP_PORT:-3000} (expanded by the sh -c shell from the container env) so the probe
+# follows a MCP_PORT override instead of curling a hardcoded 3000 and reporting unhealthy.
 HEALTHCHECK --interval=15s --timeout=10s --start-period=45s --retries=5 \
-    CMD ["sh", "-c", "curl -f --max-time 5 --retry 2 --retry-delay 1 -H 'Accept: application/json' http://localhost:3000/health | jq -e '.status == \"healthy\"' > /dev/null || exit 1"]
+    CMD ["sh", "-c", "curl -f --max-time 5 --retry 2 --retry-delay 1 -H 'Accept: application/json' http://localhost:${MCP_PORT:-3000}/health | jq -e '.status == \"healthy\"' > /dev/null || exit 1"]
 
 # Expose SSE port
 EXPOSE 3000

@@ -42,14 +42,20 @@ jobs:
   test:
     name: Test
     runs-on: ubuntu-latest
+    # Test the full supported range (pyproject requires-python = ">=3.11"), not just 3.13,
+    # so a version-specific regression is caught instead of shipping silently.
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ['3.11', '3.12', '3.13']
 
     steps:
     - uses: actions/checkout@v7
 
-    - name: Set up Python 3.13
+    - name: Set up Python ${{ matrix.python-version }}
       uses: actions/setup-python@v6
       with:
-        python-version: '3.13'
+        python-version: ${{ matrix.python-version }}
 
     - name: Install dependencies
       run: |
@@ -62,6 +68,7 @@ jobs:
         pytest tests/ -v --cov=src/wazuh_mcp_server --cov-report=xml --cov-fail-under=37
 
     - name: Upload coverage
+      if: matrix.python-version == '3.13'
       uses: codecov/codecov-action@v7
       with:
         files: ./coverage.xml
