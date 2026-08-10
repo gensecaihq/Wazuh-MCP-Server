@@ -243,6 +243,90 @@ class TestManagerAgentGuard:
         _guard_manager_agent("000", "wazuh_isolate_host")  # no raise when explicitly opted in
 
 
+class _FakeIndexer:
+    """Captures get_alerts kwargs and returns a canned result."""
+
+    def __init__(self, items=None):
+        self.calls = []
+        self._items = items or []
+
+    async def get_alerts(self, **kwargs):
+        self.calls.append(kwargs)
+        return {"data": {"affected_items": self._items, "total_affected_items": len(self._items)}}
+
+
+class TestVerificationQueries:
+    @pytest.mark.asyncio
+    async def test_check_blocked_ip_uses_structured_filters(self):
+        client = _client()
+        fake = _FakeIndexer(items=[{"rule": {"groups": ["active_response"]}}])
+        client._indexer_client = fake
+        out = await client.check_blocked_ip("1.2.3.4", agent_id="001")
+        call = fake.calls[0]
+        # Structured filters, not a free-text 'AND' query that matches nothing.
+        assert call.get("srcip") == "1.2.3.4"
+        assert call.get("rule_groups") == ["active_response"]
+        assert call.get("agent_id") == "001"
+        assert "query_text" not in call or "AND" not in str(call.get("query_text"))
+        assert call.get("timestamp_start")  # bounded window
+        assert out["data"]["blocked"] is True
+
+    @pytest.mark.asyncio
+    async def test_check_process_queries_specific_pid(self):
+        client = _client()
+        captured = {}
+
+        async def fake_request(method, path, params=None):
+            captured["path"] = path
+            captured["params"] = params
+            return {"data": {"affected_items": [{"pid": 4242, "scan": {"time": "t"}}]}}
+
+        client._request = fake_request
+        out = await client.check_process("001", 4242)
+        assert captured["params"].get("q") == "pid=4242"  # not a 500-row page scan
+        assert out["data"]["running"] is True
+        assert out["data"]["inventory_scan_time"] == "t"
+
+    @pytest.mark.asyncio
+    async def test_check_file_quarantine_no_substring_false_positive(self):
+        client = _client()
+
+        async def fake_request(method, path, params=None):
+            # A modified (not deleted) event on a path that merely contains "quarantine".
+            return {"data": {"affected_items": [{"type": "modified", "path": "/var/quarantine/keep.txt"}]}}
+
+        client._request = fake_request
+        out = await client.check_file_quarantine("001", "/var/quarantine/keep.txt")
+        assert out["data"]["quarantined"] is False
+
+
+class TestScaScore:
+    @pytest.mark.asyncio
+    async def test_na_checks_excluded_from_denominator(self):
+        client = _client()
+
+        async def fake_request(method, path, params=None):
+            checks = [{"result": "passed"}] * 50 + [{"result": "not applicable"}] * 50
+            return {"data": {"affected_items": checks}}
+
+        client._request = fake_request
+        out = await client.get_sca_policy_checks("001", "cis_debian10")
+        assert out["data"]["score"] == 100  # 50 passed / 50 applicable, not / 100
+
+
+class TestThreatScoreRanking:
+    @pytest.mark.asyncio
+    async def test_targeted_high_severity_outranks_chatty_low(self):
+        client = _client()
+        alerts = [{"rule": {"id": "noise", "level": 3, "description": "x"}, "agent": {"id": "1"}}] * 1000 + [
+            {"rule": {"id": "apt", "level": 15, "description": "y"}, "agent": {"id": "2"}}
+        ]
+        client._indexer_client = _FakeIndexer(items=alerts)
+        out = await client.get_top_security_threats(limit=10, time_range="24h")
+        threats = {t["rule_id"]: t["threat_score"] for t in out["data"]["threats"]}
+        assert threats["apt"] > threats["noise"], threats
+
+
 class TestCircuitBreakerCancellation:
     @pytest.mark.asyncio
     async def test_half_open_trial_gate_released_on_cancellation(self):

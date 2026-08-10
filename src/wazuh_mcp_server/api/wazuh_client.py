@@ -1266,9 +1266,15 @@ class WazuhClient:
         for rule_id, data in rule_data.items():
             level = data["level"]
             count = data["count"]
-            # Score: level weight * log(count) * affected_systems_factor
             affected_count = len(data["affected_agents"])
-            threat_score = min(100, int(level * 5 * math.log2(count + 1) * (1 + 0.1 * affected_count)))
+            # Normalize each factor to 0..1 and cap BEFORE combining, then weight severity
+            # highest. The old `min(100, level*5*log2(count)*...)` capped the *product*, so a
+            # chatty level-3 rule (1000 hits) saturated to 100 and outranked a level-15 targeted
+            # attack (1 hit → 75). Severity must dominate the ranking.
+            severity = level / 15.0  # Wazuh max rule level is 15
+            volume = min(math.log2(count + 1), 6.0) / 6.0  # saturates ~63 events
+            spread = min(affected_count, 10) / 10.0
+            threat_score = int(100 * (0.6 * severity + 0.25 * volume + 0.15 * spread))
 
             threats.append(
                 {
@@ -1602,7 +1608,10 @@ class WazuhClient:
                 "passed": len(passed),
                 "failed": len(failed),
                 "not_applicable": len(not_applicable),
-                "score": int(len(passed) / len(checks) * 100) if checks else 0,
+                # Score over APPLICABLE checks only (passed + failed). Including "not applicable"
+                # in the denominator understated a 100%-passing policy — 50 passed + 50 N/A read
+                # as 50%. N/A checks are reported separately above.
+                "score": int(len(passed) / (len(passed) + len(failed)) * 100) if (passed or failed) else 0,
                 "failed_checks": [
                     {
                         "id": c.get("id"),
@@ -2552,21 +2561,32 @@ class WazuhClient:
     # Verification Tools
     # =========================================================================
 
-    async def check_blocked_ip(self, ip_address: str, agent_id: str = None) -> Dict[str, Any]:
-        """Check if IP is blocked by searching active response alerts via Elasticsearch."""
+    async def check_blocked_ip(self, ip_address: str, agent_id: str = None, window: str = "now-24h") -> Dict[str, Any]:
+        """Check whether an IP was recently blocked, via active-response alerts on the Indexer.
+
+        Uses STRUCTURED filters (data.srcip + the active_response rule group) rather than a
+        free-text query. A free-text ``'"ip" AND "firewall-drop"'`` routes through the Indexer's
+        simple_query_string, where AND is a literal term and default_operator=AND then requires the
+        token "and" in the document — which AR alerts don't contain — so it reliably matched
+        nothing and reported a blocked IP as not blocked. Bounded to a recent window so a block
+        that already expired long ago isn't reported as still active.
+        """
         if not self._indexer_client:
             raise IndexerNotConfiguredError()
-        # Use Elasticsearch query_string to search for both the IP and firewall-drop.
-        # Scope to the requested agent when given, instead of ignoring agent_id and
-        # reporting a fleet-wide block status for a per-agent question.
-        query = f'"{ip_address}" AND "firewall-drop"'
-        result = await self._indexer_client.get_alerts(limit=50, query_text=query, agent_id=agent_id)
+        result = await self._indexer_client.get_alerts(
+            limit=50,
+            srcip=ip_address,
+            rule_groups=["active_response"],
+            agent_id=agent_id,
+            timestamp_start=window,
+        )
         _, total, _ = self._alerts_and_total(result)
         return {
             "data": {
                 "ip_address": ip_address,
                 "agent_id": agent_id,
                 "scope": "agent" if agent_id else "fleet",
+                "window": window,
                 "blocked": total > 0,
                 "matching_alerts": total,
             }
@@ -2580,12 +2600,21 @@ class WazuhClient:
             raise ValueError(f"Agent {agent_id} not found")
         agent = agents[0]
         status = agent.get("status")
-        # Check alert history for isolation commands if indexer is available
+        # Look for a recent host-isolation active-response alert for THIS agent, regardless of
+        # connection status. Wazuh host-isolation deliberately preserves the agent↔manager link,
+        # so a correctly isolated host stays "active" — keying isolation off "disconnected" (as
+        # before) both missed real isolations and misfired on merely-offline agents. The old
+        # free-text 'host-isolation AND {id}' query also matched nothing under simple_query_string.
         isolation_confirmed = False
-        if self._indexer_client and status == "disconnected":
+        if self._indexer_client:
             try:
-                query = f'"host-isolation" AND "{agent_id}"'
-                alerts = await self._indexer_client.get_alerts(limit=5, query_text=query)
+                alerts = await self._indexer_client.get_alerts(
+                    limit=5,
+                    agent_id=agent_id,
+                    rule_groups=["active_response"],
+                    query_text="isolation",
+                    timestamp_start="now-24h",
+                )
                 items = alerts.get("data", {}).get("affected_items", [])
                 isolation_confirmed = len(items) > 0
             except Exception:
@@ -2594,20 +2623,35 @@ class WazuhClient:
             "data": {
                 "agent_id": agent_id,
                 "status": status,
-                "possibly_isolated": status == "disconnected",
                 "isolation_confirmed": isolation_confirmed,
                 "name": agent.get("name"),
-                "note": "A disconnected agent may be isolated or simply offline. "
-                "Check isolation_confirmed for active response evidence.",
+                "note": "isolation_confirmed reflects a recent host-isolation active-response alert. "
+                "Connection status is not a reliable isolation signal — a correctly isolated host "
+                "keeps its manager link. Verify on the host for a definitive answer.",
             }
         }
 
     async def check_process(self, agent_id: str, process_id: int) -> Dict[str, Any]:
-        """Check if a process is still running on an agent."""
-        result = await self._request("GET", f"/syscollector/{agent_id}/processes", params={"limit": 500})
+        """Check if a process is still running on an agent (syscollector inventory)."""
+        # Query the specific PID rather than paging the first 500 processes — on a busy host a
+        # still-running target beyond the first page would otherwise be reported as killed.
+        result = await self._request(
+            "GET", f"/syscollector/{agent_id}/processes", params={"q": f"pid={int(process_id)}", "limit": 1}
+        )
         processes = result.get("data", {}).get("affected_items", [])
         running = any(str(p.get("pid")) == str(process_id) for p in processes)
-        return {"data": {"agent_id": agent_id, "process_id": process_id, "running": running}}
+        # Syscollector is a periodic inventory, not live — surface the scan time so the caller
+        # can judge freshness (a just-killed PID may still appear until the next scan).
+        scan_time = processes[0].get("scan", {}).get("time") if processes else None
+        return {
+            "data": {
+                "agent_id": agent_id,
+                "process_id": process_id,
+                "running": running,
+                "inventory_scan_time": scan_time,
+                "note": "Based on periodic syscollector inventory, not a live process list.",
+            }
+        }
 
     async def check_user_status(self, agent_id: str, username: str) -> Dict[str, Any]:
         """Check user account status by searching active response alerts via Elasticsearch."""
@@ -2615,18 +2659,27 @@ class WazuhClient:
         enable_evidence = False
         if self._indexer_client:
             try:
-                # Search for disable-account events for this user and agent
-                disable_query = f'"disable-account" AND "{username}" AND "{agent_id}"'
-                disable_result = await self._indexer_client.get_alerts(limit=5, query_text=disable_query)
-                disable_evidence = len(disable_result.get("data", {}).get("affected_items", [])) > 0
-
-                # Search for enable-account events
-                enable_query = f'"enable-account" AND "{username}" AND "{agent_id}"'
-                enable_result = await self._indexer_client.get_alerts(limit=5, query_text=enable_query)
-                enable_evidence = len(enable_result.get("data", {}).get("affected_items", [])) > 0
+                # Fetch recent active-response alerts mentioning this user on this agent (the
+                # username goes through as a single simple_query_string term; the old
+                # '"disable-account" AND "user" AND "id"' form matched nothing), then classify
+                # each by its rule text. Free-text AND is not a boolean operator on this backend.
+                result = await self._indexer_client.get_alerts(
+                    limit=25,
+                    agent_id=agent_id,
+                    rule_groups=["active_response"],
+                    query_text=username,
+                    timestamp_start="now-24h",
+                )
+                items = result.get("data", {}).get("affected_items", [])
+                for alert in items:
+                    blob = str(alert.get("rule", {}).get("description", "")).lower()
+                    if "disable" in blob:
+                        disable_evidence = True
+                    if "enable" in blob:
+                        enable_evidence = True
             except Exception:
                 pass
-        # Most recent action takes precedence
+        # Heuristic: presence of a disable event without a later enable. Not order-aware.
         likely_disabled = disable_evidence and not enable_evidence
         return {
             "data": {
@@ -2644,8 +2697,19 @@ class WazuhClient:
         # FIM data is per-agent: GET /syscheck/{agent_id}. GET /syscheck (no id) is 405.
         result = await self._request("GET", f"/syscheck/{agent_id}", params={"q": f"file={file_path}"})
         events = result.get("data", {}).get("affected_items", [])
-        quarantined = any(e.get("type") == "deleted" or "quarantine" in str(e) for e in events)
-        return {"data": {"agent_id": agent_id, "file_path": file_path, "quarantined": quarantined}}
+        # The FIM query is already scoped to this exact path, so a 'deleted' event for it is the
+        # quarantine signal (Wazuh's quarantine AR removes the file from its original location).
+        # The previous `"quarantine" in str(e)` matched any path whose stringified event merely
+        # contained the substring "quarantine" — a false positive on any file under such a path.
+        quarantined = any(e.get("type") == "deleted" for e in events)
+        return {
+            "data": {
+                "agent_id": agent_id,
+                "file_path": file_path,
+                "quarantined": quarantined,
+                "note": "Inferred from a FIM deletion of the exact path; verify the quarantine store on the host.",
+            }
+        }
 
     # =========================================================================
     # Rollback Tools

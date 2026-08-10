@@ -69,25 +69,44 @@ rotation, and the dual-era MCP protocol negotiation.
   before the client check, so a wrong-id request permanently killed a legitimate grant. Now
   validated before consumption; the token is restored for a correct retry.
 
-## Deferred (tracked, not addressed here)
+## Fixed in follow-up (verification & correctness)
 
-These are real but need larger design changes or are lower-impact; grouped for follow-up.
+- **Active-Response verification queries now use structured filters.** `check_blocked_ip`,
+  `check_agent_isolation`, and `check_user_status` built free-text `"X AND Y"` queries that route
+  through `simple_query_string` (where `AND` is a literal term with `default_operator=AND`) and so
+  reliably matched nothing — the verification layer for the state-changing tools reported false
+  negatives. Now they use `srcip`/`rule_groups`/`agent_id`/time-bounded filters. `check_agent_isolation`
+  no longer equates "disconnected" with "isolated" (Wazuh host-isolation keeps the manager link).
+- **`check_process`** queries the specific PID instead of paging the first 500 processes (a
+  still-running target beyond the page was reported killed) and surfaces the inventory scan time.
+- **`check_file_quarantine`** no longer false-positives on any path containing the substring
+  "quarantine"; it keys off a FIM deletion of the exact path.
+- **`get_sca_policy_checks` score** counts applicable checks only (was `passed/total`, so 50 passed
+  + 50 N/A read as 50%).
+- **`get_top_security_threats` ranking** no longer saturates — severity is weighted highest, so a
+  chatty level-3 rule no longer outranks a targeted level-15 attack.
+- **Tool descriptions** corrected where they overstated capability (`analyze_security_threat` is
+  local-alert correlation not "AI-powered"; `check_ioc_reputation` is local sightings not an
+  external feed; the "log collector stats" tool returns analysisd stats; `block` `duration` is
+  advisory, governed by the manager `<timeout>`).
+- **Redis session store no longer wiped on shutdown** — a single pod restart previously 404'd every
+  other instance's live sessions; TTL handles expiry.
+
+## Deferred (tracked, not addressed)
+
+These need larger design changes or are lower-impact; grouped for follow-up.
 
 - **MCP protocol semantics:** `/sse` does not emit the legacy `event: endpoint` frame a true
   2024-11-05 HTTP+SSE client expects; session handler state (capabilities/negotiated version) is
   not persisted after `initialize`; initialization is tracked but not enforced. Multi-worker
   deployments should prefer stateless modern `_meta` requests until session persistence lands.
-- **Redis session store:** shutdown `clear()` wipes the shared store (one pod restart 404s every
-  instance); `get()` returns a copy vs a live dict (write-through divergence vs in-memory);
-  `cleanup_expired` is a no-op. Redis mode is opt-in.
+- **Redis session store:** `get()` returns a copy vs a live dict (write-through divergence vs
+  in-memory); `cleanup_expired` is a no-op. Redis mode is opt-in.
 - **Active Response semantics:** `!host-isolation`/`!kill-process`/`!quarantine`/`!enable-account`
   are not stock Wazuh scripts — these tools require operator-deployed AR scripts (the zero-affected
-  guard fails safe, but descriptions overstate out-of-box capability); `duration` on block/firewall
-  is advisory only (expiry needs manager `<timeout>` config); the verification tools' free-text
-  `"X AND Y"` queries don't match under `simple_query_string`.
-- **Read-tool scoping/semantics:** `get_iso27001_dashboard`/`perform_risk_assessment` apply
-  `agent_id` only to part of their data; `get_top_security_threats` score saturates (chatty low-sev
-  rules outrank targeted high-sev); `get_sca_policy_checks` counts N/A checks in the denominator.
+  guard fails safe, and descriptions now note this).
+- **Read-tool scoping:** `get_iso27001_dashboard`/`perform_risk_assessment` apply `agent_id` only to
+  part of their data.
 - **Deploy:** `wazuh-mcp-server` is not yet published to PyPI (README `pip install` 404s until the
   `PUBLISH_PYPI` gate is enabled); the documented `--scale` command conflicts with `container_name`;
   Dockerfile pre-`FROM` ARGs leave OCI version/created labels empty; the healthcheck hardcodes
