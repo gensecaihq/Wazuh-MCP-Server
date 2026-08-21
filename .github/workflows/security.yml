@@ -163,7 +163,7 @@ jobs:
       # there is no diff (BASE == HEAD) and the action errors out; gitleaks below scans
       # the full git history on every event, so secret coverage is maintained.
       if: github.event_name == 'push' || github.event_name == 'pull_request'
-      uses: trufflesecurity/trufflehog@v3.96.0
+      uses: trufflesecurity/trufflehog@v3.97.0
       with:
         path: ./
         extra_args: --only-verified
