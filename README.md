@@ -145,10 +145,19 @@ docker pull ghcr.io/gensecaihq/wazuh-mcp-server:latest   # main branch
 docker pull ghcr.io/gensecaihq/wazuh-mcp-server:4.3.0    # pinned release
 ```
 
+Release tags carry no leading `v` (`4.3.0`, `4.3`). Releases after v4.3.0 also
+publish the `v`-prefixed alias (`v4.3.1`), so either form works from then on.
+
 ```bash
 docker run -d --name wazuh-mcp-server --env-file .env -p 3000:3000 \
   ghcr.io/gensecaihq/wazuh-mcp-server:latest
 ```
+
+No login is needed — the package is public. If a pull returns `unauthorized` or
+`denied`, that is a registry-side visibility problem on our end, not a missing
+credential: please [open an issue](https://github.com/gensecaihq/Wazuh-MCP-Server/issues/new)
+rather than creating a token. Building from source (`docker compose up -d`
+above) works in the meantime.
 
 ### Connect Claude Desktop
 
