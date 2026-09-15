@@ -159,6 +159,58 @@ class TestModernEra:
         assert resp.status_code == 200
         assert resp.json()["result"]["resultType"] == "complete"
 
+    @pytest.mark.asyncio
+    async def test_tools_call_result_carries_result_type(self):
+        params = {"name": "list_wazuh_clusters", "arguments": {}}
+        async with _client() as client:
+            resp = await client.post(
+                "/mcp",
+                json=modern_body("tools/call", params),
+                headers=modern_headers("tools/call", name="list_wazuh_clusters"),
+            )
+        assert resp.status_code == 200
+        assert resp.json()["result"]["resultType"] == "complete"
+
+    @pytest.mark.asyncio
+    async def test_modern_header_without_meta_is_not_downgraded_to_legacy(self):
+        # Previously served by the legacy handler: a session was minted and the result
+        # lacked resultType while MCP-Protocol-Version: 2026-07-28 was echoed back.
+        body = {"jsonrpc": "2.0", "id": 1, "method": "tools/list", "params": {}}
+        async with _client() as client:
+            resp = await client.post("/mcp", json=body, headers=modern_headers("tools/list"))
+        assert resp.status_code == 400
+        assert resp.json()["error"]["code"] == -32020
+        assert "mcp-session-id" not in {k.lower() for k in resp.headers}
+
+    @pytest.mark.asyncio
+    async def test_modern_batch_rejected(self):
+        async with _client() as client:
+            resp = await client.post("/mcp", json=[modern_body("tools/list")], headers=modern_headers("tools/list"))
+        assert resp.status_code == 400
+        assert resp.json()["error"]["code"] == -32600
+        assert "mcp-session-id" not in {k.lower() for k in resp.headers}
+
+    @pytest.mark.asyncio
+    async def test_modern_request_on_root_endpoint_served_statelessly(self):
+        async with _client() as client:
+            resp = await client.post("/", json=modern_body("tools/list"), headers=modern_headers("tools/list"))
+        assert resp.status_code == 200
+        assert resp.json()["result"]["resultType"] == "complete"
+        assert "mcp-session-id" not in {k.lower() for k in resp.headers}
+
+    @pytest.mark.asyncio
+    async def test_unknown_tool_reported_as_unknown_not_forbidden(self):
+        params = {"name": "no_such_tool", "arguments": {}}
+        async with _client() as client:
+            resp = await client.post(
+                "/mcp",
+                json=modern_body("tools/call", params),
+                headers=modern_headers("tools/call", name="no_such_tool"),
+            )
+        error = resp.json()["error"]
+        assert error["code"] == -32602
+        assert "Unknown tool" in error["message"]
+
 
 class TestLegacyEra:
     @pytest.mark.asyncio

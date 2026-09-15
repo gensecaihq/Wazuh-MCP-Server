@@ -2549,6 +2549,12 @@ async def handle_tools_call(params: Dict[str, Any], session: MCPSession) -> Dict
         raise ToolValidationError("cluster_id", "must be a string", "Use an id from list_wazuh_clusters")
     wazuh_client = cluster_registry.get(cluster_id)
 
+    # Reject unknown tools before the scope gate: every dispatchable tool is in one of the
+    # scope sets, and an unknown name would otherwise surface as a misleading
+    # "requires 'wazuh:write' scope" error (the scope lookup fails closed to write).
+    if tool_name not in READ_SCOPE_TOOLS and tool_name not in WRITE_SCOPE_TOOLS:
+        raise ValueError(f"Unknown tool: {tool_name}. Use 'tools/list' to see available tools.")
+
     # Scope enforcement: check if the token has the required scope for this tool.
     # If auth_token is missing (should not happen in normal flow), deny write tools by default.
     auth_token = getattr(session, "_auth_token", None)
@@ -3313,9 +3319,25 @@ def extract_modern_meta(body: Any) -> Optional[Dict[str, Any]]:
     return None
 
 
+def is_modern_request(body: Any, header_version: Optional[str]) -> bool:
+    """Decide whether a POST belongs on the modern (2026-07-28) stateless path.
+
+    Either signal is enough: a modern MCP-Protocol-Version header, or a modern
+    _meta protocol version in the body (including inside a batch). Keying on _meta
+    alone let a request carrying only the modern header fall through to the legacy
+    handler, which minted a session and returned a result without resultType while
+    echoing MCP-Protocol-Version: 2026-07-28 back to the client.
+    """
+    if header_version in MODERN_PROTOCOL_VERSIONS:
+        return True
+    if isinstance(body, list):
+        return any(extract_modern_meta(item) is not None for item in body)
+    return extract_modern_meta(body) is not None
+
+
 async def handle_modern_request(
-    body: Dict[str, Any],
-    meta: Dict[str, Any],
+    body: Any,
+    meta: Optional[Dict[str, Any]],
     request: Request,
     auth_token: Any,
     header_version: Optional[str],
@@ -3330,8 +3352,28 @@ async def handle_modern_request(
     metadata (MCP-Protocol-Version, Mcp-Method, Mcp-Name) is validated per the
     Streamable HTTP transport rules.
     """
+    # JSON-RPC batching does not exist in modern revisions
+    if not isinstance(body, dict):
+        return _modern_error_response(
+            None,
+            MCP_ERRORS["INVALID_REQUEST"],
+            "Batch requests are not supported by modern protocol revisions; send one request per POST",
+        )
+
     request_id = _normalize_jsonrpc_id(body.get("id"))
-    requested_version = meta.get(META_PROTOCOL_VERSION)
+    requested_version = meta.get(META_PROTOCOL_VERSION) if meta else None
+
+    # A modern header without the matching _meta is a header/body mismatch — never
+    # downgrade it to the legacy path
+    if requested_version is None:
+        return _modern_error_response(
+            request_id,
+            MCP_ERRORS["HEADER_MISMATCH"],
+            f"Header mismatch: MCP-Protocol-Version header {header_version!r} requires "
+            f"params._meta[{META_PROTOCOL_VERSION!r}] on every request",
+            headers={"MCP-Protocol-Version": str(header_version)},
+        )
+
     response_headers = {"MCP-Protocol-Version": str(requested_version)}
 
     if requested_version not in MODERN_PROTOCOL_VERSIONS:
@@ -3526,6 +3568,24 @@ async def mcp_endpoint(
         if not allowed:
             raise _rate_limited_response(retry_after)
 
+        # Parse POST bodies before touching sessions so modern (2026-07-28) requests
+        # take the same stateless path as on /mcp
+        body = None
+        if request.method == "POST":
+            try:
+                # Depth-capped parse: deep nesting raises RecursionError, not JSONDecodeError.
+                body = parse_json_body_safe(await request.body(), max_depth=MAX_JSON_DEPTH)
+            except (json.JSONDecodeError, ValueError):
+                return JSONResponse(
+                    content=create_error_response(None, MCP_ERRORS["PARSE_ERROR"], "Invalid JSON").dict(),
+                    status_code=400,
+                )
+            header_version = request.headers.get("mcp-protocol-version")
+            if is_modern_request(body, header_version):
+                return await handle_modern_request(
+                    body, extract_modern_meta(body), request, auth_token, header_version, origin
+                )
+
         # Session validation per MCP Streamable HTTP spec
         if mcp_session_id:
             existing_session = await sessions.get(mcp_session_id)
@@ -3578,17 +3638,8 @@ async def mcp_endpoint(
                     headers={"MCP-Session-Id": session.session_id, "Access-Control-Expose-Headers": "MCP-Session-Id"},
                 )
 
-        # Handle POST request (JSON-RPC)
+        # Handle POST request (JSON-RPC) — body already parsed above
         elif request.method == "POST":
-            try:
-                # Depth-capped parse: deep nesting raises RecursionError, not JSONDecodeError.
-                body = parse_json_body_safe(await request.body(), max_depth=MAX_JSON_DEPTH)
-            except (json.JSONDecodeError, ValueError):
-                return JSONResponse(
-                    content=create_error_response(None, MCP_ERRORS["PARSE_ERROR"], "Invalid JSON").dict(),
-                    status_code=400,
-                )
-
             # Handle batch requests
             if isinstance(body, list):
                 if not body:
@@ -3853,10 +3904,11 @@ async def mcp_streamable_http_endpoint(
                     content=create_error_response(None, MCP_ERRORS["PARSE_ERROR"], "Invalid JSON").dict(),
                     status_code=400,
                 )
-            modern_meta = extract_modern_meta(body)
-            if modern_meta is not None:
+            if is_modern_request(body, mcp_protocol_version):
                 # Modern era: no session is minted or echoed; Mcp-Session-Id is ignored
-                return await handle_modern_request(body, modern_meta, request, auth_token, mcp_protocol_version, origin)
+                return await handle_modern_request(
+                    body, extract_modern_meta(body), request, auth_token, mcp_protocol_version, origin
+                )
 
         # Legacy era — session validation per MCP Streamable HTTP spec:
         # If client provides session ID but session doesn't exist, return 404
@@ -4068,7 +4120,9 @@ async def health_check():
             "status": "healthy",
             "timestamp": datetime.now(timezone.utc).isoformat(),
             "version": __version__,
-            "mcp_protocol_version": MCP_PROTOCOL_VERSION,
+            # Latest revision served; the legacy value is only what initialize offers
+            "mcp_protocol_version": MODERN_PROTOCOL_VERSIONS[0],
+            "legacy_handshake_protocol_version": MCP_PROTOCOL_VERSION,
             "supported_protocol_versions": SUPPORTED_PROTOCOL_VERSIONS,
         },
         status_code=200,
@@ -4144,7 +4198,9 @@ async def readiness_check():
                 "status": overall_status,
                 "timestamp": datetime.now(timezone.utc).isoformat(),
                 "version": __version__,
-                "mcp_protocol_version": MCP_PROTOCOL_VERSION,
+                # Latest revision served; the legacy value is only what initialize offers
+                "mcp_protocol_version": MODERN_PROTOCOL_VERSIONS[0],
+                "legacy_handshake_protocol_version": MCP_PROTOCOL_VERSION,
                 "supported_protocol_versions": SUPPORTED_PROTOCOL_VERSIONS,
                 "transport": {
                     "streamable_http": "enabled",

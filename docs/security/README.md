@@ -304,7 +304,8 @@ curl http://localhost:3000/health
   "status": "healthy",
   "timestamp": "2026-08-08T12:00:00Z",
   "version": "4.3.0",
-  "mcp_protocol_version": "2025-11-25",
+  "mcp_protocol_version": "2026-07-28",
+  "legacy_handshake_protocol_version": "2025-11-25",
   "supported_protocol_versions": ["2026-07-28", "2025-11-25", "2025-06-18", "2025-03-26", "2024-11-05"]
 }
 ```
