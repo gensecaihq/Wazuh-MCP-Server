@@ -1,5 +1,6 @@
 """Configuration management for Wazuh MCP Server."""
 
+import logging
 import os
 from dataclasses import dataclass
 from typing import Optional
@@ -203,6 +204,22 @@ class ServerConfig:
     OAUTH_REFRESH_TOKEN_TTL: int = 86400  # 24 hours
     OAUTH_AUTHORIZATION_CODE_TTL: int = 600  # 10 minutes
 
+    # External OpenID Connect identity provider for AUTH_MODE=oauth. When set, users
+    # authenticate at the IdP (Microsoft Entra ID, Google Workspace, Okta, ...) before an
+    # authorization code is issued; without it /oauth/authorize auto-approves.
+    OAUTH_IDP_ISSUER: str = ""  # e.g. https://login.microsoftonline.com/<tenant-id>/v2.0
+    OAUTH_IDP_CLIENT_ID: str = ""
+    OAUTH_IDP_CLIENT_SECRET: str = ""  # optional (public client + PKCE if empty)
+    OAUTH_IDP_SCOPES: str = "openid email profile"
+    OAUTH_IDP_ALLOWED_DOMAINS: str = ""  # comma-separated; Google `hd` or e-mail domain
+    OAUTH_IDP_ALLOWED_TENANTS: str = ""  # comma-separated Entra tenant IDs (`tid` claim)
+    OAUTH_IDP_ALLOWED_USERS: str = ""  # comma-separated subjects/e-mails (optional allow-list)
+    OAUTH_IDP_GROUP_CLAIM: str = "groups"  # `groups` (Entra/Okta), `roles` (Entra app roles), ...
+    OAUTH_IDP_GROUP_SCOPE_MAP: str = ""  # JSON: {"<group>": "wazuh:read wazuh:write", ...}
+    OAUTH_IDP_DEFAULT_SCOPE: str = "wazuh:read"  # for users in no mapped group; "" denies them
+    OAUTH_IDP_SUBJECT_CLAIM: str = "email"  # claim used as the audited identity
+    OAUTH_IDP_LOGIN_TTL: int = 600  # seconds a parked /authorize request waits for the IdP
+
     # CORS settings
     ALLOWED_ORIGINS: str = "https://claude.ai,http://localhost:3000"
 
@@ -290,7 +307,7 @@ class ServerConfig:
         else:
             indexer_ssl = not indexer_host_raw.strip().lower().startswith("http://")
 
-        return cls(
+        config = cls(
             MCP_HOST=os.getenv("MCP_HOST", "0.0.0.0"),
             MCP_PORT=validate_port(os.getenv("MCP_PORT", "3000"), "MCP_PORT"),
             AUTH_SECRET_KEY=auth_secret,
@@ -308,6 +325,20 @@ class ServerConfig:
             ),
             OAUTH_AUTHORIZATION_CODE_TTL=validate_positive_int(
                 os.getenv("OAUTH_AUTHORIZATION_CODE_TTL", "600"), "OAUTH_AUTHORIZATION_CODE_TTL"
+            ),
+            OAUTH_IDP_ISSUER=os.getenv("OAUTH_IDP_ISSUER", "").strip().rstrip("/"),
+            OAUTH_IDP_CLIENT_ID=os.getenv("OAUTH_IDP_CLIENT_ID", "").strip(),
+            OAUTH_IDP_CLIENT_SECRET=os.getenv("OAUTH_IDP_CLIENT_SECRET", ""),
+            OAUTH_IDP_SCOPES=os.getenv("OAUTH_IDP_SCOPES", "openid email profile"),
+            OAUTH_IDP_ALLOWED_DOMAINS=os.getenv("OAUTH_IDP_ALLOWED_DOMAINS", ""),
+            OAUTH_IDP_ALLOWED_TENANTS=os.getenv("OAUTH_IDP_ALLOWED_TENANTS", ""),
+            OAUTH_IDP_ALLOWED_USERS=os.getenv("OAUTH_IDP_ALLOWED_USERS", ""),
+            OAUTH_IDP_GROUP_CLAIM=os.getenv("OAUTH_IDP_GROUP_CLAIM", "groups").strip() or "groups",
+            OAUTH_IDP_GROUP_SCOPE_MAP=os.getenv("OAUTH_IDP_GROUP_SCOPE_MAP", ""),
+            OAUTH_IDP_DEFAULT_SCOPE=os.getenv("OAUTH_IDP_DEFAULT_SCOPE", "wazuh:read"),
+            OAUTH_IDP_SUBJECT_CLAIM=os.getenv("OAUTH_IDP_SUBJECT_CLAIM", "email").strip() or "email",
+            OAUTH_IDP_LOGIN_TTL=validate_positive_int(
+                os.getenv("OAUTH_IDP_LOGIN_TTL", "600"), "OAUTH_IDP_LOGIN_TTL", max_val=3600
             ),
             ALLOWED_ORIGINS=os.getenv("ALLOWED_ORIGINS", "https://claude.ai,http://localhost:3000"),
             WAZUH_HOST=normalize_host(os.getenv("WAZUH_HOST", "")),
@@ -333,6 +364,23 @@ class ServerConfig:
             LOG_LEVEL=log_level,
             ENVIRONMENT=environment,
         )
+
+        # External identity provider (AUTH_MODE=oauth): fail fast on an unusable setup
+        # instead of serving 401s with the OAuth router never mounted.
+        if config.OAUTH_IDP_ISSUER:
+            from wazuh_mcp_server.oidc import validate_idp_settings
+
+            try:
+                validate_idp_settings(config)
+            except ValueError as exc:
+                raise ConfigurationError(str(exc)) from exc
+            if config.AUTH_MODE != "oauth":
+                logging.getLogger(__name__).warning(
+                    "OAUTH_IDP_* is configured but AUTH_MODE=%s; the identity provider is only used "
+                    "when AUTH_MODE=oauth",
+                    config.AUTH_MODE,
+                )
+        return config
 
     @property
     def is_authless(self) -> bool:

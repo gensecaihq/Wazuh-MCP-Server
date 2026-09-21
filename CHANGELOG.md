@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **OpenID Connect identity provider for OAuth mode** (`OAUTH_IDP_ISSUER`, `OAUTH_IDP_CLIENT_ID`, …): users now sign in at Microsoft Entra ID, Google Workspace, Okta, Keycloak or any OIDC provider before an authorization code is issued. `/oauth/authorize` parks the client request and redirects to the IdP (own PKCE S256 + nonce); the new `/oauth/callback` verifies the ID token (RS256 via JWKS, `iss`, `aud`, `nonce`, `exp`), applies tenant / domain / user allow-lists, maps `groups`/`roles` claims to Wazuh scopes (`OAUTH_IDP_GROUP_SCOPE_MAP`, intersected with the client's registered scope), and issues a code bound to the person. Access and refresh tokens carry that identity in `sub`, so audit logs and rate-limit buckets are per user (`oauth:alice@corp.example`) instead of per client.
+
+### Changed
+- **OAuth mode without an identity provider is now documented as unauthenticated**: with no `OAUTH_IDP_ISSUER`, `/oauth/authorize` auto-approves, so anyone who can reach the server obtains a token for the client's scope. Behaviour is unchanged for compatibility; the server logs a startup warning and the docs state that this mode must sit behind an authenticating proxy. A future major release will refuse to start in production without an IdP or an explicit opt-out.
+
 ### Fixed
 - **Missing `resultType` under MCP 2026-07-28** (#121): routing onto the modern stateless path keyed only on `params._meta`, so a request carrying `MCP-Protocol-Version: 2026-07-28` without that `_meta` fell through to the legacy handler — which minted a session and returned a result without `resultType` while echoing the modern version header. A modern header now always selects the modern path (missing `_meta` → `-32020`), modern batches are rejected with `-32600`, and `/` routes modern requests the same way as `/mcp`.
 - **Unknown tools reported as permission errors**: `tools/call` with a nonexistent tool name returned "requires 'wazuh:write' scope" because the scope lookup fails closed; it now returns "Unknown tool".

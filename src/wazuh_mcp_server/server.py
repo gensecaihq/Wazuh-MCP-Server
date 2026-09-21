@@ -168,10 +168,11 @@ async def _do_verify_authentication(authorization: Optional[str], config) -> Opt
                 # Return AuthToken with OAuth scopes (fail closed to read-only)
                 scope_str = getattr(token_obj, "scope", "") or ""
                 scopes = scope_str.split() if scope_str else ["wazuh:read"]
-                # Stable per-principal id for rate-limit bucketing: prefer the OAuth
-                # client_id, else the token subject, so distinct clients get distinct
-                # buckets instead of collapsing into one shared "oauth" bucket.
-                oauth_principal = getattr(token_obj, "client_id", None) or getattr(token_obj, "sub", None)
+                # Stable per-principal id for rate-limit bucketing and audit logs: the
+                # IdP-authenticated user when the login went through OAUTH_IDP_ISSUER,
+                # else the OAuth client_id, so distinct principals get distinct buckets
+                # instead of collapsing into one shared "oauth" bucket.
+                oauth_principal = getattr(token_obj, "subject", None) or getattr(token_obj, "client_id", None)
                 return AuthToken(
                     token=token,
                     api_key_id=f"oauth:{oauth_principal}" if oauth_principal else "oauth",
@@ -591,6 +592,10 @@ async def lifespan(app: FastAPI):
         auth_manager.cleanup_expired()
         auth_manager.tokens.clear()
         logger.info("Authentication tokens cleared")
+
+        # Release the identity-provider HTTP client (OAuth mode with OAUTH_IDP_ISSUER)
+        if _oauth_manager is not None and _oauth_manager.idp is not None:
+            await _oauth_manager.idp.aclose()
 
         # Do NOT clear the session store on shutdown. In-memory sessions vanish with the process
         # anyway, and a shared Redis store is the whole point of multi-instance deployments —

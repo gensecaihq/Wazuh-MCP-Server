@@ -62,10 +62,20 @@ AUTH_MODE=oauth docker compose up -d
 2. Automatically registers as a client (DCR)
 3. Handles authorization flow seamlessly
 
+**Who is allowed to log in?** By itself the server has no user database: `/oauth/authorize`
+approves every request, so it must sit behind an authenticating proxy or on a private
+network. To let people sign in with **Microsoft Entra ID, Google Workspace, Okta, Keycloak**
+or any OpenID Connect provider, set `OAUTH_IDP_ISSUER` / `OAUTH_IDP_CLIENT_ID` (see the
+[Configuration Guide](configuration.md#identity-provider-who-is-allowed-to-log-in)). The
+user is redirected to the IdP, the ID token is verified on `/oauth/callback`, group
+membership decides `wazuh:read` / `wazuh:write`, and the audit log records the person
+(`oauth:alice@corp.example`) instead of the client.
+
 **OAuth Endpoints:**
 - Discovery (authorization server): `/.well-known/oauth-authorization-server` (RFC 8414)
 - Discovery (protected resource): `/.well-known/oauth-protected-resource` (RFC 9728)
 - Authorization: `/oauth/authorize`
+- IdP return leg: `/oauth/callback` — only when `OAUTH_IDP_ISSUER` is set
 - Token: `/oauth/token`
 - Revocation: `/oauth/revoke` (RFC 7009)
 - Registration: `/oauth/register` — only when `OAUTH_ENABLE_DCR=true` (off by default)

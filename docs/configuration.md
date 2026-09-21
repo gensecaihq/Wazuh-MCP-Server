@@ -79,6 +79,47 @@ Scopes are **fail-closed**: a token with no scope claim is treated as read-only,
 
 OAuth requires **PKCE with `S256`**; authorization codes are single-use and refresh tokens rotate on every use.
 
+#### Identity provider (who is allowed to log in)
+
+Without an identity provider, `/oauth/authorize` **auto-approves**: anyone who can reach the
+server obtains a token for the client's scope. That is only acceptable behind an
+authenticating reverse proxy or on a private network. Point the server at an OpenID Connect
+provider and every login is authenticated there first; the access token then carries the
+person's identity (`sub`) into the audit log, and Wazuh scopes come from their groups.
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `OAUTH_IDP_ISSUER` | — | OIDC issuer, e.g. `https://login.microsoftonline.com/<tenant-id>/v2.0` or `https://accounts.google.com`. Enables the IdP flow |
+| `OAUTH_IDP_CLIENT_ID` | — | Client ID registered at the IdP for this server |
+| `OAUTH_IDP_CLIENT_SECRET` | — | Optional. Leave empty for a public client (PKCE is always used) |
+| `OAUTH_IDP_SCOPES` | `openid email profile` | Scopes requested from the IdP |
+| `OAUTH_IDP_ALLOWED_DOMAINS` | — | Comma-separated e-mail / Google Workspace (`hd`) domains admitted |
+| `OAUTH_IDP_ALLOWED_TENANTS` | — | Comma-separated Entra tenant IDs (`tid`). Required with a multi-tenant (`common`/`organizations`) issuer |
+| `OAUTH_IDP_ALLOWED_USERS` | — | Comma-separated e-mails/subjects. Optional explicit allow-list |
+| `OAUTH_IDP_GROUP_CLAIM` | `groups` | ID-token claim holding groups (`groups`) or app roles (`roles`) |
+| `OAUTH_IDP_GROUP_SCOPE_MAP` | — | JSON mapping group/role values to scopes, e.g. `{"soc-admins": "wazuh:read wazuh:write"}`. Entra's `groups` claim carries object IDs (GUIDs), so key on those or use app roles |
+| `OAUTH_IDP_DEFAULT_SCOPE` | `wazuh:read` | Scope for users in no mapped group. Set to empty to deny them |
+| `OAUTH_IDP_SUBJECT_CLAIM` | `email` | Claim used as the audited identity (`email`, `preferred_username`, `sub`) |
+| `OAUTH_IDP_LOGIN_TTL` | `600` | Seconds a parked `/authorize` request waits for the IdP |
+
+Register `<OAUTH_ISSUER_URL>/oauth/callback` (e.g. `https://mcp.example.com/oauth/callback`) as
+the redirect URI at the IdP and set `OAUTH_ISSUER_URL` explicitly. The granted scope is always the intersection of what the
+person's groups allow and what the OAuth client registered for, and `wazuh:write` is never
+granted implicitly.
+
+**Microsoft Entra ID**: app registration → *Authentication* → Web redirect URI above; *Token
+configuration* → add the `groups` claim (values are group **object IDs**), or define app roles
+and use `OAUTH_IDP_GROUP_CLAIM=roles` (readable names, and no 200-group "overage" limit — a
+user over that limit gets no `groups` claim and therefore only `OAUTH_IDP_DEFAULT_SCOPE`).
+Prefer the tenant-specific issuer; `common`/`organizations` are accepted only together with
+`OAUTH_IDP_ALLOWED_TENANTS`. Entra does not assert `email_verified`, so with
+`OAUTH_IDP_ALLOWED_DOMAINS` the tenant must also be allow-listed.
+
+**Google Workspace**: OAuth client (Web application) with the redirect URI above; set
+`OAUTH_IDP_ALLOWED_DOMAINS` to your Workspace domain (Google asserts it via `hd`). Google ID
+tokens carry no groups: use `OAUTH_IDP_ALLOWED_USERS` for write access, or keep the default
+read-only scope.
+
 ## Network, CORS & rate limiting
 
 | Variable | Default | Description |
