@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Security
+- **Authenticated memory-exhaustion via session state**: `initialize` (and the modern `_meta` path) stored the client's `capabilities`/`clientInfo` objects verbatim, a fresh session was minted for every POST without a session id, sessions lived 30 minutes and the in-memory store had no size limit — one read-only principal could push gigabytes into the process until the memory kill-switch returned 503 for everyone. Stored client metadata is now reduced to `clientInfo.{name,version,title}` (truncated) and capability names only, and the session store is bounded by `MAX_SESSIONS` (default 1000, expired first then least-recently-active eviction) and `MAX_SESSIONS_PER_PRINCIPAL` (default 100; a principal is an API key / OAuth client, and the cap is not applied to the shared authless principal). The check is a key count on the hot path; the full scan runs only near the bounds.
+
 ### Fixed
 - **Missing `resultType` under MCP 2026-07-28** (#121): routing onto the modern stateless path keyed only on `params._meta`, so a request carrying `MCP-Protocol-Version: 2026-07-28` without that `_meta` fell through to the legacy handler — which minted a session and returned a result without `resultType` while echoing the modern version header. A modern header now always selects the modern path (missing `_meta` → `-32020`), modern batches are rejected with `-32600`, and `/` routes modern requests the same way as `/mcp`.
 - **Unknown tools reported as permission errors**: `tools/call` with a nonexistent tool name returned "requires 'wazuh:write' scope" because the scope lookup fails closed; it now returns "Unknown tool".

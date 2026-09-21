@@ -227,6 +227,10 @@ class ServerConfig:
     MAX_CONNECTIONS: int = 10
     MAX_ALERTS_PER_QUERY: int = 1000
 
+    # Session store bounds (see server._enforce_session_bounds)
+    MAX_SESSIONS: int = 1000
+    MAX_SESSIONS_PER_PRINCIPAL: int = 100  # "principal" = API key / OAuth client, not a person
+
     # Logging
     LOG_LEVEL: str = "INFO"
 
@@ -329,6 +333,10 @@ class ServerConfig:
             MAX_CONNECTIONS=validate_positive_int(os.getenv("MAX_CONNECTIONS", "10"), "MAX_CONNECTIONS", max_val=100),
             MAX_ALERTS_PER_QUERY=validate_positive_int(
                 os.getenv("MAX_ALERTS_PER_QUERY", "1000"), "MAX_ALERTS_PER_QUERY", max_val=10000
+            ),
+            MAX_SESSIONS=validate_positive_int(os.getenv("MAX_SESSIONS", "1000"), "MAX_SESSIONS", max_val=100000),
+            MAX_SESSIONS_PER_PRINCIPAL=validate_positive_int(
+                os.getenv("MAX_SESSIONS_PER_PRINCIPAL", "100"), "MAX_SESSIONS_PER_PRINCIPAL", max_val=100000
             ),
             LOG_LEVEL=log_level,
             ENVIRONMENT=environment,

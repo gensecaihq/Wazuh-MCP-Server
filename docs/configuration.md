@@ -94,6 +94,8 @@ OAuth requires **PKCE with `S256`**; authorization codes are single-use and refr
 |----------|---------|-------------|
 | `REDIS_URL` | — | Redis URL for shared session storage across instances. Without it, sessions are in-memory (single-instance) |
 | `SESSION_TTL_SECONDS` | `1800` | Session inactivity timeout |
+| `MAX_SESSIONS` | `1000` | Upper bound on stored MCP sessions. Expired sessions are reclaimed first; beyond that the least recently active are evicted (clients simply re-initialize). With Redis, expiry is TTL-driven, so at the cap live sessions are evicted directly |
+| `MAX_SESSIONS_PER_PRINCIPAL` | `100` | Sessions one principal may hold at once (oldest evicted first). A principal is the API key or OAuth client, **not** a person: size it for the number of analysts sharing a key. Not applied in authless mode |
 
 ## Optional integrations
 

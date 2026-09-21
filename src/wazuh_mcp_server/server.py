@@ -252,6 +252,41 @@ class MCPError(BaseModel):
     data: Optional[Any] = Field(default=None, description="Additional error data")
 
 
+# Client-supplied metadata kept per session is bounded: only these clientInfo keys are
+# stored, each truncated, and capabilities are reduced to their top-level names. The
+# request body may be up to 1 MB and a fresh session is minted for every POST that lacks
+# a session id, so storing the raw objects let one authenticated principal push gigabytes
+# into the process (30 min TTL, ~100 req/min).
+_CLIENT_INFO_KEYS = ("name", "version", "title")
+_CLIENT_INFO_MAX_LEN = 128
+_CAPABILITIES_MAX_KEYS = 32
+MAX_SESSIONS = get_config().MAX_SESSIONS
+MAX_SESSIONS_PER_PRINCIPAL = get_config().MAX_SESSIONS_PER_PRINCIPAL
+# Principal ids that stand for "everyone" rather than one caller (authless mode, or an
+# OAuth token without client_id/sub). Capping those per principal would cap the whole
+# deployment and let one client evict its colleagues, so only the global bound applies.
+_SHARED_PRINCIPALS = frozenset({"authless", "oauth", "anon", "unknown"})
+
+
+def _bounded_client_info(raw: Any) -> Dict[str, str]:
+    """Copy of clientInfo keeping only _CLIENT_INFO_KEYS, each stringified and truncated to _CLIENT_INFO_MAX_LEN."""
+    if not isinstance(raw, dict):
+        return {}
+    out: Dict[str, str] = {}
+    for key in _CLIENT_INFO_KEYS:
+        value = raw.get(key)
+        if isinstance(value, (str, int, float)):
+            out[key] = str(value)[:_CLIENT_INFO_MAX_LEN]
+    return out
+
+
+def _bounded_capabilities(raw: Any) -> Dict[str, bool]:
+    """Top-level capability names only (bounded count), so stored sessions stay small."""
+    if not isinstance(raw, dict):
+        return {}
+    return {str(k)[:64]: True for k in list(raw.keys())[:_CAPABILITIES_MAX_KEYS]}
+
+
 class MCPSession:
     """MCP Session Management for Remote MCP Server."""
 
@@ -263,6 +298,8 @@ class MCPSession:
         self.capabilities = {}
         self.client_info = {}
         self.authenticated = False
+        # Principal that created the session (for the per-principal cap); set by the endpoints.
+        self.principal: Optional[str] = None
 
     def update_activity(self) -> None:
         """Update last activity timestamp."""
@@ -282,6 +319,7 @@ class MCPSession:
             "last_activity": self.last_activity.isoformat(),
             "capabilities": self.capabilities,
             "client_info": self.client_info,
+            "principal": self.principal,
             "authenticated": self.authenticated,
         }
 
@@ -303,8 +341,9 @@ class SessionManager:
         session = MCPSession(data["session_id"], data.get("origin"))
         session.created_at = datetime.fromisoformat(data["created_at"].replace("Z", "+00:00"))
         session.last_activity = datetime.fromisoformat(data["last_activity"].replace("Z", "+00:00"))
-        session.capabilities = data.get("capabilities", {})
-        session.client_info = data.get("client_info", {})
+        session.capabilities = _bounded_capabilities(data.get("capabilities", {}))
+        session.client_info = _bounded_client_info(data.get("client_info", {}))
+        session.principal = data.get("principal")
         session.authenticated = data.get("authenticated", False)
         return session
 
@@ -397,6 +436,10 @@ class SessionManager:
         """Remove expired sessions and return count."""
         return await self._store.cleanup_expired(timeout_minutes=timeout_minutes)
 
+    async def count(self) -> int:
+        """Number of stored sessions (cheap; no payload fetch)."""
+        return await self._store.count()
+
 
 # Initialize session manager with pluggable backend
 # Will use Redis if REDIS_URL is set, otherwise in-memory
@@ -407,7 +450,52 @@ sessions = SessionManager(_session_store)
 _last_session_cleanup: float = 0.0
 
 
-async def get_or_create_session(session_id: Optional[str], origin: Optional[str]) -> MCPSession:
+def _principal_of(auth_token: Any) -> Optional[str]:
+    """The api_key_id of an auth token (the session-bounding principal), or None when unauthenticated."""
+    return getattr(auth_token, "api_key_id", None) if auth_token is not None else None
+
+
+async def _enforce_session_bounds(principal: Optional[str]) -> None:
+    """Keep the session store bounded so a session-minting flood cannot exhaust memory.
+
+    Cheap path first: a key count. The full scan only runs once the store holds at
+    least MAX_SESSIONS_PER_PRINCIPAL entries (below that nobody can be over their cap)
+    or is at MAX_SESSIONS. Expired sessions are reclaimed first; if the store is still
+    full, the least recently active sessions are evicted (they only need to
+    re-initialize). The per-principal cap applies to real principals only (see
+    _SHARED_PRINCIPALS); "principal" is the API key / OAuth client, not a person.
+    """
+    total = await sessions.count()
+    per_principal = bool(principal) and principal not in _SHARED_PRINCIPALS
+    if total < MAX_SESSIONS and (not per_principal or total < MAX_SESSIONS_PER_PRINCIPAL):
+        return  # fast path: no bound can be exceeded by one more session
+
+    active = await sessions.get_all()
+    if per_principal:
+        mine = sorted(
+            (s for s in active.values() if getattr(s, "principal", None) == principal),
+            key=lambda s: s.last_activity,
+        )
+        excess = len(mine) - (MAX_SESSIONS_PER_PRINCIPAL - 1)
+        for victim in mine[: max(0, excess)]:
+            await sessions.remove(victim.session_id)
+            _initialized_sessions.pop(victim.session_id, None)
+            active.pop(victim.session_id, None)
+    if len(active) >= MAX_SESSIONS:
+        reclaimed = await sessions.cleanup_expired()
+        if reclaimed:
+            active = await sessions.get_all()
+    if len(active) >= MAX_SESSIONS:
+        oldest = sorted(active.values(), key=lambda s: s.last_activity)
+        for victim in oldest[: len(active) - MAX_SESSIONS + 1]:
+            await sessions.remove(victim.session_id)
+            _initialized_sessions.pop(victim.session_id, None)
+        logger.warning(f"Session store at MAX_SESSIONS={MAX_SESSIONS}; evicted least recently active sessions")
+
+
+async def get_or_create_session(
+    session_id: Optional[str], origin: Optional[str], principal: Optional[str] = None
+) -> MCPSession:
     """Get existing session or create new one."""
     global _last_session_cleanup
 
@@ -418,10 +506,13 @@ async def get_or_create_session(session_id: Optional[str], origin: Optional[str]
             await sessions.set(session_id, existing_session)
             return existing_session
 
+    await _enforce_session_bounds(principal)
+
     # Always generate server-side session IDs to prevent session fixation attacks.
     # Client-provided session IDs are only used to look up existing sessions above.
     new_session_id = str(uuid.uuid4())
     session = MCPSession(new_session_id, origin)
+    session.principal = principal
     await sessions.set(new_session_id, session)
     from wazuh_mcp_server.monitoring import record_session_event
 
@@ -1058,9 +1149,9 @@ async def handle_initialize(params: Dict[str, Any], session: MCPSession) -> Dict
     capabilities = params.get("capabilities", {})
     client_info = params.get("clientInfo", {})
 
-    # Store client information
-    session.capabilities = capabilities
-    session.client_info = client_info
+    # Store a bounded copy of the client information (see _bounded_client_info)
+    session.capabilities = _bounded_capabilities(capabilities)
+    session.client_info = _bounded_client_info(client_info)
 
     # Protocol version negotiation per MCP spec.
     # Only legacy revisions can be negotiated here — modern revisions (2026-07-28+)
@@ -3435,8 +3526,8 @@ async def handle_modern_request(
     session = MCPSession(f"stateless-{uuid.uuid4()}", origin)
     session.authenticated = True
     session._auth_token = auth_token
-    session.client_info = meta.get(META_CLIENT_INFO) or {}
-    session.capabilities = meta.get(META_CLIENT_CAPABILITIES) or {}
+    session.client_info = _bounded_client_info(meta.get(META_CLIENT_INFO))
+    session.capabilities = _bounded_capabilities(meta.get(META_CLIENT_CAPABILITIES))
 
     try:
         mcp_request = MCPRequest(**body)
@@ -3603,7 +3694,7 @@ async def mcp_endpoint(
             session.update_activity()
             await sessions.set(mcp_session_id, session)
         else:
-            session = await get_or_create_session(None, origin)
+            session = await get_or_create_session(None, origin, principal=_principal_of(auth_token))
 
         session._auth_token = auth_token  # Store token for scope checks in tool handlers
 
@@ -3811,7 +3902,7 @@ async def mcp_sse_endpoint(
         session.update_activity()
         await sessions.set(mcp_session_id, session)
     else:
-        session = await get_or_create_session(None, origin)
+        session = await get_or_create_session(None, origin, principal=_principal_of(auth_token))
     session.authenticated = True  # Mark as authenticated via bearer token
     session._auth_token = auth_token  # Store token for scope checks in tool handlers
 
@@ -3929,7 +4020,7 @@ async def mcp_streamable_http_endpoint(
             await sessions.set(mcp_session_id, session)
         else:
             # Create new session only if no session ID provided
-            session = await get_or_create_session(None, origin)
+            session = await get_or_create_session(None, origin, principal=_principal_of(auth_token))
 
         session.authenticated = True  # Mark as authenticated
         session._auth_token = auth_token  # Store token for scope checks in tool handlers

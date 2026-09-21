@@ -209,6 +209,7 @@ python -c "import secrets; print('wazuh_' + secrets.token_urlsafe(32))"
 | `ALLOWED_ORIGINS` | `https://claude.ai,...` | CORS origins (comma-separated) |
 | `TRUSTED_PROXIES` | — | Proxy IPs to trust for `X-Forwarded-For` (correct per-client rate limiting behind a proxy) |
 | `REDIS_URL` | — | Redis URL for multi-instance session storage |
+| `MAX_SESSIONS` / `MAX_SESSIONS_PER_PRINCIPAL` | `1000` / `100` | Session-store bounds (LRU eviction); a principal is an API key / OAuth client |
 | `RESPONSE_FORMAT` | `json` | Wire format for alert/event/vulnerability results: `json` or `gcf` (see below) |
 
 ### Response encoding (GCF)
