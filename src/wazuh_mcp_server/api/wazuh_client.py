@@ -2533,9 +2533,9 @@ class WazuhClient:
                 f"Allowed commands: {', '.join(sorted(self.ALLOWED_AR_COMMANDS))}"
             )
         args = []
+        if parameters is not None and not isinstance(parameters, dict):
+            raise ValueError("parameters must be an object of key/value pairs")
         if parameters:
-            if not isinstance(parameters, dict):
-                raise ValueError("parameters must be an object of key/value pairs")
             if command in self.IP_BLOCKING_AR_COMMANDS:
                 # The generic tool must not be a back door around the block_ip guard. The
                 # check is value-based: any parameter whose value parses as an IP address is
