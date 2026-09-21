@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Security
+- **Protected-target guard enforced on every IP-blocking active-response path**: `block_ip` refused loopback, the manager and `WAZUH_PROTECTED_IPS`, but `wazuh_firewall_drop`, `wazuh_host_deny` and the generic `wazuh_active_response` tool dispatched the same `!firewall-drop`/`!host-deny` commands without that check, and the `firewall_drop`/`host_deny`/`block_ip` handlers skipped the agent-000 (manager) guard (a fleet-wide `all_agents=true` block also includes the manager). A prompt-injected model with `wazuh:write` could therefore cut the SOC off from its own manager by picking the sibling tool. All four paths now share `_refuse_protected_target` (value-based for the generic tool, so `SrcIp`/`dstip`/whitespace variants are caught, and IPv4-mapped IPv6 spellings such as `::ffff:127.0.0.1` are unmapped first), and the three handlers — including `all_agents=true` — honour `WAZUH_ALLOW_MANAGER_AR` like the other host-level tools. `wazuh_active_response` also rejects a non-object `parameters` value instead of crashing.
+
 ### Fixed
 - **Missing `resultType` under MCP 2026-07-28** (#121): routing onto the modern stateless path keyed only on `params._meta`, so a request carrying `MCP-Protocol-Version: 2026-07-28` without that `_meta` fell through to the legacy handler — which minted a session and returned a result without `resultType` while echoing the modern version header. A modern header now always selects the modern path (missing `_meta` → `-32020`), modern batches are rejected with `-32600`, and `/` routes modern requests the same way as `/mcp`.
 - **Unknown tools reported as permission errors**: `tools/call` with a nonexistent tool name returned "requires 'wazuh:write' scope" because the scope lookup fails closed; it now returns "Unknown tool".

@@ -2414,10 +2414,28 @@ class WazuhClient:
     def _is_protected_target(self, ip_address: str) -> bool:
         """True if ip_address falls inside a protected network (must never be blocked)."""
         try:
-            addr = ipaddress.ip_address(ip_address)
+            addr = ipaddress.ip_address(str(ip_address).strip())
         except ValueError:
             return False
+        # ::ffff:127.0.0.1 is still 127.0.0.1 on the wire: compare the mapped IPv4 address.
+        mapped = getattr(addr, "ipv4_mapped", None)
+        if mapped is not None:
+            addr = mapped
         return any(addr in net for net in self._protected_networks)
+
+    # Active-response commands that block network reachability of a source IP. Every
+    # entry point that can dispatch one of these must run _refuse_protected_target so
+    # the guard cannot be sidestepped by picking a sibling tool.
+    IP_BLOCKING_AR_COMMANDS = frozenset({"!firewall-drop", "!host-deny"})
+
+    def _refuse_protected_target(self, ip_address: str, action: str) -> None:
+        """Raise if `action` would cut the SOC off from itself (loopback, the manager,
+        or anything on WAZUH_PROTECTED_IPS)."""
+        if self._is_protected_target(ip_address):
+            raise ValueError(
+                f"Refusing {action} on protected target {ip_address}: it is loopback, the Wazuh "
+                "manager, or on the WAZUH_PROTECTED_IPS denylist. Blocking it would be self-inflicted DoS."
+            )
 
     async def block_ip(
         self, ip_address: str, duration: int = 0, agent_id: str = None, all_agents: bool = False
@@ -2429,11 +2447,7 @@ class WazuhClient:
         "block <ip>" in a log line must not weaponize the whole fleet by omission.
         """
         ip_address = self._validate_ip(ip_address)
-        if self._is_protected_target(ip_address):
-            raise ValueError(
-                f"Refusing to block protected target {ip_address}: it is loopback, the Wazuh "
-                "manager, or on the WAZUH_PROTECTED_IPS denylist. Blocking it would be self-inflicted DoS."
-            )
+        self._refuse_protected_target(ip_address, "block_ip")
         if not agent_id and not all_agents:
             raise ValueError(
                 "block_ip requires an explicit target: pass agent_id for a single agent, or "
@@ -2520,13 +2534,27 @@ class WazuhClient:
             )
         args = []
         if parameters:
+            if not isinstance(parameters, dict):
+                raise ValueError("parameters must be an object of key/value pairs")
+            if command in self.IP_BLOCKING_AR_COMMANDS:
+                # The generic tool must not be a back door around the block_ip guard. The
+                # check is value-based: any parameter whose value parses as an IP address is
+                # tested, whatever the key is called (srcip, SrcIp, dstip, ...).
+                for value in parameters.values():
+                    candidate = str(value).strip()
+                    try:
+                        ipaddress.ip_address(candidate)
+                    except ValueError:
+                        continue
+                    self._refuse_protected_target(candidate, command)
             args = [self._sanitize_ar_argument(f"{k}={v}", f"parameter:{k}") for k, v in parameters.items()]
         data = {"command": command, "agent_list": [agent_id], "arguments": args}
         return await self.execute_active_response(data)
 
     async def firewall_drop(self, agent_id: str, src_ip: str, duration: int = 0) -> Dict[str, Any]:
-        """Add firewall drop rule via active response."""
+        """Add firewall drop rule via active response (same guard as block_ip)."""
         src_ip = self._validate_ip(src_ip, "src_ip")
+        self._refuse_protected_target(src_ip, "firewall_drop")
         src_ip = self._sanitize_ar_argument(src_ip, "src_ip")
         arguments = [f"-srcip {src_ip}"]
         if duration and duration > 0:
@@ -2540,8 +2568,9 @@ class WazuhClient:
         return await self.execute_active_response(data)
 
     async def host_deny(self, agent_id: str, src_ip: str) -> Dict[str, Any]:
-        """Add hosts.deny entry via active response."""
+        """Add hosts.deny entry via active response (same guard as block_ip)."""
         src_ip = self._validate_ip(src_ip, "src_ip")
+        self._refuse_protected_target(src_ip, "host_deny")
         src_ip = self._sanitize_ar_argument(src_ip, "src_ip")
         data = {
             "command": "!host-deny",
