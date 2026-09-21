@@ -102,6 +102,19 @@ OAuth requires **PKCE with `S256`**; authorization codes are single-use and refr
 | `WAZUH_CLUSTERS_FILE` | `./config/clusters.json` | Multi-cluster topology file. When present, tools accept an optional `cluster_id` and a `list_wazuh_clusters` tool appears (see the [Multi-Cluster Guide](MULTI_CLUSTER.md)). Absent → single-cluster from the env vars above |
 | `WAZUH_AR_FIREWALL_UNDO_COMMAND` | — | Operator-deployed active-response command that removes a firewall-drop block. Required for `wazuh_firewall_allow` — stock Wazuh cannot unblock via the API |
 | `WAZUH_AR_HOSTDENY_UNDO_COMMAND` | — | Same, for removing a hosts.deny block (`wazuh_host_allow`) |
+
+### Active-response guard-rails
+
+These exist because the caller is a language model whose tool arguments can be steered by attacker-controlled alert text (prompt injection). Each default errs on the side of refusing an action that would hurt the SOC itself; every one can be relaxed explicitly.
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `WAZUH_REQUIRE_ACTION_CONFIRMATION` | `true` in production, `false` otherwise | Write tools must be invoked with `confirm=true`. The model has to come back for it, which is its cue to ask a human first |
+| `WAZUH_PROTECTED_IPS` | — | Extra IPs/CIDRs that `block_ip`, `firewall_drop` and `host_deny` refuse to block (loopback and the Manager are always protected) |
+| `WAZUH_ALLOW_MANAGER_AR` | `false` | Allow host-level active response on agent `000` (the Manager) and `wazuh_restart target=manager` |
+| `WAZUH_ALLOW_FLEET_AR` | `false` | Allow `wazuh_block_ip` with `all_agents=true` (fan a block out to every agent) |
+| `WAZUH_QUARANTINE_DENY_PREFIXES` | `/etc`, `/boot`, `/bin`, `/sbin`, `/lib`, `/lib32`, `/lib64`, `/usr`, `/proc`, `/sys`, `/dev`, `/var/ossec`, `/var/lib`, `/private/etc`, `/private/var/ossec`, `/Library`, `/System`, `/Applications`, `C:\Windows`, `C:\Program Files`, `C:\Program Files (x86)` | `wazuh_quarantine_file` refuses paths under these literal prefixes (system and agent directories). Comma-separated; paths are normalised (`//`, `/./`) and compared case-insensitively |
+| `WAZUH_QUARANTINE_ALLOW_PREFIXES` | — | When set, `wazuh_quarantine_file` accepts *only* paths under these prefixes |
 | `YDC_API_KEY` | — | Optional You.com API key. Enables the `search_external_context` web-search tool |
 | `YDC_BASE_URL` | `https://ydc-index.io` | You.com Search API base URL |
 | `YDC_VERIFY_SSL` | `true` | Verify You.com TLS certificates |

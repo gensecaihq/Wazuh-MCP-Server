@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Security
+- **Guard-rails on destructive active-response tools** (all reachable by a prompt-injected model holding `wazuh:write`): the `confirm=true` gate is now on by default when `ENVIRONMENT=production` (explicit `WAZUH_REQUIRE_ACTION_CONFIRMATION` still wins); `wazuh_quarantine_file` refuses relative paths and anything under system/agent locations (`/etc`, `/boot`, `/usr`, `/var/ossec`, `C:\Windows`, … — `WAZUH_QUARANTINE_DENY_PREFIXES` / `WAZUH_QUARANTINE_ALLOW_PREFIXES`); `wazuh_restart target=manager` requires `WAZUH_ALLOW_MANAGER_AR=true` like the other Manager-targeting actions; and `wazuh_block_ip all_agents=true` requires the new `WAZUH_ALLOW_FLEET_AR=true`. **Upgrade note**: production deployments that relied on unconfirmed write tools, Manager restarts or fleet-wide blocks must set the corresponding variable.
+
 ### Fixed
 - **Missing `resultType` under MCP 2026-07-28** (#121): routing onto the modern stateless path keyed only on `params._meta`, so a request carrying `MCP-Protocol-Version: 2026-07-28` without that `_meta` fell through to the legacy handler — which minted a session and returned a result without `resultType` while echoing the modern version header. A modern header now always selects the modern path (missing `_meta` → `-32020`), modern batches are rejected with `-32600`, and `/` routes modern requests the same way as `/mcp`.
 - **Unknown tools reported as permission errors**: `tools/call` with a nonexistent tool name returned "requires 'wazuh:write' scope" because the scope lookup fails closed; it now returns "Unknown tool".
