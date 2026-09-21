@@ -122,8 +122,8 @@ server itself honors are for its **outbound** connections to Wazuh:
 ```bash
 # .env — outbound TLS to the Wazuh Manager / Indexer
 WAZUH_VERIFY_SSL=true            # verify the Manager cert (default: true)
-WAZUH_ALLOW_SELF_SIGNED=false    # default: true (accepts Wazuh's stock self-signed certs);
-                                 # set false in production with a proper CA
+WAZUH_CA_BUNDLE=/etc/wazuh-mcp/root-ca.pem   # trust stock self-signed Wazuh certs WITHOUT disabling verification
+WAZUH_ALLOW_SELF_SIGNED=false    # default: false. true == no verification at all (dev only)
 WAZUH_INDEXER_VERIFY_SSL=true    # verify the Indexer cert (default: true)
 WAZUH_INDEXER_SSL=true           # use HTTPS to the Indexer
 ```

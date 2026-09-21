@@ -736,7 +736,7 @@ class WazuhClient:
                 logger.error(f"SSL certificate validation failed for {self.config.wazuh_host}")
                 raise ConnectionError(
                     f"SSL certificate validation failed for {self.config.wazuh_host}. "
-                    "Set WAZUH_VERIFY_SSL=false for self-signed certificates."
+                    "Export the Manager's CA (or its self-signed certificate) and point WAZUH_CA_BUNDLE at it."
                 )
             # Let other connection errors propagate for retry logic
             logger.error(f"Lost connection to Wazuh server at {self.config.wazuh_host}")

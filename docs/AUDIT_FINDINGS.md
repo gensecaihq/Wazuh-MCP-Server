@@ -54,7 +54,9 @@ rotation, and the dual-era MCP protocol negotiation.
   `WAZUH_INDEXER_SSL=1` sent credentials over plain HTTP). A shared strict `env_bool` now accepts
   `1/true/yes/on` and raises on garbage.
 - **`WAZUH_ALLOW_SELF_SIGNED` was a no-op.** Documented but never plumbed into the client. Now
-  wired: effective verify = `WAZUH_VERIFY_SSL and not WAZUH_ALLOW_SELF_SIGNED`.
+  wired: effective verify = `WAZUH_VERIFY_SSL and not WAZUH_ALLOW_SELF_SIGNED`. Its default was
+  later changed to `false` (it silently disabled verification for every default deployment);
+  `WAZUH_CA_BUNDLE` is the supported way to trust stock self-signed certificates.
 
 ### Correctness (Wazuh clients)
 - **Alert totals capped at 10,000.** Document searches lacked `track_total_hits`, so summary/KPI

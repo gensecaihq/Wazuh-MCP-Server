@@ -117,18 +117,26 @@ def _cluster_config(entry: Dict[str, Any]) -> WazuhConfig:
         if not resolved.get(key):
             raise ValueError(f"cluster '{entry.get('id', '?')}' is missing required field '{key}'")
 
+    # A CA bundle keeps verification ON for stock self-signed certificates: per-entry
+    # "ca_bundle" wins, else the global WAZUH_CA_BUNDLE. verify_ssl=false still disables.
+    ca_bundle = str(resolved.get("ca_bundle") or os.getenv("WAZUH_CA_BUNDLE", "")).strip()
+    if ca_bundle and not os.path.isfile(ca_bundle):
+        raise ValueError(f"cluster '{entry.get('id', '?')}': ca_bundle file does not exist: {ca_bundle}")
+    verify_manager = _as_bool(resolved.get("verify_ssl"), True)
+    verify_indexer = _as_bool(resolved.get("indexer_verify_ssl"), True)
+
     return WazuhConfig(
         wazuh_host=resolved["wazuh_host"],
         wazuh_user=resolved["wazuh_user"],
         wazuh_pass=resolved["wazuh_pass"],
         wazuh_port=int(resolved.get("wazuh_port", 55000)),
-        verify_ssl=_as_bool(resolved.get("verify_ssl"), True),
+        verify_ssl=(ca_bundle or True) if verify_manager else False,
         wazuh_indexer_host=resolved.get("indexer_host"),
         wazuh_indexer_port=int(resolved.get("indexer_port", 9200)),
         wazuh_indexer_user=resolved.get("indexer_user"),
         wazuh_indexer_pass=resolved.get("indexer_pass"),
         wazuh_indexer_ssl=_as_bool(resolved.get("indexer_ssl"), True),
-        wazuh_indexer_verify_ssl=_as_bool(resolved.get("indexer_verify_ssl"), True),
+        wazuh_indexer_verify_ssl=(ca_bundle or True) if verify_indexer else False,
         request_timeout_seconds=int(resolved.get("request_timeout_seconds", 30)),
     )
 

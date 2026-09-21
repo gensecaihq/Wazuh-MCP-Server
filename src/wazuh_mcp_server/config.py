@@ -1,8 +1,9 @@
 """Configuration management for Wazuh MCP Server."""
 
+import logging
 import os
 from dataclasses import dataclass
-from typing import Optional
+from typing import Optional, Union
 
 
 class ConfigurationError(Exception):
@@ -90,7 +91,7 @@ class WazuhConfig:
 
     # Optional settings with sensible defaults
     wazuh_port: int = 55000
-    verify_ssl: bool = True
+    verify_ssl: Union[bool, str] = True  # httpx `verify`: bool or path to a CA bundle
 
     # Indexer settings (optional)
     wazuh_indexer_host: Optional[str] = None
@@ -98,7 +99,7 @@ class WazuhConfig:
     wazuh_indexer_user: Optional[str] = None
     wazuh_indexer_pass: Optional[str] = None
     wazuh_indexer_ssl: bool = True  # Use HTTPS for the indexer (set False for plain-HTTP OpenSearch nodes)
-    wazuh_indexer_verify_ssl: bool = True  # Verify the indexer's TLS certificate
+    wazuh_indexer_verify_ssl: Union[bool, str] = True  # Verify the indexer's TLS certificate (bool or CA path)
 
     # Transport settings
     mcp_transport: str = "http"  # Default to HTTP/SSE mode
@@ -212,7 +213,11 @@ class ServerConfig:
     WAZUH_PASS: str = ""
     WAZUH_PORT: int = 55000
     WAZUH_VERIFY_SSL: bool = True
-    WAZUH_ALLOW_SELF_SIGNED: bool = True
+    # Accepting a self-signed certificate == not verifying at all (httpx has no middle
+    # ground), so this is OFF by default. To trust a private CA or a self-signed
+    # certificate *safely*, point WAZUH_CA_BUNDLE at its PEM file instead.
+    WAZUH_ALLOW_SELF_SIGNED: bool = False
+    WAZUH_CA_BUNDLE: str = ""  # PEM file used to verify the Manager (and Indexer) certificate
 
     # Wazuh Indexer settings (Required for Wazuh 4.8.0+ vulnerability tools)
     WAZUH_INDEXER_HOST: str = ""
@@ -277,6 +282,18 @@ class ServerConfig:
                     "Generate one with: openssl rand -hex 32"
                 )
 
+        # Optional CA bundle for the Wazuh Manager / Indexer certificates. Fail fast on a
+        # bad path: silently falling back would either break every request or, worse,
+        # tempt operators into WAZUH_ALLOW_SELF_SIGNED=true.
+        ca_bundle = os.getenv("WAZUH_CA_BUNDLE", "").strip()
+        if ca_bundle and not os.path.isfile(ca_bundle):
+            raise ConfigurationError(f"WAZUH_CA_BUNDLE points to a file that does not exist: {ca_bundle}")
+        if ca_bundle and (not env_bool("WAZUH_VERIFY_SSL", True) or env_bool("WAZUH_ALLOW_SELF_SIGNED", False)):
+            logging.getLogger(__name__).warning(
+                "WAZUH_CA_BUNDLE is set but certificate verification is disabled "
+                "(WAZUH_VERIFY_SSL=false or WAZUH_ALLOW_SELF_SIGNED=true): the bundle is ignored."
+            )
+
         # Validate log level
         log_level = os.getenv("LOG_LEVEL", "INFO").upper()
         if log_level not in ("DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"):
@@ -315,7 +332,8 @@ class ServerConfig:
             WAZUH_PASS=os.getenv("WAZUH_PASS", ""),
             WAZUH_PORT=validate_port(os.getenv("WAZUH_PORT", "55000"), "WAZUH_PORT"),
             WAZUH_VERIFY_SSL=env_bool("WAZUH_VERIFY_SSL", True),
-            WAZUH_ALLOW_SELF_SIGNED=env_bool("WAZUH_ALLOW_SELF_SIGNED", True),
+            WAZUH_ALLOW_SELF_SIGNED=env_bool("WAZUH_ALLOW_SELF_SIGNED", False),
+            WAZUH_CA_BUNDLE=ca_bundle,
             # Wazuh Indexer settings (for vulnerability tools in Wazuh 4.8.0+)
             WAZUH_INDEXER_HOST=normalize_host(indexer_host_raw),
             WAZUH_INDEXER_PORT=validate_port(os.getenv("WAZUH_INDEXER_PORT", "9200"), "WAZUH_INDEXER_PORT"),
@@ -333,6 +351,30 @@ class ServerConfig:
             LOG_LEVEL=log_level,
             ENVIRONMENT=environment,
         )
+
+    @property
+    def wazuh_tls_verify(self) -> Union[bool, str]:
+        """Effective httpx ``verify`` value for the Wazuh Manager connection.
+
+        ``False`` disables certificate verification entirely (WAZUH_VERIFY_SSL=false or
+        WAZUH_ALLOW_SELF_SIGNED=true); a path means "verify against this CA bundle";
+        ``True`` means the system trust store.
+        """
+        if not self.WAZUH_VERIFY_SSL or self.WAZUH_ALLOW_SELF_SIGNED:
+            return False
+        return self.WAZUH_CA_BUNDLE or True
+
+    @property
+    def wazuh_indexer_tls_verify(self) -> Union[bool, str]:
+        """Effective httpx ``verify`` value for the Wazuh Indexer connection."""
+        if not self.WAZUH_INDEXER_VERIFY_SSL:
+            return False
+        return self.WAZUH_CA_BUNDLE or True
+
+    @property
+    def wazuh_tls_verification_disabled(self) -> bool:
+        """True when certificate verification is off for the Manager."""
+        return self.wazuh_tls_verify is False
 
     @property
     def is_authless(self) -> bool:

@@ -199,6 +199,7 @@ python -c "import secrets; print('wazuh_' + secrets.token_urlsafe(32))"
 | `ENVIRONMENT` | `development` | `production` enforces stricter checks (see below) |
 | `WAZUH_PORT` | `55000` | Manager API port |
 | `WAZUH_VERIFY_SSL` | `true` | Verify the Manager's TLS certificate |
+| `WAZUH_CA_BUNDLE` | — | PEM file used to verify the Manager/Indexer certificates (keeps verification on with stock self-signed Wazuh certs) |
 | `MCP_HOST` | `0.0.0.0` | Server bind address |
 | `MCP_PORT` | `3000` | Server port |
 | `AUTH_MODE` | `bearer` | `oauth`, `bearer`, or `none` |

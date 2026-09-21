@@ -640,26 +640,34 @@ app = FastAPI(
 config = get_config()
 
 # Create Wazuh configuration from server config.
-# WAZUH_ALLOW_SELF_SIGNED is a documented control ("set false in production with a proper CA")
-# but was never plumbed into the client, making it a no-op. Wire it in: httpx has no
-# "verify-but-accept-self-signed" middle ground, so accepting self-signed == not verifying.
-# effective verify = WAZUH_VERIFY_SSL AND NOT WAZUH_ALLOW_SELF_SIGNED. With the shipped defaults
-# (verify=true, allow_self_signed=true) this yields verify=false, matching stock Wazuh's
-# self-signed certs out of the box; setting WAZUH_ALLOW_SELF_SIGNED=false enforces strict verify.
-_wazuh_verify_ssl = config.WAZUH_VERIFY_SSL and not config.WAZUH_ALLOW_SELF_SIGNED
+# Effective TLS verification is computed in ServerConfig (wazuh_tls_verify): httpx has no
+# "verify-but-accept-self-signed" middle ground, so WAZUH_ALLOW_SELF_SIGNED=true means
+# no verification at all. The supported way to trust a private CA or a self-signed
+# Manager certificate is WAZUH_CA_BUNDLE. The API password is sent with HTTP Basic on
+# every (re)authentication, so an unverified channel exposes it to any on-path attacker.
+if config.wazuh_tls_verification_disabled:
+    _tls_msg = (
+        "TLS certificate verification for the Wazuh Manager is DISABLED "
+        "(WAZUH_VERIFY_SSL=false or WAZUH_ALLOW_SELF_SIGNED=true). The API credentials travel "
+        "over an unauthenticated channel. Export the Manager's CA and set WAZUH_CA_BUNDLE instead."
+    )
+    if config.ENVIRONMENT == "production":
+        logger.error("🔓 " + _tls_msg)
+    else:
+        logger.warning("🔓 " + _tls_msg)
 wazuh_config = WazuhConfig(
     wazuh_host=config.WAZUH_HOST,
     wazuh_user=config.WAZUH_USER,
     wazuh_pass=config.WAZUH_PASS,
     wazuh_port=config.WAZUH_PORT,
-    verify_ssl=_wazuh_verify_ssl,
+    verify_ssl=config.wazuh_tls_verify,
     # Wazuh Indexer settings (required for vulnerability tools in Wazuh 4.8.0+)
     wazuh_indexer_host=config.WAZUH_INDEXER_HOST if config.WAZUH_INDEXER_HOST else None,
     wazuh_indexer_port=config.WAZUH_INDEXER_PORT,
     wazuh_indexer_user=config.WAZUH_INDEXER_USER if config.WAZUH_INDEXER_USER else None,
     wazuh_indexer_pass=config.WAZUH_INDEXER_PASS if config.WAZUH_INDEXER_PASS else None,
     wazuh_indexer_ssl=config.WAZUH_INDEXER_SSL,
-    wazuh_indexer_verify_ssl=config.WAZUH_INDEXER_VERIFY_SSL,
+    wazuh_indexer_verify_ssl=config.wazuh_indexer_tls_verify,
     request_timeout_seconds=config.REQUEST_TIMEOUT_SECONDS,
     max_connections=config.MAX_CONNECTIONS,
     max_alerts_per_query=config.MAX_ALERTS_PER_QUERY,

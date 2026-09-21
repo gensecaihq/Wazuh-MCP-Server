@@ -10,7 +10,7 @@ Wazuh stores alerts and vulnerability data in the Wazuh Indexer
 import asyncio
 import json
 import logging
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Union
 
 import httpx
 from tenacity import retry, retry_if_exception_type, stop_after_attempt, wait_exponential
@@ -35,7 +35,7 @@ class WazuhIndexerClient:
         port: int = 9200,
         username: Optional[str] = None,
         password: Optional[str] = None,
-        verify_ssl: bool = True,
+        verify_ssl: Union[bool, str] = True,
         timeout: int = 30,
         use_ssl: bool = True,
         ccs_prefix: str = "",

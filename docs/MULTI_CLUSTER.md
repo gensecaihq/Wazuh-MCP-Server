@@ -57,6 +57,7 @@ cp config/clusters.json.example config/clusters.json
 | `wazuh_host` / `wazuh_user` / `wazuh_pass` | ✅ | Manager API connection |
 | `wazuh_port` | | Manager API port (default `55000`) |
 | `verify_ssl` | | Verify the Manager TLS cert (default `true`) |
+| `ca_bundle` | | PEM file used to verify this cluster's Manager/Indexer certificates (defaults to the global `WAZUH_CA_BUNDLE`) |
 | `indexer_host` / `indexer_user` / `indexer_pass` | | Indexer connection (required for alert/vulnerability tools on this cluster) |
 | `indexer_port` / `indexer_ssl` / `indexer_verify_ssl` | | Indexer options (defaults `9200` / `true` / `true`) |
 | `ccs_prefix` | | OpenSearch Cross-Cluster Search remote name (see below) |

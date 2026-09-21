@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Security
+- **TLS verification to the Wazuh Manager was silently off by default**: `WAZUH_ALLOW_SELF_SIGNED` defaulted to `true`, and since accepting a self-signed certificate means not verifying at all, the httpx client was built with `verify=False` even with the documented `WAZUH_VERIFY_SSL=true` — the API credentials (HTTP Basic on every re-authentication) travelled over an unauthenticated channel. The default is now `false`; a new `WAZUH_CA_BUNDLE` (PEM path, validated at startup, applied to Manager and Indexer) is the supported way to trust stock self-signed Wazuh certificates, and the server logs an error (production) or warning when verification is disabled. **Upgrade note**: deployments that relied on the old default must either set `WAZUH_CA_BUNDLE` (recommended) or explicitly set `WAZUH_ALLOW_SELF_SIGNED=true`.
+
 ### Fixed
 - **Missing `resultType` under MCP 2026-07-28** (#121): routing onto the modern stateless path keyed only on `params._meta`, so a request carrying `MCP-Protocol-Version: 2026-07-28` without that `_meta` fell through to the legacy handler — which minted a session and returned a result without `resultType` while echoing the modern version header. A modern header now always selects the modern path (missing `_meta` → `-32020`), modern batches are rejected with `-32600`, and `/` routes modern requests the same way as `/mcp`.
 - **Unknown tools reported as permission errors**: `tools/call` with a nonexistent tool name returned "requires 'wazuh:write' scope" because the scope lookup fails closed; it now returns "Unknown tool".

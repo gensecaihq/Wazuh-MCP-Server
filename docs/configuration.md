@@ -37,8 +37,9 @@ The Manager API is always reached over HTTPS on `WAZUH_PORT` (it is TLS-only).
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `WAZUH_PORT` | `55000` | Manager API port |
-| `WAZUH_VERIFY_SSL` | `true` | Verify the Manager's TLS certificate. Set `false` only for self-signed certs in development |
-| `WAZUH_ALLOW_SELF_SIGNED` | `true` | Accept self-signed Manager certificates (Wazuh ships with them by default). Set `false` in production with a proper CA |
+| `WAZUH_VERIFY_SSL` | `true` | Verify the Manager's TLS certificate. Set `false` only in development |
+| `WAZUH_CA_BUNDLE` | — | Absolute path to a PEM file (CA or the Manager's own self-signed certificate) used to verify the Manager and Indexer certificates, including multi-cluster entries (a per-cluster `ca_bundle` overrides it). The supported way to keep verification **on** with stock Wazuh certificates: `WAZUH_CA_BUNDLE=/etc/wazuh-mcp/root-ca.pem` |
+| `WAZUH_ALLOW_SELF_SIGNED` | `false` | Accept *any* certificate: httpx has no "verify but accept self-signed" mode, so this equals `WAZUH_VERIFY_SSL=false`. Development only; the server logs an error at startup in production when verification is off |
 
 ## Wazuh Indexer
 
@@ -151,7 +152,7 @@ ENVIRONMENT=development
 WAZUH_HOST=dev-wazuh.internal
 WAZUH_USER=dev-user
 WAZUH_PASS=dev-password
-WAZUH_VERIFY_SSL=false           # self-signed dev certs
+WAZUH_ALLOW_SELF_SIGNED=true     # dev only: accepts any certificate
 LOG_LEVEL=DEBUG
 # AUTH_SECRET_KEY / MCP_API_KEY auto-generated and printed on startup
 ```
@@ -163,6 +164,7 @@ WAZUH_HOST=wazuh.company.com
 WAZUH_USER=mcp-service-account
 WAZUH_PASS=very-secure-password
 WAZUH_VERIFY_SSL=true
+WAZUH_CA_BUNDLE=/etc/wazuh-mcp/root-ca.pem   # the CA that signed the Manager/Indexer certs (mount it read-only)
 
 AUTH_MODE=bearer
 AUTH_SECRET_KEY=<openssl rand -hex 32, identical on every instance>
