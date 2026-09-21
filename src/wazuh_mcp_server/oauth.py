@@ -82,6 +82,7 @@ class AuthorizationCode:
     subject: Optional[str] = None
 
     def is_expired(self) -> bool:
+        """True once the code is older than OAUTH_AUTHORIZATION_CODE_TTL."""
         return datetime.now(timezone.utc) > self.expires_at
 
 
@@ -99,6 +100,7 @@ class OAuthToken:
     subject: Optional[str] = None
 
     def is_expired(self) -> bool:
+        """True once the token's TTL has elapsed."""
         return datetime.now(timezone.utc) > self.expires_at
 
 
@@ -118,6 +120,7 @@ class PendingLogin:
     expires_at: datetime
 
     def is_expired(self) -> bool:
+        """True once the user took longer than OAUTH_IDP_LOGIN_TTL to come back from the IdP."""
         return datetime.now(timezone.utc) > self.expires_at
 
 
@@ -125,6 +128,7 @@ class OAuthManager:
     """Manage OAuth 2.0 authentication with DCR support."""
 
     def __init__(self, config, idp: Optional[OIDCProvider] = None):
+        """Build the authorization server; `idp` overrides the provider built from config (tests)."""
         self.config = config
         self.secret_key = config.AUTH_SECRET_KEY
         self.clients: Dict[str, OAuthClient] = {}
@@ -814,6 +818,7 @@ def create_oauth_router(oauth_manager: OAuthManager) -> APIRouter:
             )
 
         def _deny(err: str, description: str) -> RedirectResponse:
+            """Send the MCP client an OAuth error redirect (with its own state), never IdP text."""
             params = {"error": err, "error_description": description}
             if pending.state:
                 params["state"] = pending.state
@@ -872,6 +877,7 @@ def create_oauth_router(oauth_manager: OAuthManager) -> APIRouter:
         code_challenge_method: Optional[str],
         subject: Optional[str],
     ) -> RedirectResponse:
+        """Mint the MCP authorization code and redirect the client back with code, state and iss."""
         try:
             code = oauth_manager.create_authorization_code(
                 client_id=client_id,

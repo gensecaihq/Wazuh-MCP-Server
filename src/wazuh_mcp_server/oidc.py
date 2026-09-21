@@ -44,6 +44,7 @@ class IdentityDenied(Exception):
     """The IdP authenticated the user, but this server's policy does not admit them."""
 
     def __init__(self, reason: str) -> None:
+        """Record the (log-only) policy reason; it is never sent back to the client."""
         super().__init__(reason)
         self.reason = reason
 
@@ -62,6 +63,8 @@ class Identity:
 
 
 class _JWKSCache:
+    """Cache of the IdP's RSA signing keys, refreshed at most once per `min_refresh_seconds`."""
+
     def __init__(
         self,
         client: httpx.AsyncClient,
@@ -69,6 +72,7 @@ class _JWKSCache:
         cache_seconds: int = 3600,
         min_refresh_seconds: int = 60,
     ) -> None:
+        """Bind the cache to the shared HTTP client; the JWKS URL arrives after discovery."""
         self._client = client
         self._url: Optional[str] = None
         self._cache_seconds = cache_seconds
@@ -79,9 +83,11 @@ class _JWKSCache:
         self._lock = asyncio.Lock()
 
     def set_url(self, url: str) -> None:
+        """Set the `jwks_uri` learned from OpenID discovery."""
         self._url = url
 
     async def _refresh(self, force: bool) -> None:
+        """Fetch the JWKS document (throttled) and replace the cached key set."""
         async with self._lock:
             now = time.monotonic()
             if self._keys and not force and (now - self._fetched_at) < self._cache_seconds:
@@ -101,7 +107,10 @@ class _JWKSCache:
                     continue
                 try:
                     keys[entry["kid"]] = PyJWK(entry, algorithm="RS256")
-                except PyJWTError as e:  # one malformed entry must not take every login down
+                except (PyJWTError, ValueError, TypeError) as e:
+                    # PyJWK raises InvalidKeyError for bad base64/shape, but a wrong type in
+                    # `n`/`e` surfaces as TypeError/ValueError. One malformed entry must not
+                    # take every login down: skip it and keep the good keys.
                     logger.warning(f"Skipping malformed JWKS entry kid={entry.get('kid')!r}: {type(e).__name__}")
             if not keys:
                 raise IdPError("JWKS document contained no usable RSA signing keys")
@@ -109,6 +118,7 @@ class _JWKSCache:
             self._fetched_at = time.monotonic()
 
     async def get_key(self, kid: str) -> Optional[PyJWK]:
+        """Return the key for `kid`, refreshing on a miss; serves stale keys if the IdP is down."""
         try:
             if not self._keys or (time.monotonic() - self._fetched_at) >= self._cache_seconds:
                 await self._refresh(force=False)
@@ -128,6 +138,7 @@ class OIDCProvider:
     """Thin OpenID Connect relying-party client used by the authorization endpoint."""
 
     def __init__(self, config, transport: Optional[httpx.AsyncBaseTransport] = None) -> None:
+        """Read the OAUTH_IDP_* settings; `transport` is a test seam for httpx.MockTransport."""
         self.issuer: str = config.OAUTH_IDP_ISSUER.rstrip("/")
         self.client_id: str = config.OAUTH_IDP_CLIENT_ID
         self.client_secret: str = getattr(config, "OAUTH_IDP_CLIENT_SECRET", "") or ""
@@ -161,6 +172,7 @@ class OIDCProvider:
 
     # ------------------------------------------------------------------ discovery
     async def metadata(self) -> Dict[str, Any]:
+        """Return the IdP's OpenID discovery document (fetched once, validated, cached)."""
         if self._metadata is not None:
             return self._metadata
         async with self._metadata_lock:
@@ -191,6 +203,7 @@ class OIDCProvider:
 
     # ------------------------------------------------------------------ authorize leg
     async def build_authorization_url(self, *, redirect_uri: str, state: str, nonce: str, code_challenge: str) -> str:
+        """Build the IdP authorization URL for one login (PKCE S256, nonce, opaque state)."""
         md = await self.metadata()
         params = {
             "response_type": "code",
@@ -210,6 +223,7 @@ class OIDCProvider:
 
     # ------------------------------------------------------------------ token leg
     async def exchange_code(self, *, code: str, redirect_uri: str, code_verifier: str) -> Dict[str, Any]:
+        """Redeem the IdP authorization code; returns the token response (must carry id_token)."""
         md = await self.metadata()
         body = {
             "grant_type": "authorization_code",
@@ -241,6 +255,7 @@ class OIDCProvider:
         return payload
 
     async def verify_id_token(self, id_token: str, *, nonce: str) -> Dict[str, Any]:
+        """Verify signature (RS256/JWKS), iss, aud/azp, exp/iat and nonce; return the claims."""
         if len(id_token) > 16384:
             raise IdPError("id_token too large")
         try:
@@ -341,6 +356,7 @@ class OIDCProvider:
         return Identity(subject=subject, scope=scope, groups=groups)
 
     async def aclose(self) -> None:
+        """Release the HTTP client (called from the server's shutdown hook)."""
         await self._http.aclose()
 
 
@@ -372,16 +388,19 @@ def validate_idp_settings(config) -> None:
 
 
 def _csv(raw: str, lower: bool = False) -> List[str]:
+    """Split a comma-separated setting into stripped, non-empty items."""
     items = [x.strip() for x in (raw or "").split(",") if x.strip()]
     return [x.lower() for x in items] if lower else items
 
 
 def _canonical_scope(raw: str) -> str:
+    """Keep only known Wazuh scopes, in canonical (read, write) order."""
     wanted = set((raw or "").split())
     return " ".join(s for s in VALID_SCOPES if s in wanted)
 
 
 def _parse_group_scope_map(raw: str) -> Dict[str, str]:
+    """Parse OAUTH_IDP_GROUP_SCOPE_MAP (JSON object of group -> scopes); raise on bad input."""
     if not raw or not raw.strip():
         return {}
     try:
