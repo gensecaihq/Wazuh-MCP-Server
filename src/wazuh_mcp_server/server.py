@@ -30,7 +30,7 @@ from wazuh_mcp_server import __version__
 from wazuh_mcp_server.api.wazuh_client import WazuhClient
 from wazuh_mcp_server.api.wazuh_indexer import IndexerNotConfiguredError
 from wazuh_mcp_server.auth import create_access_token
-from wazuh_mcp_server.config import WazuhConfig, get_config
+from wazuh_mcp_server.config import WazuhConfig, get_config, validate_positive_int
 from wazuh_mcp_server.gcf_format import render_result
 from wazuh_mcp_server.monitoring import ACTIVE_CONNECTIONS, setup_monitoring_middleware
 from wazuh_mcp_server.resilience import GracefulShutdown
@@ -1849,7 +1849,11 @@ async def handle_tools_list(params: Dict[str, Any], session: MCPSession) -> Dict
                         "enum": ["1h", "6h", "12h", "1d", "24h", "7d", "30d"],
                         "default": "24h",
                     },
-                    "group_by": {"type": "string", "default": "rule.level"},
+                    "group_by": {
+                        "type": "string",
+                        "enum": ["rule.level", "rule.id", "rule.groups", "agent.id", "agent.name"],
+                        "default": "rule.level",
+                    },
                 },
                 "required": [],
             },
@@ -2622,6 +2626,11 @@ async def handle_tools_list(params: Dict[str, Any], session: MCPSession) -> Dict
 
 _TOOL_ARGUMENT_NAMES: Optional[Dict[str, frozenset]] = None
 
+# Upper bound on one tool result's text (~1 MB). Compact queries stay well under it.
+MAX_TOOL_RESPONSE_CHARS = validate_positive_int(
+    os.getenv("MAX_TOOL_RESPONSE_CHARS", "1000000"), "MAX_TOOL_RESPONSE_CHARS"
+)
+
 # Accepted for backward compatibility but no longer advertised: `duration` is refused when
 # positive (see _reject_block_duration) and harmless at 0, which older clients still send.
 _UNADVERTISED_ARGUMENTS = {"wazuh_block_ip": {"duration"}, "wazuh_firewall_drop": {"duration"}}
@@ -2751,8 +2760,15 @@ async def handle_tools_call(params: Dict[str, Any], session: MCPSession) -> Dict
         """Return MCP-compliant tool success response with isError field.
 
         Every result is redacted here, not only compact alerts: compact=false, GCF output and
-        the manager-log tools used to return credentials from log lines verbatim."""
-        return {"content": [{"type": "text", "text": _sanitize_output_text(text)}], "isError": False}
+        the manager-log tools used to return credentials from log lines verbatim. Results are
+        also capped (1000 alerts with compact=false was a 5.5 MB single result)."""
+        text = _sanitize_output_text(text)
+        if len(text) > MAX_TOOL_RESPONSE_CHARS:
+            text = text[:MAX_TOOL_RESPONSE_CHARS] + (
+                f"\n\n[Truncated: the result exceeded {MAX_TOOL_RESPONSE_CHARS:,} characters. "
+                "Narrow the query (smaller limit, shorter time range, compact=true) for complete data.]"
+            )
+        return {"content": [{"type": "text", "text": text}], "isError": False}
 
     def _tool_error(text: str) -> dict:
         """Return MCP-compliant tool error response with isError field."""
@@ -2805,7 +2821,7 @@ async def handle_tools_call(params: Dict[str, Any], session: MCPSession) -> Dict
             group_by = arguments.get("group_by", "rule.level")
             # Validate group_by to prevent injection (only allow safe dotted field paths)
             VALID_GROUP_BY = {"rule.level", "rule.id", "rule.groups", "agent.id", "agent.name"}
-            if group_by not in VALID_GROUP_BY:
+            if not isinstance(group_by, str) or group_by not in VALID_GROUP_BY:
                 raise ToolValidationError(
                     "group_by",
                     f"invalid value '{group_by}'",

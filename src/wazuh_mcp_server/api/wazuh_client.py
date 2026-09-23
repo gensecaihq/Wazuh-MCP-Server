@@ -821,8 +821,12 @@ class WazuhClient:
             value: Any = alert
             for part in group_by.split("."):
                 value = value.get(part, {}) if isinstance(value, dict) else "unknown"
-            key = str(value) if not isinstance(value, dict) else "unknown"
-            groups[key] = groups.get(key, 0) + 1
+            # rule.groups is a list: count each group once per alert. Keying on str(list) made
+            # the counts depend on group order (['sshd','auth'] vs ['auth','sshd']).
+            keys = value if isinstance(value, list) else [value]
+            for item in keys or ["unknown"]:
+                key = str(item) if not isinstance(item, dict) else "unknown"
+                groups[key] = groups.get(key, 0) + 1
         return {
             "data": {
                 "time_range": time_range,

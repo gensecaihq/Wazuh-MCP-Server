@@ -579,3 +579,41 @@ class TestLegacySessions:
             )
         assert init.headers.get("MCP-Session-Id")
         assert len(await mcp_server.sessions.get_all()) == before + 1
+
+
+class TestAlertSummaryAndSize:
+    @pytest.mark.asyncio
+    async def test_rule_groups_counted_per_group(self):
+        client = _client()
+
+        class Indexer:
+            async def get_alerts(self, **kw):
+                items = [
+                    {"rule": {"groups": g}}
+                    for g in (["sshd", "authentication_failed"], ["authentication_failed", "sshd"], ["sshd"])
+                ]
+                return {"data": {"affected_items": items, "total_affected_items": 3}}
+
+        client._indexer_client = Indexer()
+        groups = (await client.get_alert_summary("24h", "rule.groups"))["data"]["groups"]
+        assert groups == {"sshd": 3, "authentication_failed": 2}
+
+    @pytest.mark.asyncio
+    async def test_non_string_group_by_is_a_validation_error(self):
+        result = await mcp_server.handle_tools_call(
+            {"name": "get_wazuh_alert_summary", "arguments": {"group_by": ["rule.id"]}}, _session()
+        )
+        assert result["isError"] is True and "group_by" in result["content"][0]["text"]
+
+    @pytest.mark.asyncio
+    async def test_oversized_result_truncated_with_notice(self, monkeypatch):
+        monkeypatch.setattr(mcp_server, "MAX_TOOL_RESPONSE_CHARS", 1000)
+
+        class Stub:
+            async def get_rules_summary(self):
+                return {"data": {"blob": "x" * 5000}}
+
+        monkeypatch.setattr(mcp_server, "cluster_registry", ClusterRegistry({"default": Stub()}, "default", False))
+        result = await mcp_server.handle_tools_call({"name": "get_wazuh_rules_summary", "arguments": {}}, _session())
+        text = result["content"][0]["text"]
+        assert len(text) < 1300 and "Truncated" in text
