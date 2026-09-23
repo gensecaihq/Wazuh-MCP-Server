@@ -81,8 +81,8 @@ grep -E "WAZUH_USER|WAZUH_HOST" .env
 ### MCP API Key Issues
 
 ```bash
-# Check API key in server logs
-docker compose logs wazuh-main-server | grep "API key"
+# The key the server accepts is MCP_API_KEY from .env (keys are never logged)
+grep ^MCP_API_KEY= .env
 
 # Exchange API key for token
 curl -X POST http://localhost:3000/auth/token \

@@ -83,17 +83,24 @@ Create a `compose.redis.yml` overlay next to `compose.yml`:
 services:
   redis:
     image: redis:7-alpine
-    ports:
-      - "6379:6379"
+    # No published port: only the server needs it, over the compose network. Publishing
+    # 6379 exposes an unauthenticated Redis holding every session.
     volumes:
       - redis-data:/data
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 5s
 
+  wazuh-main-server:
+    depends_on:
+      redis:
+        condition: service_healthy
+
 volumes:
   redis-data:
 ```
+
+The image ships the `redis` client, so no rebuild is needed. If Redis becomes unreachable, requests fail with `503` and `Retry-After` rather than dropping sessions.
 
 ### Verification
 

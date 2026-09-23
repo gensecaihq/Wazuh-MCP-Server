@@ -78,9 +78,11 @@ For API access or when OAuth is not available:
 AUTH_MODE=bearer docker compose up -d
 ```
 
-**Step 1: Get API Key**
+**Step 1: Set an API Key**
+
+Set it in `.env` before starting (a generated key is never shown in production):
 ```bash
-docker compose logs wazuh-main-server | grep "API key"
+echo "MCP_API_KEY=wazuh_$(openssl rand -base64 32 | tr '+/' '-_' | tr -d '=')" >> .env
 ```
 
 **Step 2: Exchange for JWT Token**

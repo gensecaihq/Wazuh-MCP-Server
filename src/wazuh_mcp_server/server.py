@@ -11,6 +11,7 @@ import logging
 import math
 import os
 import re as _re
+import sys
 import threading
 import time
 import uuid
@@ -503,12 +504,21 @@ async def lifespan(app: FastAPI):
             from wazuh_mcp_server.auth import auth_manager
 
             default_key = auth_manager.get_default_api_key()
-            if default_key:
-                logger.info("=" * 60)
-                logger.info("🔑 AUTO-GENERATED API KEY (save this for client auth):")
-                logger.info(f"   {default_key}")
-                logger.info("   Set MCP_API_KEY environment variable in production")
-                logger.info("=" * 60)
+            if default_key and cfg.ENVIRONMENT == "development":
+                # Printed outside logging on purpose: the log sanitizer (rightly) redacts
+                # wazuh_* keys, which left the banner showing "wazuh_[REDACTED]" and the
+                # generated key unusable. Development only.
+                print(
+                    f"\n🔑 Auto-generated API key for this process (dev only):\n   {default_key}\n"
+                    "   Exchange it at POST /auth/token. Set MCP_API_KEY for a stable key.\n",
+                    file=sys.stderr,
+                    flush=True,
+                )
+            elif default_key:
+                logger.warning(
+                    "No MCP_API_KEY set: a temporary read-only key was generated and is not shown in "
+                    "production. Set MCP_API_KEY (and MCP_API_KEY_SCOPES) to authenticate clients."
+                )
 
     # Start background session cleanup task (runs every 5 minutes regardless of traffic)
     async def _background_session_cleanup():

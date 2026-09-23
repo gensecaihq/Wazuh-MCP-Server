@@ -48,7 +48,7 @@ dependencies = [
 
 [project.optional-dependencies]
 redis = [
-    "redis>=7.0.0",
+    "redis>=7.0.0,<9.0.0",
 ]
 # Opt-in GCF response encoding (RESPONSE_FORMAT=gcf); zero-dependency, pinned exact
 gcf = [
