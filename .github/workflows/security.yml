@@ -124,6 +124,11 @@ jobs:
         scan-ref: '.'
         format: 'sarif'
         output: 'trivy-results.sarif'
+        # Without exit-code trivy-action exits 0 on findings, so continue-on-error: false
+        # never actually gated anything. Same policy as the image scan in docker-publish.yml.
+        exit-code: '1'
+        severity: 'HIGH,CRITICAL'
+        ignore-unfixed: true
       continue-on-error: false
     
     - name: Upload Trivy results to GitHub Security tab

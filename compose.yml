@@ -74,7 +74,7 @@ services:
     # Writable directories
     tmpfs:
       - /tmp:noexec,nosuid,size=64m
-      - /app/logs:noexec,nosuid,size=128m
+      - /app/logs:noexec,nosuid,size=128m,uid=1000,gid=1000
     
     # Structured logging
     logging:

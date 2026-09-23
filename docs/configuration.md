@@ -8,7 +8,7 @@ All configuration is via environment variables, loaded from (highest precedence 
 2. A `.env` file in the working directory (convenient for development)
 3. Built-in defaults
 
-Only the variables listed here are read by the server. (See `.env.example` for a ready-to-copy template.)
+Every variable the server reads is listed here. (See `.env.example` for a ready-to-copy template.)
 
 ## Required
 
@@ -30,6 +30,7 @@ The Manager API is always reached over HTTPS on `WAZUH_PORT` (it is TLS-only).
 | `MCP_BIND` | `127.0.0.1` | **Compose-level** host interface the port is published on (see `compose.yml`). Loopback by default (expects a reverse proxy); set `0.0.0.0` to expose directly on a trusted network |
 | `LOG_LEVEL` | `INFO` | `DEBUG`, `INFO`, `WARNING`, `ERROR`, or `CRITICAL` |
 | `LOG_FORMAT` | `text` | Set `json` for structured logs that include the request correlation ID and extra fields |
+| `WEB_CONCURRENCY` / `UVICORN_WORKERS` / `GUNICORN_WORKERS` | — | Only read to warn: OAuth, revocation and rate-limit state are per process, so run one worker (or use sticky sessions) |
 | `MAX_MEMORY_MB` | `512` | Memory budget used for the ratio reported by `/metrics` |
 
 ## Wazuh Manager
@@ -37,8 +38,11 @@ The Manager API is always reached over HTTPS on `WAZUH_PORT` (it is TLS-only).
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `WAZUH_PORT` | `55000` | Manager API port |
-| `WAZUH_VERIFY_SSL` | `true` | Verify the Manager's TLS certificate. Set `false` only for self-signed certs in development |
-| `WAZUH_ALLOW_SELF_SIGNED` | `true` | Accept self-signed Manager certificates (Wazuh ships with them by default). Set `false` in production with a proper CA |
+| `WAZUH_VERIFY_SSL` | `true` | Verify the Manager's TLS certificate. Only takes effect when `WAZUH_ALLOW_SELF_SIGNED=false` |
+| `WAZUH_ALLOW_SELF_SIGNED` | `true` | Accept self-signed Manager certificates (Wazuh ships with them). **While `true`, Manager certificate verification is off**, whatever `WAZUH_VERIFY_SSL` says. Set `false` in production with a CA the container trusts |
+| `REQUEST_TIMEOUT_SECONDS` | `30` | Manager and Indexer request timeout (max 300) |
+| `MAX_CONNECTIONS` | `10` | HTTP connection pool size per client (max 100) |
+| `MAX_ALERTS_PER_QUERY` | `1000` | Upper bound on alerts fetched per query (max 10000) |
 
 ## Wazuh Indexer
 
@@ -112,6 +116,18 @@ OAuth requires **PKCE with `S256`**; authorization codes are single-use and refr
 |----------|---------|-------------|
 | `WAZUH_TOOLSETS` | `all` | Comma-separated toolsets to expose: `alerts`, `agents`, `vulnerabilities`, `analysis`, `web_search`, `compliance`, `system`, `response`. Unknown names fail at startup |
 | `WAZUH_DISABLED_TOOLS` | — | Comma-separated tool names to hide on top of `WAZUH_TOOLSETS` |
+| `MAX_TOOL_RESPONSE_CHARS` | `1000000` | Longest tool result returned; longer results are truncated with a note to narrow the query |
+| `RESPONSE_FORMAT` | `json` | `gcf` encodes alert/event/vulnerability results as Graph Compact Format (fewer tokens, lossless) |
+
+## Active response safety
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `WAZUH_PROTECTED_IPS` | — | Comma-separated IPs/CIDRs that `wazuh_block_ip`, `wazuh_firewall_drop` and `wazuh_host_deny` refuse to block. Loopback and the Manager's own address are always protected |
+| `WAZUH_REQUIRE_ACTION_CONFIRMATION` | `false` | Write tools must be called with `confirm=true` (the flag is then advertised in their schemas) |
+| `WAZUH_ALLOW_MANAGER_AR` | `false` | Allow isolate/kill/quarantine/restart and similar actions against agent `000` (the Manager itself) |
+
+Active-response results report `execution_status: dispatched`: Wazuh confirms the command was queued to the agent, not that the script ran. Confirm with the matching `wazuh_check_*` tool. Blocks are permanent until removed; per-call durations aren't possible through the API.
 
 Hidden tools are dropped from `tools/list` and refused by `tools/call`; scope filtering still applies to what remains. Trimming the catalogue matters most for local models (see [Local LLMs](LOCAL_LLM.md)): the full list is ~6.6k tokens resent on every request, so a smaller list means less prompt processing and more room for results. `web_search` is the only toolset that sends data off-box — drop it for air-gapped deployments.
 

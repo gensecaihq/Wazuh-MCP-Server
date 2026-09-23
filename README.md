@@ -237,12 +237,10 @@ no cross-turn deduplication, so no alert is ever omitted). If encoding fails —
 or the encoder isn't installed — the tool falls back to JSON. It composes with
 the existing `compact` field-projection parameter.
 
-The encoder is one zero-dependency package (pinned exact). Install it directly, or via the
-`gcf` extra from a source checkout:
+The encoder is one zero-dependency package (pinned exact) and ships in the Docker image. For a source install:
 
 ```bash
-pip install gcf-python==2.5.1        # direct
-pip install ".[gcf]"                 # or, from a clone of this repo
+pip install ".[gcf]"                 # from a clone of this repo
 ```
 
 > **Production note:** the server listens over plain HTTP — terminate TLS at a reverse proxy or load balancer. OAuth knobs (`OAUTH_ENABLE_DCR` — off by default, `OAUTH_*_TTL`) and rate-limit tuning (`RATE_LIMIT_REQUESTS`, `RATE_LIMIT_WINDOW`) are in the [Configuration Guide](docs/configuration.md).
