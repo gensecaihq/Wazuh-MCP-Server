@@ -446,10 +446,6 @@ class WazuhClient:
         cache_key = f"rules:{sorted(params.items()) if params else 'all'}"
         return await self._get_cached(cache_key, "/rules", params=params)
 
-    async def get_rule_info(self, rule_id: str) -> Dict[str, Any]:
-        """Get detailed information about a specific rule."""
-        return await self._request("GET", f"/rules/{rule_id}")
-
     async def get_decoders(self, **params) -> Dict[str, Any]:
         """Get Wazuh log decoders (cached for 5 minutes)."""
         # Use caching for decoders as they rarely change
@@ -558,18 +554,6 @@ class WazuhClient:
     async def get_cdb_lists(self, **params) -> Dict[str, Any]:
         """Get CDB lists."""
         return await self._request("GET", "/lists", params=params)
-
-    async def get_cdb_list_content(self, filename: str) -> Dict[str, Any]:
-        """Get specific CDB list content."""
-        return await self._request("GET", f"/lists/{filename}")
-
-    async def get_fim_events(self, **params) -> Dict[str, Any]:
-        """Get File Integrity Monitoring events."""
-        return await self._request("GET", "/syscheck", params=params)
-
-    async def get_syscollector_info(self, agent_id: str, **params) -> Dict[str, Any]:
-        """Get system inventory information from agent."""
-        return await self._request("GET", f"/syscollector/{agent_id}", params=params)
 
     async def get_manager_stats(self, **params) -> Dict[str, Any]:
         """Get manager statistics."""

@@ -520,7 +520,10 @@ class WazuhIndexerClient:
                     "severity": source.get("vulnerability", {}).get("severity"),
                     "description": source.get("vulnerability", {}).get("description"),
                     "reference": source.get("vulnerability", {}).get("reference"),
-                    "status": source.get("vulnerability", {}).get("status"),
+                    # There is no vulnerability.status in wazuh-states-vulnerabilities-* (it was
+                    # always null); CVSS base score and under_evaluation are real fields.
+                    "cvss_score": (source.get("vulnerability", {}).get("score") or {}).get("base"),
+                    "under_evaluation": source.get("vulnerability", {}).get("under_evaluation"),
                     "detected_at": source.get("vulnerability", {}).get("detected_at"),
                     "published_at": source.get("vulnerability", {}).get("published_at"),
                     "agent": {

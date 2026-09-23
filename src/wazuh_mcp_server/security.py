@@ -632,7 +632,13 @@ SENSITIVE_PATTERNS = [
     (r'(authorization["\']?\s*[:=]\s*["\']?)[^"\'\s,}]+', r"\1[REDACTED]"),
     (r"wst_[a-zA-Z0-9_-]+", "wst_[REDACTED]"),
     (r"wazuh_[a-zA-Z0-9_-]{40,}", "wazuh_[REDACTED]"),
+    # A bare JWT (no Bearer prefix), e.g. a token echoed in an exception or a tool argument
+    (r"eyJ[a-zA-Z0-9_-]{8,}\.eyJ[a-zA-Z0-9_-]{8,}\.[a-zA-Z0-9_-]+", "[REDACTED_JWT]"),
 ]
+
+# Attributes every LogRecord has; anything else arrived via `extra=` (the JSON formatter
+# emits those fields, so they need redacting too)
+_STANDARD_LOG_ATTRS = frozenset(vars(logging.LogRecord("", 0, "", 0, "", (), None))) | {"message", "asctime"}
 
 
 def sanitize_log_message(message: str) -> str:
@@ -677,6 +683,15 @@ class SanitizingLogFilter(logging.Filter):
                     else:
                         sanitized_args.append(arg)
                 record.args = tuple(sanitized_args)
+        # Tracebacks (logger.exception / exc_info=True) are rendered from exc_info by the
+        # formatter; pre-render and redact so exception text can't carry credentials out.
+        if record.exc_info and not record.exc_text:
+            record.exc_text = sanitize_log_message(logging.Formatter().formatException(record.exc_info))
+        elif record.exc_text:
+            record.exc_text = sanitize_log_message(record.exc_text)
+        for key, value in list(vars(record).items()):
+            if key not in _STANDARD_LOG_ATTRS and isinstance(value, str):
+                setattr(record, key, sanitize_log_message(value))
         return True
 
 
