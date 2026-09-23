@@ -285,8 +285,10 @@ class TestLegacyEra:
         assert "result" in payload, payload
         assert "error" not in payload
         assert len(payload["result"]["tools"]) > 40
-        # Legacy path is stateful — a session is minted (modern path would not echo one).
-        assert resp.headers.get("MCP-Session-Id")
+        # Served by the legacy handler: modern results always carry resultType
+        assert "resultType" not in payload["result"]
+        # ...and a non-initialize request doesn't mint a stored session
+        assert not resp.headers.get("MCP-Session-Id")
 
 
 if __name__ == "__main__":

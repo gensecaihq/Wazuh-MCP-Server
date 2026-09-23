@@ -412,9 +412,22 @@ sessions = SessionManager(_session_store)
 _last_session_cleanup: float = 0.0
 
 
-async def get_or_create_session(session_id: Optional[str], origin: Optional[str]) -> MCPSession:
-    """Get existing session or create new one."""
+def _is_initialize(body: Any) -> bool:
+    """True if a JSON-RPC body (single or batch) contains an initialize request."""
+    items = body if isinstance(body, list) else [body]
+    return any(isinstance(item, dict) and item.get("method") == "initialize" for item in items)
+
+
+async def get_or_create_session(session_id: Optional[str], origin: Optional[str], persist: bool = True) -> MCPSession:
+    """Get existing session or create new one.
+
+    persist=False builds a throwaway session for a request that isn't an initialize: the
+    spec assigns session ids only on the InitializeResult, and storing one for every
+    session-less request grew the store by (rate limit x session TTL) per client."""
     global _last_session_cleanup
+
+    if not session_id and not persist:
+        return MCPSession(str(uuid.uuid4()), origin)
 
     if session_id:
         existing_session = await sessions.get(session_id)
@@ -828,8 +841,7 @@ MCP_ERRORS = {
     "INVALID_PARAMS": -32602,
     "INTERNAL_ERROR": -32603,
     "TIMEOUT": -32001,
-    "CANCELLED": -32002,
-    "RESOURCE_NOT_FOUND": -32003,
+    "RESOURCE_NOT_FOUND": -32002,  # MCP resources spec
     # 2026-07-28 spec-reserved range (-32020 to -32099)
     "HEADER_MISMATCH": -32020,
     "MISSING_CLIENT_CAPABILITY": -32021,
@@ -1489,6 +1501,13 @@ async def handle_resources_list(params: Dict[str, Any], session: MCPSession) -> 
     return {"resources": resources}
 
 
+class ResourceNotFound(ValueError):
+    """resources/read for a URI this server doesn't serve (-32002 per the MCP spec)."""
+
+
+_AGENT_RESOURCE = _re.compile(r"^agents/([0-9]{1,5})/(info|alerts|vulnerabilities)$")
+
+
 async def handle_resources_read(params: Dict[str, Any], session: MCPSession) -> Dict[str, Any]:
     """
     Handle resources/read method per MCP specification.
@@ -1496,17 +1515,28 @@ async def handle_resources_read(params: Dict[str, Any], session: MCPSession) -> 
     """
     uri = params.get("uri")
 
-    if not uri:
+    if not uri or not isinstance(uri, str):
         raise ValueError("Resource URI is required")
 
     # Parse Wazuh resource URI
     if not uri.startswith("wazuh://"):
-        raise ValueError(f"Invalid resource URI scheme: {uri}. Expected wazuh://")
+        raise ResourceNotFound(f"Resource not found: {uri} (expected a wazuh:// URI)")
 
     resource_path = uri[8:]  # Remove "wazuh://"
+    agent_match = _AGENT_RESOURCE.match(resource_path)
 
     try:
-        if resource_path == "manager/info":
+        if agent_match:
+            # The three templates advertised by resources/templates/list
+            agent_id = validate_agent_id(agent_match.group(1), required=True)
+            kind = agent_match.group(2)
+            if kind == "info":
+                data = await wazuh_client.get_agents(agent_id=agent_id)
+            elif kind == "alerts":
+                data = await wazuh_client.get_alerts(limit=50, agent_id=agent_id)
+            else:
+                data = await wazuh_client.get_vulnerabilities(agent_id=agent_id, limit=100)
+        elif resource_path == "manager/info":
             data = await wazuh_client.get_manager_info()
         elif resource_path == "agents/summary":
             data = await wazuh_client.get_running_agents()
@@ -1519,15 +1549,17 @@ async def handle_resources_read(params: Dict[str, Any], session: MCPSession) -> 
         elif resource_path == "vulnerabilities/critical":
             data = await wazuh_client.get_critical_vulnerabilities(limit=50)
         else:
-            raise ValueError(f"Resource not found: {uri}")
-
-        return {
-            "contents": [{"uri": uri, "mimeType": "application/json", "text": json.dumps(data, indent=2, default=str)}]
-        }
-
+            raise ResourceNotFound(f"Resource not found: {uri}")
+    except ResourceNotFound:
+        raise
     except Exception as e:
+        # A backend failure is an internal error, not bad params — and its text can carry
+        # internal hosts/usernames, so it goes to the log, not the client.
         logger.error(f"Error reading resource {uri}: {e}")
-        raise ValueError(f"Failed to read resource: {str(e)}")
+        raise RuntimeError("Failed to read resource") from e
+
+    text = _sanitize_output_text(json.dumps(data, indent=2, default=str))
+    return {"contents": [{"uri": uri, "mimeType": "application/json", "text": text}]}
 
 
 async def handle_resources_templates_list(params: Dict[str, Any], session: MCPSession) -> Dict[str, Any]:
@@ -3368,6 +3400,8 @@ async def process_mcp_request(request: MCPRequest, session: MCPSession) -> MCPRe
 
         return create_success_response(request.id, result)
 
+    except ResourceNotFound as e:
+        return create_error_response(request.id, MCP_ERRORS["RESOURCE_NOT_FOUND"], str(e))
     except ValueError as e:
         return create_error_response(request.id, MCP_ERRORS["INVALID_PARAMS"], str(e))
     except Exception as e:
@@ -3731,7 +3765,8 @@ async def mcp_endpoint(
             session.update_activity()
             await sessions.set(mcp_session_id, session)
         else:
-            session = await get_or_create_session(None, origin)
+            # Only an initialize (or a GET stream) starts a stored session
+            session = await get_or_create_session(None, origin, persist=request.method == "GET" or _is_initialize(body))
 
         session._auth_token = auth_token  # Store token for scope checks in tool handlers
 
@@ -4006,18 +4041,20 @@ async def mcp_streamable_http_endpoint(
             session.update_activity()
             await sessions.set(mcp_session_id, session)
         else:
-            # Create new session only if no session ID provided
-            session = await get_or_create_session(None, origin)
+            # Only an initialize (or a GET stream) starts a stored session
+            persist = request.method == "GET" or _is_initialize(body)
+            session = await get_or_create_session(None, origin, persist=persist)
 
         session.authenticated = True  # Mark as authenticated
         session._auth_token = auth_token  # Store token for scope checks in tool handlers
 
         # Common response headers
         response_headers = {
-            "MCP-Session-Id": session.session_id,
             "MCP-Protocol-Version": protocol_version,
             "Access-Control-Expose-Headers": "MCP-Session-Id, MCP-Protocol-Version",
         }
+        if mcp_session_id or persist:
+            response_headers["MCP-Session-Id"] = session.session_id
 
         # Handle GET request per MCP Streamable HTTP spec
         if request.method == "GET":

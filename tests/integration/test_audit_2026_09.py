@@ -520,3 +520,62 @@ class TestEndpointGuards:
                 for _ in range(8)
             ]
         assert codes[:5] == [401] * 5 and 429 in codes[5:]
+
+
+class TestResources:
+    async def _read(self, monkeypatch, uri, stub):
+        monkeypatch.setattr(mcp_server, "wazuh_client", stub)
+        request = mcp_server.MCPRequest(jsonrpc="2.0", id=1, method="resources/read", params={"uri": uri})
+        return await mcp_server.process_mcp_request(request, _session())
+
+    @pytest.mark.asyncio
+    async def test_advertised_agent_template_is_readable(self, monkeypatch):
+        seen = {}
+
+        class Stub:
+            async def get_agents(self, agent_id=None, **kw):
+                seen["agent_id"] = agent_id
+                return {"data": {"affected_items": [{"id": agent_id}]}}
+
+        resp = await self._read(monkeypatch, "wazuh://agents/1/info", Stub())
+        assert resp.error is None and seen["agent_id"] == "001"
+
+    @pytest.mark.asyncio
+    async def test_unknown_uri_is_resource_not_found(self, monkeypatch):
+        resp = await self._read(monkeypatch, "wazuh://nope", object())
+        assert resp.error["code"] == -32002
+
+    @pytest.mark.asyncio
+    async def test_backend_error_is_internal_and_not_leaked(self, monkeypatch):
+        class Stub:
+            async def get_manager_info(self):
+                raise ConnectionError("connect to https://10.0.0.5:55000 failed: user=wazuh-wui")
+
+        resp = await self._read(monkeypatch, "wazuh://manager/info", Stub())
+        assert resp.error["code"] == -32603
+        assert "10.0.0.5" not in json.dumps(resp.error)
+
+
+class TestLegacySessions:
+    @pytest.mark.asyncio
+    async def test_only_initialize_stores_a_session(self):
+        before = len(await mcp_server.sessions.get_all())
+        async with _http() as client:
+            for _ in range(5):
+                r = await client.post("/mcp", json={"jsonrpc": "2.0", "id": 1, "method": "tools/list"})
+                assert r.status_code == 200 and "MCP-Session-Id" not in r.headers
+            init = await client.post(
+                "/mcp",
+                json={
+                    "jsonrpc": "2.0",
+                    "id": 1,
+                    "method": "initialize",
+                    "params": {
+                        "protocolVersion": "2025-11-25",
+                        "capabilities": {},
+                        "clientInfo": {"name": "t", "version": "1"},
+                    },
+                },
+            )
+        assert init.headers.get("MCP-Session-Id")
+        assert len(await mcp_server.sessions.get_all()) == before + 1
