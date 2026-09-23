@@ -242,15 +242,16 @@ driver or log collector.
 
 | Setting | Default | Effect |
 |---|---|---|
-| `WAZUH_VERIFY_SSL` | `true` | Verify the Manager API certificate, subject to the next row. |
-| `WAZUH_ALLOW_SELF_SIGNED` | `true` | When true, disables Manager certificate verification. Effective verification is `WAZUH_VERIFY_SSL and not WAZUH_ALLOW_SELF_SIGNED`. |
+| `WAZUH_VERIFY_SSL` | `true` | Verify the Manager API certificate. |
+| `WAZUH_ALLOW_SELF_SIGNED` | `false` | `true` disables Manager certificate verification. |
+| `WAZUH_CA_BUNDLE` | *(none)* | CA PEM trusted for the Manager and Indexer instead of the system store. |
 | `WAZUH_INDEXER_VERIFY_SSL` | `true` | Verify the Indexer certificate. Not affected by `WAZUH_ALLOW_SELF_SIGNED`. |
-| `WAZUH_INDEXER_SSL` | inferred | HTTPS to the Indexer unless the host has an `http://` prefix or this is `false`. |
 
-With the defaults, **Manager certificate verification is off** (see
-[Known limitations](#known-limitations)). To verify it, install a certificate the server
-trusts on the Manager and set `WAZUH_ALLOW_SELF_SIGNED=false`. Clusters defined in
-`clusters.json` use their own `verify_ssl`/`indexer_verify_ssl` fields, which default to `true`.
+Manager verification is on by default. The stock Wazuh API certificate is self-signed for
+`CN=wazuh.com` without a subjectAltName and cannot be verified for any host; reissue it with a
+subjectAltName matching `WAZUH_HOST` and set `WAZUH_CA_BUNDLE`, or opt out with
+`WAZUH_ALLOW_SELF_SIGNED=true` (logged at startup; as an error in production). See
+[Manager TLS](../configuration.md#manager-tls). Clusters in `clusters.json` accept a per-cluster `ca_bundle`.
 
 ### Least-privilege Wazuh accounts
 
@@ -326,11 +327,9 @@ HIGH/CRITICAL fail the job) and only then pushes the multi-arch image to GHCR.
 
 ## Known limitations
 
-- **Manager TLS is not verified by default.** `WAZUH_ALLOW_SELF_SIGNED` defaults to `true`, which
-  disables certificate verification for the Manager API so stock self-signed Wazuh
-  certificates work. Anyone able to intercept that connection can read the Wazuh credentials
-  and responses. Set `WAZUH_ALLOW_SELF_SIGNED=false` with a trusted certificate. Changing the
-  default is proposed in PR #127.
+- **Stock Manager certificates need action.** Verification is on by default, and the stock
+  self-signed certificate has no subjectAltName; deployments must reissue it or explicitly
+  opt out with `WAZUH_ALLOW_SELF_SIGNED=true`, which sends the API credentials unverified.
 - **Per-process security state.** OAuth clients, authorization codes, refresh-token records, the
   revocation denylist and rate-limit counters live in process memory. They are not shared
   between replicas and are lost on restart (for example, a revoked OAuth token becomes usable
@@ -348,7 +347,7 @@ HIGH/CRITICAL fail the job) and only then pushes the multi-arch image to GHCR.
 - [ ] `ALLOWED_ORIGINS` lists only the origins your clients use.
 - [ ] TLS terminated at a reverse proxy; the server port not exposed directly; the proxy in
       `TRUSTED_PROXIES` if it is not on loopback.
-- [ ] `WAZUH_ALLOW_SELF_SIGNED=false` with a trusted Manager certificate;
+- [ ] Manager certificate verified (`WAZUH_ALLOW_SELF_SIGNED` left `false`), using a reissued certificate and `WAZUH_CA_BUNDLE` where needed;
       `WAZUH_INDEXER_VERIFY_SSL=true`.
 - [ ] Dedicated least-privilege Wazuh API and Indexer accounts.
 - [ ] `WAZUH_REQUIRE_ACTION_CONFIRMATION=true` and `WAZUH_PROTECTED_IPS` set if write tools are

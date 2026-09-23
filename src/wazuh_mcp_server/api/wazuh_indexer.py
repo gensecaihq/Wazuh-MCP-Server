@@ -11,10 +11,12 @@ import asyncio
 import json
 import logging
 import re
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Union
 
 import httpx
 from tenacity import retry, retry_if_exception_type, stop_after_attempt, wait_exponential
+
+from wazuh_mcp_server.config import tls_verify
 
 logger = logging.getLogger(__name__)
 
@@ -54,7 +56,7 @@ class WazuhIndexerClient:
         port: int = 9200,
         username: Optional[str] = None,
         password: Optional[str] = None,
-        verify_ssl: bool = True,
+        verify_ssl: Union[bool, str] = True,
         timeout: int = 30,
         use_ssl: bool = True,
         ccs_prefix: str = "",
@@ -132,7 +134,7 @@ class WazuhIndexerClient:
             auth = (self.username, self.password)
 
         self.client = httpx.AsyncClient(
-            verify=self.verify_ssl,
+            verify=tls_verify(self.verify_ssl),
             timeout=self.timeout,
             auth=auth,
             limits=httpx.Limits(max_connections=20, max_keepalive_connections=10),

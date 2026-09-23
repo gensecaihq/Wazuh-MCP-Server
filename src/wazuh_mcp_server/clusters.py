@@ -136,12 +136,20 @@ def _cluster_config(entry: Dict[str, Any]) -> WazuhConfig:
         except (ConfigurationError, ValueError, TypeError) as e:
             raise ValueError(f"cluster '{cid}': invalid {name}: {e}") from None
 
+    # A CA bundle keeps verification ON for stock self-signed certificates: per-entry
+    # "ca_bundle" wins, else the global WAZUH_CA_BUNDLE. verify_ssl=false still disables.
+    ca_bundle = str(resolved.get("ca_bundle") or os.getenv("WAZUH_CA_BUNDLE", "")).strip()
+    if ca_bundle and not os.path.isfile(ca_bundle):
+        raise ValueError(f"cluster '{cid}': ca_bundle file does not exist: {ca_bundle}")
+    verify_manager = field("verify_ssl", lambda: _as_bool(resolved.get("verify_ssl"), True))
+    verify_indexer = field("indexer_verify_ssl", lambda: _as_bool(resolved.get("indexer_verify_ssl"), True))
+
     return WazuhConfig(
         wazuh_host=normalize_host(str(resolved["wazuh_host"])),
         wazuh_user=resolved["wazuh_user"],
         wazuh_pass=resolved["wazuh_pass"],
         wazuh_port=field("wazuh_port", lambda: validate_port(str(resolved.get("wazuh_port", 55000)), "wazuh_port")),
-        verify_ssl=field("verify_ssl", lambda: _as_bool(resolved.get("verify_ssl"), True)),
+        verify_ssl=(ca_bundle or True) if verify_manager else False,
         # Left as given: an http:// prefix is how a plain-HTTP indexer is selected
         wazuh_indexer_host=resolved.get("indexer_host"),
         wazuh_indexer_port=field(
@@ -150,9 +158,7 @@ def _cluster_config(entry: Dict[str, Any]) -> WazuhConfig:
         wazuh_indexer_user=resolved.get("indexer_user"),
         wazuh_indexer_pass=resolved.get("indexer_pass"),
         wazuh_indexer_ssl=field("indexer_ssl", lambda: _as_bool(resolved.get("indexer_ssl"), True)),
-        wazuh_indexer_verify_ssl=field(
-            "indexer_verify_ssl", lambda: _as_bool(resolved.get("indexer_verify_ssl"), True)
-        ),
+        wazuh_indexer_verify_ssl=(ca_bundle or True) if verify_indexer else False,
         request_timeout_seconds=field(
             "request_timeout_seconds",
             lambda: validate_positive_int(

@@ -70,6 +70,8 @@ services:
     # MULTI_CLUSTER.md describes was never visible to the container
     volumes:
       - ./config:/app/config:ro
+      # CA bundle for Manager/Indexer TLS verification (then set WAZUH_CA_BUNDLE=/app/certs/ca.pem)
+      # - ./certs:/app/certs:ro
 
     # Writable directories
     tmpfs:
