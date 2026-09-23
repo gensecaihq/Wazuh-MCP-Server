@@ -83,17 +83,24 @@ Create a `compose.redis.yml` overlay next to `compose.yml`:
 services:
   redis:
     image: redis:7-alpine
-    ports:
-      - "6379:6379"
+    # No published port: only the server needs it, over the compose network. Publishing
+    # 6379 exposes an unauthenticated Redis holding every session.
     volumes:
       - redis-data:/data
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 5s
 
+  wazuh-main-server:
+    depends_on:
+      redis:
+        condition: service_healthy
+
 volumes:
   redis-data:
 ```
+
+The image ships the `redis` client, so no rebuild is needed. If Redis becomes unreachable, requests fail with `503` and `Retry-After` rather than dropping sessions.
 
 ### Verification
 
@@ -157,7 +164,7 @@ Dual-era compliance: MCP 2026-07-28 (modern, stateless) plus 2025-11-25 and earl
 | Dynamic Streaming | ✅ JSON or SSE based on Accept header |
 | Authentication | ✅ Bearer token (JWT) authentication |
 | Security | ✅ HTTPS, origin validation, rate limiting |
-| Legacy Support | ✅ Legacy `/sse` endpoint maintained |
+| Legacy Support | ✅ Pre-2026 clients via the `initialize` handshake on `/mcp` |
 | Session Management | ✅ `MCP-Session-Id` header, full lifecycle with DELETE |
 | Prompts | ✅ `prompts/list` and `prompts/get` with 5 security prompts |
 | Resources | ✅ `resources/list`, `resources/read`, `resources/templates/list` |

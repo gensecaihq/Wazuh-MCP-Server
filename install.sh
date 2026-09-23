@@ -450,14 +450,17 @@ deploy_server() {
 generate_api_key() {
     log_step "Generating API key for client authentication..."
     
-    # Generate secure API key
-    local api_key="wazuh_$(openssl rand -base64 32 | tr -d "=+/" | cut -c1-32)"
+    # The server reads MCP_API_KEY from .env and only accepts wazuh_ + 43 url-safe chars
+    # (the old 32-char key written to .api_key was never read and would have been rejected)
+    local api_key
+    api_key=$(grep -E '^MCP_API_KEY=.+' .env 2>/dev/null | tail -1 | cut -d= -f2-)
+    if [ -z "$api_key" ]; then
+        api_key="wazuh_$(openssl rand -base64 32 | tr '+/' '-_' | tr -d '=')"
+        printf '\nMCP_API_KEY=%s\n' "$api_key" >> .env
+        chmod 600 .env
+    fi
     
-    # Save to secure file
-    echo "MCP_API_KEY=${api_key}" > .api_key
-    chmod 600 .api_key
-    
-    log_success "API key generated and saved to .api_key"
+    log_success "API key saved to .env as MCP_API_KEY"
     echo -e "${YELLOW}🔑 API Key: ${api_key}${NC}"
     echo -e "${YELLOW}⚠️  Save this key securely - you'll need it for Claude Desktop integration${NC}"
     
@@ -499,7 +502,8 @@ post_deployment_verification() {
 # Show deployment summary
 show_deployment_summary() {
     local port=${MCP_PORT:-3000}
-    local api_key=$(cat .api_key 2>/dev/null | cut -d= -f2 || echo "Not generated")
+    local api_key
+    api_key=$(grep -E '^MCP_API_KEY=.+' .env 2>/dev/null | tail -1 | cut -d= -f2- || echo "Not generated")
     
     echo
     echo -e "${GREEN}🎉 Deployment Completed Successfully!${NC}"
@@ -513,7 +517,7 @@ show_deployment_summary() {
     echo
     echo -e "${CYAN}🔑 Authentication:${NC}"
     echo -e "  • API Key: $api_key"
-    echo -e "  • Configuration: .api_key (secure file)"
+    echo -e "  • Configuration: .env (MCP_API_KEY)"
     echo
     echo -e "${CYAN}🐳 Docker Management:${NC}"
     echo -e "  • Status: docker compose ps"

@@ -65,7 +65,7 @@ jobs:
 
     - name: Run tests
       run: |
-        pytest tests/ -v --cov=src/wazuh_mcp_server --cov-report=xml --cov-fail-under=37
+        pytest tests/ -v --cov=src/wazuh_mcp_server --cov-report=xml --cov-fail-under=50
 
     - name: Upload coverage
       if: matrix.python-version == '3.13'

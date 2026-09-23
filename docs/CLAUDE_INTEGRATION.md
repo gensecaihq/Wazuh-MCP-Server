@@ -24,9 +24,7 @@ curl https://your-server-domain.com/health
 1. Open **Claude Desktop**
 2. Go to **Settings** → **Connectors**
 3. Click **"Add custom connector"**
-4. Enter your MCP server URL:
-   - **Recommended (Streamable HTTP):** `https://your-server-domain.com/mcp`
-   - **Legacy (SSE):** `https://your-server-domain.com/sse`
+4. Enter your MCP server URL: `https://your-server-domain.com/mcp`
 5. In **Advanced settings**, add your Bearer token for authentication
 6. Click **Connect**
 
@@ -51,16 +49,21 @@ The server supports three authentication modes via `AUTH_MODE` environment varia
 
 ### OAuth Mode (Recommended)
 
-OAuth with Dynamic Client Registration (DCR) provides the best Claude Desktop experience.
+Each user connects through Claude's OAuth flow and signs in once with their own API key. The token they get carries that key's identity and scopes, so RBAC, rate limits and the audit log are per user.
 
 ```bash
+# Give each user a key (API_KEYS JSON), or one shared key:
+echo "MCP_API_KEY=wazuh_$(openssl rand -base64 32 | tr '+/' '-_' | tr -d '=')" >> .env
 AUTH_MODE=oauth docker compose up -d
 ```
 
 **How it works:**
-1. Claude Desktop discovers OAuth endpoints via `/.well-known/oauth-authorization-server`
-2. Automatically registers as a client (DCR)
-3. Handles authorization flow seamlessly
+1. Claude discovers the endpoints via `/.well-known/oauth-authorization-server`
+2. The browser opens `/oauth/authorize`, which shows a sign-in page
+3. The user pastes their `wazuh_` API key; the grant is capped at that key's scopes (a read-only key can't obtain `wazuh:write`, whatever the client asks for)
+4. Claude exchanges the code (PKCE S256) for access and refresh tokens
+
+Without a configured key nobody can sign in — OAuth mode fails closed.
 
 **OAuth Endpoints:**
 - Discovery (authorization server): `/.well-known/oauth-authorization-server` (RFC 8414)
@@ -78,9 +81,11 @@ For API access or when OAuth is not available:
 AUTH_MODE=bearer docker compose up -d
 ```
 
-**Step 1: Get API Key**
+**Step 1: Set an API Key**
+
+Set it in `.env` before starting (a generated key is never shown in production):
 ```bash
-docker compose logs wazuh-main-server | grep "API key"
+echo "MCP_API_KEY=wazuh_$(openssl rand -base64 32 | tr '+/' '-_' | tr -d '=')" >> .env
 ```
 
 **Step 2: Exchange for JWT Token**
@@ -145,44 +150,12 @@ Could not load app settings
 - ✅ Claude Pro, Max, Team, or Enterprise plan
 - ✅ Use **Connectors UI** (Settings → Connectors), NOT `claude_desktop_config.json`
 - ✅ Server must be accessible via **HTTPS** (production)
-- ✅ Use `/mcp` endpoint (Streamable HTTP) or `/sse` endpoint (legacy)
+- ✅ Use the `/mcp` endpoint (Streamable HTTP); the legacy `/sse` transport is not supported
 - ✅ Authentication: OAuth (recommended), Bearer token, or Authless (dev only)
 
 ---
 
 ## Programmatic Access
-
-### SSE Endpoint
-
-```python
-import httpx
-import asyncio
-
-async def connect_to_mcp_sse():
-    """Connect to MCP server using SSE endpoint."""
-    async with httpx.AsyncClient() as client:
-        # Get authentication token first
-        auth_response = await client.post(
-            "http://localhost:3000/auth/token",
-            json={"api_key": "your-api-key"}
-        )
-        token = auth_response.json()["access_token"]
-
-        # Connect to SSE endpoint
-        async with client.stream(
-            "GET",
-            "http://localhost:3000/sse",
-            headers={
-                "Authorization": f"Bearer {token}",
-                "Accept": "text/event-stream",
-                "Origin": "http://localhost"
-            }
-        ) as response:
-            async for chunk in response.aiter_text():
-                print(f"Received: {chunk}")
-
-asyncio.run(connect_to_mcp_sse())
-```
 
 ### JSON-RPC Endpoint
 

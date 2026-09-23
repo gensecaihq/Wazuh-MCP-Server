@@ -129,13 +129,8 @@ This document details the compatibility of Wazuh MCP Server with different Wazuh
 - ✅ Enhanced CVE tracking and analysis
 - ✅ Improved vulnerability correlation
 
-**New Endpoints:**
-- `/vulnerability/cti/{cve_id}` - Get CTI data for specific CVEs
-- Enhanced `/vulnerability/agents` response with CTI references
-
 **MCP Server Support:**
-- `get_cti_data()` - Fetch CTI information for CVEs
-- `get_vulnerability_details()` - Enhanced vulnerability data
+- CVE lookups read the Wazuh Indexer's `wazuh-states-vulnerabilities-*` index (there is no Manager API vulnerability endpoint)
 
 ### **Wazuh 4.11.x**
 
@@ -171,11 +166,11 @@ This document details the compatibility of Wazuh MCP Server with different Wazuh
 - ✅ **Centralized vulnerability detection**
 - ⚠️ **Breaking Change:** `/vulnerability` endpoint removed
 - ⚠️ **Breaking Change:** `custom` parameter removed from active response
-- ✅ New `/vulnerability/agents` endpoint
+- ✅ Vulnerability state moved to the Indexer (`wazuh-states-vulnerabilities-*`)
 - ✅ `/manager/version/check` endpoint added
 
 **Migration from 4.7.x:**
-- Update to use `/vulnerability/agents` instead of `/vulnerability`
+- Configure `WAZUH_INDEXER_HOST`: vulnerability data is read from the Indexer
 - Remove `custom` parameter from active response calls
 - Enable Wazuh Indexer for better performance
 
@@ -233,9 +228,7 @@ WAZUH_VERIFY_SSL=true
 |----------|------------|-----------|-------|
 | `/agents` | ✅ | ✅ | Fully compatible across all versions |
 | `/alerts` (via Indexer) | ✅ | ❌ | Requires Wazuh Indexer (4.8.0+) |
-| `/vulnerability/agents` | ✅ | ❌ | Added in 4.8.0 |
-| `/vulnerability` | ❌ | ⚠️ | Removed in 4.8.0, deprecated in 4.7.0 |
-| `/vulnerability/cti/{cve}` | ✅ | ❌ | Added in 4.12.0 |
+| Vulnerabilities (via Indexer `wazuh-states-vulnerabilities-*`) | ✅ | ❌ | The Manager API has no `/vulnerability*` routes from 4.8.0 on (checked against the 4.13.0 and 4.14.x API specs) |
 | `/cluster/status` | ✅ | ✅ | Fully compatible |
 | `/manager/stats` | ✅ | ✅ | Fully compatible |
 | `/manager/version/check` | ✅ | ❌ | Added in 4.8.0 |
@@ -274,9 +267,9 @@ WAZUH_VERIFY_SSL=true
 
 ### **4.8.0 Breaking Changes**
 1. **Vulnerability Endpoint Removed**
-   - Old: `GET /vulnerability`
-   - New: `GET /vulnerability/agents`
-   - Impact: MCP Server automatically uses correct endpoint
+   - Old: `GET /vulnerability` (Manager API)
+   - New: vulnerability state lives in the Indexer (`wazuh-states-vulnerabilities-*`)
+   - Impact: vulnerability tools need `WAZUH_INDEXER_HOST`
 
 2. **Active Response Parameter**
    - Removed: `custom` parameter
@@ -289,17 +282,10 @@ WAZUH_VERIFY_SSL=true
 
 ---
 
-## 🔍 **Version Detection**
+## 🔍 **Where Data Comes From**
 
-The MCP Server automatically detects your Wazuh version and adapts:
-
-```python
-# Example: Version-aware vulnerability fetching
-async def get_vulnerabilities(self, **params):
-    # Automatically uses /vulnerability/agents for 4.8.0+
-    # Falls back to legacy endpoint for 4.7.x and below
-    return await self._request("GET", "/vulnerability/agents", params=params)
-```
+- **Manager API** (`WAZUH_HOST`): agents, rules, SCA, syscollector, FIM database, manager logs and stats, cluster, active response.
+- **Indexer** (`WAZUH_INDEXER_HOST`): alerts (`wazuh-alerts-*`) and vulnerabilities (`wazuh-states-vulnerabilities-*`). Without it, alert and vulnerability tools return a configuration error rather than empty results.
 
 ---
 
@@ -358,14 +344,6 @@ curl -X POST http://localhost:3000/mcp \
   -d '{"jsonrpc":"2.0","method":"tools/call","params":{"name":"get_wazuh_vulnerabilities"},"id":"1"}'
 ```
 
-**For 4.12.0+:**
-```bash
-# Test CTI data
-curl -X POST http://localhost:3000/mcp \
-  -H "Authorization: Bearer <token>" \
-  -H "Content-Type: application/json" \
-  -d '{"jsonrpc":"2.0","method":"tools/call","params":{"name":"get_cti_data","arguments":{"cve_id":"CVE-2024-1234"}},"id":"1"}'
-```
 
 ---
 

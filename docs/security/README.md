@@ -30,7 +30,7 @@ Wazuh MCP Server implements multiple layers of security:
 ### Threat Model
 
 **Mitigated Threats:**
-- ✅ Unauthorized access (authentication enforced on all MCP endpoints including `/`, `/mcp`, `/sse`)
+- ✅ Unauthorized access (authentication enforced on all MCP endpoints, `/` and `/mcp`)
 - ✅ Man-in-the-middle attacks (TLS encryption, security headers)
 - ✅ Credential theft (constant-time hash comparison, secure storage practices)
 - ✅ Injection attacks (comprehensive input validation with regex patterns)

@@ -141,16 +141,15 @@ docker compose logs wazuh-main-server | grep -i auth
 
 ### Updates
 
+compose builds the image locally (`wazuh-main-server` isn't a registry image, so `docker compose pull` fails):
+
 ```bash
-# Pull latest images
-docker compose pull
-
-# Update and restart
-docker compose pull && docker compose up -d
-
-# Update with rebuild
-docker compose build --pull --no-cache && docker compose up -d
+# Update the source and rebuild on fresh base images
+git pull
+docker compose build --pull && docker compose up -d
 ```
+
+To run the published image instead, use `ghcr.io/gensecaihq/wazuh-mcp-server:<version>` (see the README).
 
 ### Backups
 
@@ -165,8 +164,8 @@ tar -czf backup-full-$(date +%Y%m%d).tar.gz .env compose.yml logs/
 ### Security Updates
 
 ```bash
-# Check for vulnerabilities
-docker scout cves wazuh-main-server:latest
+# Check for vulnerabilities (compose tags the image with VERSION, default 4.3.0)
+docker scout cves wazuh-main-server:${VERSION:-4.3.0}
 
 # Force security update
 docker compose build --pull --no-cache
@@ -182,7 +181,6 @@ docker compose up -d
 | Endpoint | Method | Description |
 |----------|--------|-------------|
 | `/mcp` | GET/POST/DELETE | **Recommended** - Streamable HTTP (MCP 2026-07-28 + legacy) |
-| `/sse` | GET | Legacy SSE endpoint |
 | `/` | GET/POST | JSON-RPC 2.0 endpoint (authenticated) |
 | `/health` | GET | Liveness probe — 200 while the process is up (no dependency checks; use this for the container/orchestrator healthcheck) |
 | `/ready` | GET | Readiness probe — verifies Wazuh Manager/Indexer reachability; 503 when a dependency is down |

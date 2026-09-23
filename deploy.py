@@ -83,6 +83,23 @@ def run_command(cmd: List[str], check: bool = True, capture_output: bool = False
         sys.exit(1)
 
 
+def host_port() -> str:
+    """The published port: MCP_PORT from the shell, else from .env (what compose uses)."""
+    if os.environ.get('MCP_PORT'):
+        return os.environ['MCP_PORT']
+    env_file = Path('.env')
+    port = '3000'
+    if env_file.exists():
+        # Last assignment wins, as it does for docker compose's env-file parsing
+        for line in env_file.read_text().splitlines():
+            line = line.strip()
+            if line.startswith('MCP_PORT='):
+                value = line.split('=', 1)[1].strip().strip('"').strip("'")
+                if value:
+                    port = value
+    return port
+
+
 def check_docker():
     """Check if Docker is installed and running"""
     print_step("Checking Docker installation...")
@@ -132,8 +149,16 @@ def setup_environment():
     with open(env_file, 'r') as f:
         env_content = f.read()
 
+    values = {}
+    for line in env_content.splitlines():
+        line = line.strip()
+        if line and not line.startswith('#') and '=' in line:
+            key, _, value = line.partition('=')
+            values[key.strip()] = value.strip().strip('"').strip("'")
     for var in required_vars:
-        if f"{var}=" not in env_content or f"{var}=your-" in env_content:
+        value = values.get(var, '')
+        # Placeholders from .env.example (e.g. https://your-wazuh-server.com) count as unset
+        if not value or 'your-' in value or 'example' in value or value.startswith('<'):
             missing_vars.append(var)
 
     if missing_vars:
@@ -144,6 +169,23 @@ def setup_environment():
         sys.exit(1)
 
     print_success("Environment configuration validated")
+
+
+def ensure_auth_secret():
+    """compose runs ENVIRONMENT=production, which refuses to start without AUTH_SECRET_KEY."""
+    env_file = Path('.env')
+    for line in env_file.read_text().splitlines():
+        stripped = line.strip()
+        if stripped.startswith('AUTH_SECRET_KEY=') and stripped.split('=', 1)[1].strip():
+            print_success("Using existing AUTH_SECRET_KEY from .env")
+            return
+    with open(env_file, 'a') as f:
+        f.write(f"\n# Auto-generated token signing key (keep identical across instances)\nAUTH_SECRET_KEY={secrets.token_hex(32)}\n")
+    try:
+        os.chmod(env_file, 0o600)
+    except OSError:
+        pass  # Windows doesn't support chmod
+    print_success("Generated AUTH_SECRET_KEY in .env")
 
 
 def generate_api_key() -> str:
@@ -175,7 +217,7 @@ def generate_api_key() -> str:
     print()
     print_success(f"Generated API key: {api_key}")
     print_warning("Saved to .env as MCP_API_KEY - keep it secret")
-    print(f"{Colors.CYAN}Use this key as a Bearer token to authenticate with the MCP server{Colors.NC}")
+    print(f"{Colors.CYAN}Exchange it for a bearer token: POST /auth/token with {{\"api_key\": \"<key>\"}}{Colors.NC}")
     print()
 
     return api_key
@@ -206,7 +248,7 @@ def wait_for_services():
     print_step("Waiting for services to be ready...")
 
     max_attempts = 30
-    port = os.environ.get('MCP_PORT', '3000')
+    port = host_port()
 
     for attempt in range(1, max_attempts + 1):
         try:
@@ -232,7 +274,7 @@ def run_health_checks() -> bool:
     """Run health checks"""
     print_step("Running health checks...")
 
-    port = os.environ.get('MCP_PORT', '3000')
+    port = host_port()
 
     try:
         import urllib.request
@@ -256,7 +298,7 @@ def show_deployment_info(api_key: str):
     """Show deployment information"""
     print_step("Deployment complete! Here's your service information:")
 
-    port = os.environ.get('MCP_PORT', '3000')
+    port = host_port()
 
     print()
     print(f"{Colors.CYAN}🔗 Service URLs:{Colors.NC}")
@@ -347,6 +389,7 @@ def main_deploy():
         # Run deployment steps
         check_docker()
         setup_environment()
+        ensure_auth_secret()
         api_key = generate_api_key()
         build_and_deploy()
 
