@@ -718,3 +718,41 @@ class TestSseEventIds:
         first = [await mcp_server.generate_sse_events(session).__anext__() for _ in range(2)]
         ids = [chunk.split("\n")[0] for chunk in first]
         assert ids[0].startswith("id: ") and ids[0] != ids[1]
+
+
+class TestRateLimitAndOAuthBinding:
+    def test_mcp_rate_limit_follows_env(self):
+        import subprocess
+        import sys
+
+        env = {**os.environ, "RATE_LIMIT_REQUESTS": "7", "RATE_LIMIT_WINDOW": "30", "AUTH_MODE": "none"}
+        code = "from wazuh_mcp_server import server as s; print(s.rate_limiter.max_requests, s.rate_limiter.window_seconds)"
+        out = subprocess.run([sys.executable, "-c", code], env=env, capture_output=True, text=True, check=True)
+        assert out.stdout.split()[-2:] == ["7", "30"]
+
+    @pytest.mark.asyncio
+    async def test_removing_the_key_ends_oauth_tokens(self, monkeypatch):
+        from types import SimpleNamespace
+
+        from wazuh_mcp_server.auth import APIKey, auth_manager
+        from wazuh_mcp_server.oauth import OAuthManager
+
+        mgr = OAuthManager(
+            SimpleNamespace(
+                AUTH_SECRET_KEY="test-secret-key-at-least-32-characters-long",
+                OAUTH_ENABLE_DCR=False,
+                OAUTH_ACCESS_TOKEN_TTL=3600,
+                OAUTH_REFRESH_TOKEN_TTL=86400,
+                OAUTH_AUTHORIZATION_CODE_TTL=600,
+                OAUTH_ISSUER_URL="",
+            )
+        )
+        key = APIKey(id="k-oauth", name="k", key_hash="x", created_at=datetime.now(timezone.utc), scopes=["wazuh:read"])
+        monkeypatch.setitem(auth_manager.api_keys, "k-oauth", key)
+        token = mgr._create_jwt_token("claude-desktop", "wazuh:read", "access", "k-oauth", "fam")
+        monkeypatch.setattr(mcp_server, "_oauth_manager", mgr)
+        monkeypatch.setattr(mcp_server.config, "AUTH_MODE", "oauth")
+        assert await mcp_server.verify_authentication(f"Bearer {token}", mcp_server.config)
+        key.active = False
+        with pytest.raises(Exception):
+            await mcp_server.verify_authentication(f"Bearer {token}", mcp_server.config)
