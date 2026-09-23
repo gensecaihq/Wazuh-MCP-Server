@@ -1704,9 +1704,7 @@ def _require_action_confirmation() -> bool:
             return True
         if raw in ("false", "0", "no"):
             return False
-        raise ValueError(
-            "WAZUH_REQUIRE_ACTION_CONFIRMATION must be true or false"
-        )
+        raise ValueError("WAZUH_REQUIRE_ACTION_CONFIRMATION must be true or false")
     return os.getenv("ENVIRONMENT", getattr(config, "ENVIRONMENT", "development")).strip().lower() == "production"
 
 
