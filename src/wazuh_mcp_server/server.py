@@ -499,6 +499,23 @@ async def lifespan(app: FastAPI):
 
     install_log_sanitizer()
 
+    # Fail at startup, not on the first tool call: an empty WAZUH_HOST used to surface much
+    # later as "Request URL is missing an 'http://' or 'https://' protocol".
+    _startup_cfg = get_config()
+    _missing = [
+        name
+        for name, value in (
+            ("WAZUH_HOST", _startup_cfg.WAZUH_HOST),
+            ("WAZUH_USER", _startup_cfg.WAZUH_USER),
+            ("WAZUH_PASS", _startup_cfg.WAZUH_PASS),
+        )
+        if not value
+    ]
+    if _missing:
+        from wazuh_mcp_server.config import ConfigurationError
+
+        raise ConfigurationError(f"Required Wazuh Manager settings are not set: {', '.join(_missing)}")
+
     logger.info(f"Wazuh MCP Server v{__version__} starting up...")
     logger.info(f"📡 MCP Protocol: {MCP_PROTOCOL_VERSION}")
     logger.info(f"🔗 Wazuh Host: {get_config().WAZUH_HOST}")
@@ -1846,7 +1863,7 @@ async def handle_tools_list(params: Dict[str, Any], session: MCPSession) -> Dict
             "inputSchema": {
                 "type": "object",
                 "properties": {
-                    "limit": {"type": "integer", "minimum": 1, "maximum": 1000, "default": 100},
+                    "limit": {"type": "integer", "minimum": 1, "maximum": config.MAX_ALERTS_PER_QUERY, "default": 100},
                     "rule_id": {"type": "string", "description": "Filter by specific rule ID"},
                     "level": {
                         "type": "string",
@@ -1961,7 +1978,7 @@ async def handle_tools_list(params: Dict[str, Any], session: MCPSession) -> Dict
                         "enum": ["1h", "6h", "12h", "1d", "24h", "7d", "30d"],
                         "default": "24h",
                     },
-                    "limit": {"type": "integer", "minimum": 1, "maximum": 1000, "default": 100},
+                    "limit": {"type": "integer", "minimum": 1, "maximum": config.MAX_ALERTS_PER_QUERY, "default": 100},
                     "rule_id": {"type": "string", "description": "Filter by Wazuh rule ID (e.g., '5710', '100002')"},
                     "agent_id": {"type": "string", "description": "Filter by Wazuh agent ID (e.g., '001', '1234')"},
                     "level": {
@@ -2824,7 +2841,7 @@ async def handle_tools_call(params: Dict[str, Any], session: MCPSession) -> Dict
         # Alert Management Tools
         if tool_name == "get_wazuh_alerts":
             # Validate all parameters
-            limit = validate_limit(arguments.get("limit"), max_val=1000)
+            limit = validate_limit(arguments.get("limit"), max_val=config.MAX_ALERTS_PER_QUERY)
             rule_id = validate_rule_id(arguments.get("rule_id"))
             level = arguments.get("level")
             # Validate level format: must be a number optionally followed by "+"
@@ -2906,7 +2923,7 @@ async def handle_tools_call(params: Dict[str, Any], session: MCPSession) -> Dict
         elif tool_name == "search_security_events":
             query = validate_query(arguments.get("query"), required=True)
             time_range = validate_time_range(arguments.get("time_range"))
-            limit = validate_limit(arguments.get("limit"), max_val=1000)
+            limit = validate_limit(arguments.get("limit"), max_val=config.MAX_ALERTS_PER_QUERY)
             compact = validate_boolean(arguments.get("compact"), default=True, param_name="compact")
             rule_id = validate_rule_id(arguments.get("rule_id"))
             agent_id = validate_agent_id(arguments.get("agent_id"))
