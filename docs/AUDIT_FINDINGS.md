@@ -1,5 +1,11 @@
 # Production-Readiness Audit — Findings & Remediation
 
+> **Historical record.** This document describes the production-readiness audit carried out
+> for the v4.3.0 release (August 2026) and the code as it was then. Counts, file references and
+> behavior below may have changed since. Later fixes, including the September 2026 audit, are
+> listed in [CHANGELOG.md](../CHANGELOG.md); current security behavior is documented in
+> [docs/security/README.md](security/README.md).
+
 A block-by-block audit of the server (MCP protocol/dispatch, Wazuh API clients, auth/OAuth,
 security middleware, resilience, config, and the deploy surface). Findings were verified
 against the code by tracing each path; the fixes below are covered by regression tests in

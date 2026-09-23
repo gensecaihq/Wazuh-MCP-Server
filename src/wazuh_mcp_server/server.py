@@ -167,6 +167,15 @@ async def _do_verify_authentication(authorization: Optional[str], config) -> Opt
         if _oauth_manager:
             token = authorization.replace("Bearer ", "") if authorization.startswith("Bearer ") else authorization
             token_obj = _oauth_manager.validate_access_token(token)
+            subject = getattr(token_obj, "subject", None) if token_obj else None
+            if subject:
+                # Same binding as bearer JWTs: removing or deactivating the API key the user
+                # signed in with ends their OAuth tokens too, not just at TTL expiry.
+                from wazuh_mcp_server.auth import auth_manager
+
+                key_obj = auth_manager.api_keys.get(subject)
+                if key_obj is None or not key_obj.active:
+                    token_obj = None
             if token_obj:
                 # Return AuthToken with OAuth scopes (fail closed to read-only)
                 scope_str = getattr(token_obj, "scope", "") or ""
@@ -731,7 +740,16 @@ async def get_wazuh_client() -> WazuhClient:
 
 
 # Initialize rate limiter
-rate_limiter = RateLimiter(max_requests=RATE_LIMIT_REQUESTS, window_seconds=RATE_LIMIT_WINDOW_SECONDS)
+# Honour RATE_LIMIT_REQUESTS / RATE_LIMIT_WINDOW here too (validated at startup in security.py);
+# the MCP endpoints used hard-coded constants, so the documented knobs never reached them.
+rate_limiter = RateLimiter(
+    max_requests=validate_positive_int(
+        os.getenv("RATE_LIMIT_REQUESTS", str(RATE_LIMIT_REQUESTS)), "RATE_LIMIT_REQUESTS"
+    ),
+    window_seconds=validate_positive_int(
+        os.getenv("RATE_LIMIT_WINDOW", str(RATE_LIMIT_WINDOW_SECONDS)), "RATE_LIMIT_WINDOW", max_val=86400
+    ),
+)
 
 # Initialize graceful shutdown manager
 shutdown_manager = GracefulShutdown()

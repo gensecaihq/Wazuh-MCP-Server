@@ -2831,8 +2831,8 @@ class WazuhClient:
                 f"Cannot remove a {block_kind} block through the Wazuh API: stock active-response "
                 f"scripts only support the 'add' action via the API, so this would re-block "
                 f"{src_ip} instead of removing it. Configure an operator-deployed undo script "
-                f"and set {env_var} to its command name, or rely on the manager's "
-                f"<active-response><timeout> to expire the block automatically."
+                f"and set {env_var} to its command name, or remove the block on the agent host. "
+                f"(A manager <active-response><timeout> does not apply: API-dispatched blocks never expire.)"
             )
         data = {
             "command": undo_command,
