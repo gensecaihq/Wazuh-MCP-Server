@@ -2,7 +2,7 @@
 
 ## Upgrading to the next release (after 4.3.0)
 
-Most changes are fixes. These ones need action or change what clients see:
+These changes are on `main` and listed under "Unreleased" in [CHANGELOG.md](CHANGELOG.md). Most are fixes; the ones below need action or change what clients see.
 
 ### 1. OAuth users sign in with an API key
 
@@ -70,8 +70,9 @@ AUTH_SECRET_KEY=<32+ char secret>
 
 ### 3. Alerts come from the Indexer, not the Manager
 
-The Manager REST API removed `/alerts` in Wazuh 4.8. Alert, aggregation,
-vulnerability, and alert-backed compliance tools require the Wazuh Indexer:
+The Wazuh Manager REST API has no alerts endpoint, and from Wazuh 4.8 vulnerability data is
+only in the Indexer. Alert, aggregation, vulnerability, and alert-backed compliance tools
+require the Wazuh Indexer (see [WAZUH_COMPATIBILITY.md](WAZUH_COMPATIBILITY.md)):
 
 ```env
 WAZUH_INDEXER_HOST=<indexer-host>
@@ -88,8 +89,9 @@ silently empty results.
 address. Stock Wazuh cannot remove a firewall-drop / hosts.deny block through the
 API, so these tools now require an operator-deployed undo script named via
 `WAZUH_AR_FIREWALL_UNDO_COMMAND` / `WAZUH_AR_HOSTDENY_UNDO_COMMAND`, or they refuse
-with an actionable error. Alternatively, configure `<active-response><timeout>` in
-the manager so blocks expire automatically.
+with an actionable error. (The 4.3.0 notes also suggested an `<active-response><timeout>`
+in the manager so blocks expire; that does not work for API-dispatched commands, see
+"Tool calls" above.)
 
 ### MCP protocol
 
