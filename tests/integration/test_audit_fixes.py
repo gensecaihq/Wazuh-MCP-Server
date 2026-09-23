@@ -268,6 +268,17 @@ class TestPrincipalKey:
         # verify_bearer_token decodes with get_config().AUTH_SECRET_KEY (the shared
         # singleton, i.e. mcp_server.config); sign the tokens with the same key.
         monkeypatch.setattr(mcp_server.config, "AUTH_SECRET_KEY", secret)
+        from datetime import datetime, timezone
+
+        from wazuh_mcp_server.auth import APIKey, auth_manager
+
+        # Tokens are bound to live API keys, so the keys must exist
+        for kid in ("key-A", "key-B"):
+            monkeypatch.setitem(
+                auth_manager.api_keys,
+                kid,
+                APIKey(id=kid, name=kid, key_hash="x", created_at=datetime.now(timezone.utc), scopes=["wazuh:read"]),
+            )
         tok_a = create_access_token({"sub": "key-A", "scope": "wazuh:read"}, secret)
         tok_b = create_access_token({"sub": "key-B", "scope": "wazuh:read"}, secret)
 

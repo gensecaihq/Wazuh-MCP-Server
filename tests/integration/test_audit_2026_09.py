@@ -409,3 +409,46 @@ class TestOutputRedaction:
             {"name": "search_wazuh_manager_logs", "arguments": {"query": "password"}}, _session()
         )
         assert "hunter2" not in result["content"][0]["text"]
+
+
+class TestBearerTokenBinding:
+    @pytest.fixture
+    def minted(self, monkeypatch):
+        from wazuh_mcp_server.auth import APIKey, auth_manager, create_access_token
+
+        secret = "test-secret-key-at-least-32-characters-long"
+        monkeypatch.setattr(mcp_server.config, "AUTH_SECRET_KEY", secret)
+        key = APIKey(id="k1", name="k1", key_hash="x", created_at=datetime.now(timezone.utc), scopes=["wazuh:read"])
+        monkeypatch.setitem(auth_manager.api_keys, "k1", key)
+        return key, secret, create_access_token
+
+    @pytest.mark.asyncio
+    async def test_revoking_the_key_ends_its_tokens(self, minted):
+        from wazuh_mcp_server.auth import verify_bearer_token
+
+        key, secret, mint = minted
+        token = mint({"sub": "k1", "scope": "wazuh:read"}, secret)
+        assert (await verify_bearer_token(f"Bearer {token}")).api_key_id == "jwt:k1"
+        key.active = False
+        with pytest.raises(ValueError):
+            await verify_bearer_token(f"Bearer {token}")
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("claims", [{"type": "refresh"}, {"exp": None}])
+    async def test_refresh_or_non_expiring_tokens_refused(self, minted, claims):
+        import jwt as pyjwt
+
+        from wazuh_mcp_server.auth import verify_bearer_token
+
+        _, secret, _ = minted
+        payload = {"sub": "k1", "scope": "wazuh:read", "exp": int(datetime.now(timezone.utc).timestamp()) + 600}
+        payload.update(claims)
+        payload = {k: v for k, v in payload.items() if v is not None}
+        with pytest.raises(ValueError):
+            await verify_bearer_token(f"Bearer {pyjwt.encode(payload, secret, algorithm='HS256')}")
+
+    def test_env_key_id_is_stable_across_instances(self, monkeypatch):
+        from wazuh_mcp_server.auth import AuthManager
+
+        monkeypatch.setenv("MCP_API_KEY", "wazuh_" + "a" * 43)
+        assert list(AuthManager().api_keys) == list(AuthManager().api_keys)
