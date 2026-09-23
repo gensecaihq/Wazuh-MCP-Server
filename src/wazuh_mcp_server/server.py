@@ -1813,7 +1813,10 @@ async def handle_tools_list(params: Dict[str, Any], session: MCPSession) -> Dict
                 "properties": {
                     "limit": {"type": "integer", "minimum": 1, "maximum": 1000, "default": 100},
                     "rule_id": {"type": "string", "description": "Filter by specific rule ID"},
-                    "level": {"type": "string", "description": "Filter by alert level (e.g., '12', '10+')"},
+                    "level": {
+                        "type": "string",
+                        "description": "Minimum alert level: '10' (or '10+') returns level 10 and above",
+                    },
                     "agent_id": {"type": "string", "description": "Filter by agent ID"},
                     "rule_groups": {
                         "type": "array",
@@ -1869,7 +1872,7 @@ async def handle_tools_list(params: Dict[str, Any], session: MCPSession) -> Dict
                         "enum": ["1h", "6h", "12h", "1d", "24h", "7d", "30d"],
                         "default": "24h",
                     },
-                    "min_frequency": {"type": "integer", "minimum": 1, "default": 5},
+                    "min_frequency": {"type": "integer", "minimum": 1, "maximum": 1000, "default": 5},
                 },
                 "required": [],
             },
@@ -2380,7 +2383,12 @@ async def handle_tools_list(params: Dict[str, Any], session: MCPSession) -> Dict
                 "type": "object",
                 "properties": {
                     "agent_id": {"type": "string", "description": "ID of the agent"},
-                    "process_id": {"type": "integer", "description": "PID of the process to kill"},
+                    "process_id": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 999999,
+                        "description": "PID of the process to kill",
+                    },
                 },
                 "required": ["agent_id", "process_id"],
             },
@@ -2489,7 +2497,7 @@ async def handle_tools_list(params: Dict[str, Any], session: MCPSession) -> Dict
                 "type": "object",
                 "properties": {
                     "agent_id": {"type": "string", "description": "ID of the agent"},
-                    "process_id": {"type": "integer", "description": "PID to check"},
+                    "process_id": {"type": "integer", "minimum": 1, "maximum": 999999, "description": "PID to check"},
                 },
                 "required": ["agent_id", "process_id"],
             },
@@ -3177,6 +3185,10 @@ async def handle_tools_call(params: Dict[str, Any], session: MCPSession) -> Dict
             _guard_manager_agent(agent_id, tool_name)
             command = validate_active_response_command(arguments.get("command"), required=True)
             parameters = arguments.get("parameters")
+            if parameters is not None and not isinstance(parameters, dict):
+                raise ToolValidationError(
+                    "parameters", f"must be an object, got {type(parameters).__name__}", 'e.g. {"srcip": "1.2.3.4"}'
+                )
             result = await wazuh_client.run_active_response(agent_id, command, parameters)
             _success = True
             return _tool_result(f"Active Response Result:\n{json.dumps(result, indent=2, default=str)}")

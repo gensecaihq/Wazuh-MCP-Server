@@ -258,6 +258,14 @@ def validate_timestamp(value: Any, required: bool = False, param_name: str = "ti
         return normalized
 
     if ISO_TIMESTAMP_PATTERN.match(timestamp):
+        # The regex checks shape only; "2026-13-45" or "T25:99:99Z" would reach the indexer
+        # and fail there. fromisoformat checks the calendar (and accepts Z on 3.11+).
+        try:
+            datetime.fromisoformat(timestamp)
+        except ValueError:
+            raise ToolValidationError(
+                param_name, f"not a real date/time '{value}'", "Use ISO 8601, e.g. 2026-09-23T14:00:00Z, or now-24h"
+            ) from None
         return timestamp
 
     raise ToolValidationError(

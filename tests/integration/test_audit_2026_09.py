@@ -617,3 +617,34 @@ class TestAlertSummaryAndSize:
         result = await mcp_server.handle_tools_call({"name": "get_wazuh_rules_summary", "arguments": {}}, _session())
         text = result["content"][0]["text"]
         assert len(text) < 1300 and "Truncated" in text
+
+
+class TestInputEdgeCases:
+    @pytest.mark.parametrize("value", ["2026-13-45", "2026-09-23T25:99:99Z"])
+    def test_impossible_timestamps_rejected(self, value):
+        from wazuh_mcp_server.security import validate_timestamp
+
+        with pytest.raises(ToolValidationError):
+            validate_timestamp(value)
+
+    def test_real_timestamps_and_date_math_accepted(self):
+        from wazuh_mcp_server.security import validate_timestamp
+
+        assert validate_timestamp("2026-09-23T14:00:00Z") == "2026-09-23T14:00:00Z"
+        assert validate_timestamp("now-24h") == "now-24h"
+
+    @pytest.mark.asyncio
+    async def test_active_response_parameters_must_be_an_object(self):
+        result = await mcp_server.handle_tools_call(
+            {
+                "name": "wazuh_active_response",
+                "arguments": {"agent_id": "001", "command": "!restart-wazuh", "parameters": ["a"]},
+            },
+            _session(),
+        )
+        assert result["isError"] is True and "parameters" in result["content"][0]["text"]
+
+    def test_all_alongside_other_toolsets_means_all(self):
+        from wazuh_mcp_server.toolsets import ALL_TOOLS, resolve_enabled_tools
+
+        assert resolve_enabled_tools("all,alerts", None) == ALL_TOOLS

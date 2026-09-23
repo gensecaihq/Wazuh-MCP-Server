@@ -133,7 +133,7 @@ def resolve_enabled_tools(toolsets: Optional[str], disabled_tools: Optional[str]
     fails at startup instead of silently hiding (or exposing) tools.
     """
     names = _split(toolsets)
-    if not names or names == ["all"]:
+    if not names or "all" in names:
         enabled = set(ALL_TOOLS)
     else:
         unknown = [n for n in names if n not in TOOLSETS]
