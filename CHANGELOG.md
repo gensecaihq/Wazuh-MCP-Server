@@ -9,9 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 - **OAuth now requires sign-in.** `/oauth/authorize` auto-approved every request, and the pre-registered public client was registered for read+write, so anyone who could reach the server got a `wazuh:write` token and could run active response. Users now sign in with their `wazuh_` API key; the grant is capped at that key's scopes and tokens carry the key's identity, so RBAC, rate limits and the audit log are per user. A refresh-token replay revokes that grant only, instead of every user of the shared client. DCR rejects grant types and auth methods the server doesn't implement.
-- **Bearer JWTs are bound to their API key**: revoking or rotating the key ends its tokens (they used to stay valid until expiry). Tokens must carry `exp`; refresh tokens are refused as access tokens. `MCP_API_KEY` gets a stable id derived from the key, identical across replicas and restarts.
+- **Tokens are bound to their API key**: revoking or rotating the key ends its bearer JWTs and the OAuth access tokens from sign-ins with it (they used to stay valid until expiry). Tokens must carry `exp`; refresh tokens are refused as access tokens. `MCP_API_KEY` gets a stable id derived from the key, identical across replicas and restarts.
 - **Protected-target checks cover every blocking tool.** `wazuh_firewall_drop` and `wazuh_host_deny` never checked `WAZUH_PROTECTED_IPS`/loopback/the Manager, and leading-zero or IPv4-mapped IPv6 spellings (`127.000.000.001`, `::ffff:7f00:1`) slipped past `wazuh_block_ip`'s check.
 - **Tool output is redacted in every mode**: credentials in log lines were only redacted for compact alerts; `compact=false`, GCF output, manager logs and resource reads returned them verbatim. Log redaction also covers tracebacks, structured `extra` fields and bare JWTs.
+- `RATE_LIMIT_REQUESTS`/`RATE_LIMIT_WINDOW` now apply to `/mcp` and `/`, which used hard-coded constants.
 - Chunked request bodies are size-capped while streaming (they were buffered in full first); failed authentication on the MCP endpoints is rate limited; `DELETE /mcp` checks Origin; `resources/read` no longer returns raw backend exception text; the Trivy filesystem scan in CI actually gates.
 
 ### Added
