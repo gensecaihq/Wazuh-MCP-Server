@@ -1715,6 +1715,22 @@ def _arg_is_true(value: Any) -> bool:
     return False
 
 
+def _reject_block_duration(arguments: Dict[str, Any]) -> None:
+    """Per-call block durations can't work: the Wazuh agent sets the timeout to 0 for every
+    API-dispatched '!script' command (os_execd GetCommandbyName), so a "1 hour" block was
+    silently permanent. Refuse a positive duration instead of implying it will expire."""
+    duration = arguments.get("duration")
+    if duration is None:
+        return
+    if validate_limit(duration, min_val=0, max_val=86400, param_name="duration") > 0:
+        raise ToolValidationError(
+            "duration",
+            "per-call block durations are not supported: Wazuh ignores the timeout for API-triggered "
+            "active response, so the block would be permanent",
+            "Omit duration; remove the block later with wazuh_firewall_allow",
+        )
+
+
 def _require_action_confirmation() -> bool:
     """Whether state-changing tools require an explicit confirm=true (env-gated, default off)."""
     return os.getenv("WAZUH_REQUIRE_ACTION_CONFIRMATION", "false").strip().lower() in ("true", "1", "yes")
@@ -2256,7 +2272,7 @@ async def handle_tools_list(params: Dict[str, Any], session: MCPSession) -> Dict
                 "type": "object",
                 "properties": {
                     "query": {"type": "string", "description": "Search query/pattern"},
-                    "limit": {"type": "integer", "minimum": 1, "maximum": 1000, "default": 100},
+                    "limit": {"type": "integer", "minimum": 1, "maximum": 500, "default": 100},
                 },
                 "required": ["query"],
             },
@@ -2266,7 +2282,7 @@ async def handle_tools_list(params: Dict[str, Any], session: MCPSession) -> Dict
             "description": "Get recent error logs from Wazuh manager",
             "inputSchema": {
                 "type": "object",
-                "properties": {"limit": {"type": "integer", "minimum": 1, "maximum": 1000, "default": 100}},
+                "properties": {"limit": {"type": "integer", "minimum": 1, "maximum": 500, "default": 100}},
                 "required": [],
             },
         },
@@ -2278,17 +2294,11 @@ async def handle_tools_list(params: Dict[str, Any], session: MCPSession) -> Dict
         # Active Response / Action Tools (9 tools)
         {
             "name": "wazuh_block_ip",
-            "description": "[ACTION] Block an IP address via Wazuh active response firewall-drop. Risk: LOW, Reversible.",
+            "description": "[ACTION] Block an IP address via Wazuh active response firewall-drop. The block is permanent until removed; wazuh_firewall_allow needs an operator-deployed undo script (WAZUH_AR_FIREWALL_UNDO_COMMAND).",
             "inputSchema": {
                 "type": "object",
                 "properties": {
                     "ip_address": {"type": "string", "description": "IP address to block"},
-                    "duration": {
-                        "type": "integer",
-                        "minimum": 0,
-                        "default": 0,
-                        "description": "Block duration in seconds (0 = permanent). Advisory only: actual expiry is governed by the manager's active-response <timeout> configuration, not per-call.",
-                    },
                     "agent_id": {
                         "type": "string",
                         "description": "Target agent ID. Required unless all_agents=true is set.",
@@ -2369,12 +2379,6 @@ async def handle_tools_list(params: Dict[str, Any], session: MCPSession) -> Dict
                 "properties": {
                     "agent_id": {"type": "string", "description": "ID of the agent"},
                     "src_ip": {"type": "string", "description": "Source IP address to drop"},
-                    "duration": {
-                        "type": "integer",
-                        "minimum": 0,
-                        "default": 0,
-                        "description": "Duration in seconds (0 = permanent)",
-                    },
                 },
                 "required": ["agent_id", "src_ip"],
             },
@@ -2994,14 +2998,14 @@ async def handle_tools_call(params: Dict[str, Any], session: MCPSession) -> Dict
 
         elif tool_name == "search_wazuh_manager_logs":
             query = validate_query(arguments.get("query"), required=True)
-            limit = validate_limit(arguments.get("limit"), max_val=1000)
+            limit = validate_limit(arguments.get("limit"), max_val=500)  # /manager/logs caps limit at 500
 
             result = await wazuh_client.search_manager_logs(query, limit)
             _success = True
             return _tool_result(f"Manager Logs:\n{json.dumps(result, indent=2, default=str)}")
 
         elif tool_name == "get_wazuh_manager_error_logs":
-            limit = validate_limit(arguments.get("limit"), max_val=1000)
+            limit = validate_limit(arguments.get("limit"), max_val=500)  # /manager/logs caps limit at 500
             result = await wazuh_client.get_manager_error_logs(limit)
             _success = True
             return _tool_result(f"Manager Error Logs:\n{json.dumps(result, indent=2, default=str)}")
@@ -3014,17 +3018,13 @@ async def handle_tools_call(params: Dict[str, Any], session: MCPSession) -> Dict
         # Active Response / Action Tools
         elif tool_name == "wazuh_block_ip":
             ip_address = validate_ip_address(arguments.get("ip_address"), required=True)
-            duration = (
-                validate_limit(arguments.get("duration"), min_val=0, max_val=86400, param_name="duration")
-                if arguments.get("duration") is not None
-                else 0
-            )
+            _reject_block_duration(arguments)
             agent_id = validate_agent_id(arguments.get("agent_id"))
             # Strict boolean: raw bool("false") is True, which would turn an explicit
             # all_agents="false" (LLMs routinely send stringly-typed booleans) into a
             # fleet-wide block. validate_boolean maps "false"/"0"/"no"/"off" → False.
             all_agents = validate_boolean(arguments.get("all_agents"), default=False, param_name="all_agents")
-            result = await wazuh_client.block_ip(ip_address, duration, agent_id, all_agents=all_agents)
+            result = await wazuh_client.block_ip(ip_address, agent_id=agent_id, all_agents=all_agents)
             _success = True
             return _tool_result(f"Block IP Result:\n{json.dumps(result, indent=2, default=str)}")
 
@@ -3074,12 +3074,8 @@ async def handle_tools_call(params: Dict[str, Any], session: MCPSession) -> Dict
         elif tool_name == "wazuh_firewall_drop":
             agent_id = validate_agent_id(arguments.get("agent_id"), required=True)
             src_ip = validate_ip_address(arguments.get("src_ip"), required=True, param_name="src_ip")
-            duration = (
-                validate_limit(arguments.get("duration"), min_val=0, max_val=86400, param_name="duration")
-                if arguments.get("duration") is not None
-                else 0
-            )
-            result = await wazuh_client.firewall_drop(agent_id, src_ip, duration)
+            _reject_block_duration(arguments)
+            result = await wazuh_client.firewall_drop(agent_id, src_ip)
             _success = True
             return _tool_result(f"Firewall Drop Result:\n{json.dumps(result, indent=2, default=str)}")
 

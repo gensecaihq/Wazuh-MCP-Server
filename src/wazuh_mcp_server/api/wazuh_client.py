@@ -151,6 +151,22 @@ _ISO27001_CONTROL_MAP: Dict[str, Dict] = {
 }
 
 
+def _retry_after_seconds(value: Optional[str], default: int = 30) -> int:
+    """Retry-After is either delta-seconds or an HTTP-date (RFC 9110); int() on a date crashed."""
+    if not value:
+        return default
+    try:
+        return max(0, int(value))
+    except ValueError:
+        pass
+    try:
+        from email.utils import parsedate_to_datetime
+
+        return max(0, int((parsedate_to_datetime(value) - datetime.now(timezone.utc)).total_seconds()))
+    except (TypeError, ValueError):
+        return default
+
+
 class WazuhClient:
     """Simplified Wazuh API client with rate limiting, circuit breaker, and retry logic."""
 
@@ -449,13 +465,15 @@ class WazuhClient:
         # Wazuh 4.x API: agent_list must be passed as query param 'agents_list'
         agents_list = data.pop("agent_list", None)
         params = {}
+        fleet_wide = False
         if agents_list:
             agent_items = agents_list if isinstance(agents_list, list) else [agents_list]
             # Check if targeting all agents
             if any(str(a).lower() == "all" for a in agent_items):
-                # Wazuh 4.x API requires a valid agents_list; use "all" as a special keyword
-                # that the API accepts for targeting all agents
-                params["agents_list"] = "all"
+                # PUT /active-response's agents_list only accepts numeric IDs ("all" is a 400);
+                # an absent agents_list means every agent. Omit it — but only for an explicit
+                # "all" from the caller; every other missing target is refused below.
+                fleet_wide = True
             else:
                 # Filter to numeric agent IDs only
                 numeric_agents = [str(a) for a in agent_items if str(a).isdigit()]
@@ -471,7 +489,7 @@ class WazuhClient:
                         "refusing to dispatch to avoid a fleet-wide action."
                     )
                 params["agents_list"] = ",".join(numeric_agents)
-        if not params.get("agents_list"):
+        if not fleet_wide and not params.get("agents_list"):
             # Defense in depth: never send a targeting active-response PUT without an explicit
             # agents_list — an empty/absent list is interpreted as ALL agents by the manager.
             raise ValueError(
@@ -488,11 +506,10 @@ class WazuhClient:
         failed_items = resp_data.get("failed_items", [])
 
         if total_affected == 0:
-            # Zero agents affected is a FAILURE, not success. Wazuh returns HTTP 200 with
-            # total_affected_items == 0 both when a command failed on every agent AND when
-            # the AR command doesn't exist / isn't configured (e.g. the custom
-            # host-isolation / kill-process / quarantine scripts aren't deployed). Reporting
-            # that as success would be false containment during a live incident — so refuse.
+            # Zero agents affected is a FAILURE, not success: the command reached no agent
+            # (disconnected, unknown id, ...). A script missing ON the agent is NOT caught
+            # here — Wazuh skips validation for '!script' commands and still counts the agent
+            # as affected; see execution_note below.
             errors = []
             for item in failed_items:
                 err = item.get("error", {})
@@ -522,6 +539,16 @@ class WazuhClient:
                     f"code {err.get('code')} - {err.get('message')}"
                 )
 
+        # "Affected" means the manager queued the command to the agent. Wazuh does not validate
+        # '!script' commands, so a script that isn't deployed on the agent still counts as
+        # affected — this is delivery, not proof of execution.
+        if isinstance(resp_data, dict):
+            resp_data["execution_status"] = "dispatched"
+            resp_data["execution_note"] = (
+                f"Queued to {total_affected} agent(s). Wazuh confirms delivery, not execution: it "
+                "reports success even if the script is missing on the agent. Confirm with the "
+                "matching wazuh_check_* tool."
+            )
         return result
 
     async def get_active_response_commands(self, **params) -> Dict[str, Any]:
@@ -712,7 +739,7 @@ class WazuhClient:
                     raise
             elif e.response.status_code == 429:
                 # Wazuh-side rate limiting: wait per Retry-After and let retry logic handle it
-                retry_after = int(e.response.headers.get("Retry-After", "30"))
+                retry_after = _retry_after_seconds(e.response.headers.get("Retry-After"))
                 logger.warning(f"Wazuh API rate-limited on {endpoint}. Waiting {retry_after}s...")
                 await asyncio.sleep(min(retry_after, 60))  # Cap at 60s to prevent abuse
                 raise  # Let tenacity/circuit breaker handle the retry
@@ -2309,8 +2336,20 @@ class WazuhClient:
             if current_time - cached_time < self._cache_ttl:
                 return cached_data
 
-        result = await self._request("GET", "/rules", params={"limit": 500})
-        rules = result.get("data", {}).get("affected_items", [])
+        # /rules pages at 500; a stock ruleset has several thousand rules. Reading one page
+        # reported "total_rules: 500" with level/group stats from that slice.
+        rules: list = []
+        total = None
+        while total is None or len(rules) < total:
+            page = await self._request(
+                "GET", "/rules", params={"limit": 500, "offset": len(rules), "select": "level,groups"}
+            )
+            data = page.get("data", {})
+            items = data.get("affected_items", [])
+            total = data.get("total_affected_items", len(rules) + len(items))
+            if not items:
+                break
+            rules.extend(items)
         level_counts: Dict[int, int] = {}
         group_counts: Dict[str, int] = {}
         for rule in rules:
@@ -2447,9 +2486,7 @@ class WazuhClient:
                 "manager, or on the WAZUH_PROTECTED_IPS denylist. Blocking it would be self-inflicted DoS."
             )
 
-    async def block_ip(
-        self, ip_address: str, duration: int = 0, agent_id: str = None, all_agents: bool = False
-    ) -> Dict[str, Any]:
+    async def block_ip(self, ip_address: str, agent_id: str = None, all_agents: bool = False) -> Dict[str, Any]:
         """Block IP via firewall-drop active response.
 
         Requires an explicit target: either a specific agent_id, or all_agents=True to
@@ -2465,8 +2502,6 @@ class WazuhClient:
             )
         ip_address = self._sanitize_ar_argument(ip_address, "ip_address")
         arguments = [f"-srcip {ip_address}"]
-        if duration and duration > 0:
-            arguments.append(f"-timeout {int(duration)}")
         data = {
             "command": "!firewall-drop",
             "agent_list": [agent_id] if agent_id else ["all"],
@@ -2548,14 +2583,12 @@ class WazuhClient:
         data = {"command": command, "agent_list": [agent_id], "arguments": args}
         return await self.execute_active_response(data)
 
-    async def firewall_drop(self, agent_id: str, src_ip: str, duration: int = 0) -> Dict[str, Any]:
+    async def firewall_drop(self, agent_id: str, src_ip: str) -> Dict[str, Any]:
         """Add firewall drop rule via active response."""
         src_ip = self._validate_ip(src_ip, "src_ip")
         self._refuse_protected_target(src_ip)
         src_ip = self._sanitize_ar_argument(src_ip, "src_ip")
         arguments = [f"-srcip {src_ip}"]
-        if duration and duration > 0:
-            arguments.append(f"-timeout {int(duration)}")
         data = {
             "command": "!firewall-drop",
             "agent_list": [agent_id],
@@ -2719,21 +2752,44 @@ class WazuhClient:
         }
 
     async def check_file_quarantine(self, agent_id: str, file_path: str) -> Dict[str, Any]:
-        """Check if a file has been quarantined via FIM events."""
-        # FIM data is per-agent: GET /syscheck/{agent_id}. GET /syscheck (no id) is 405.
+        """Check whether a file was removed from its original path (the quarantine signal).
+
+        The FIM database can't answer this: GET /syscheck entries are typed file/registry and a
+        deleted file simply drops out, so the old `type == "deleted"` check could never be true.
+        The evidence is a FIM "deleted" alert (rule 553) for the exact path in the Indexer.
+        """
+        if self._indexer_client is not None:
+            event = await self._indexer_client.latest_fim_event(agent_id, file_path, "deleted")
+            return {
+                "data": {
+                    "agent_id": agent_id,
+                    "file_path": file_path,
+                    "quarantined": event is not None,
+                    "removed_at": event.get("timestamp") if event else None,
+                    "note": "Based on the latest FIM 'deleted' alert for this exact path; "
+                    "confirm the file is in the quarantine store on the host.",
+                }
+            }
+
+        # Without the Indexer, only presence in the FIM database is knowable. The path goes into
+        # Wazuh's q filter, where , ; ( ) are operators — refuse them rather than let a path
+        # widen the query to other files.
+        if any(c in file_path for c in ",;()"):
+            raise ValueError("file_path contains , ; ( or ) — checking it needs the Indexer (WAZUH_INDEXER_HOST)")
         result = await self._request("GET", f"/syscheck/{agent_id}", params={"q": f"file={file_path}"})
-        events = result.get("data", {}).get("affected_items", [])
-        # The FIM query is already scoped to this exact path, so a 'deleted' event for it is the
-        # quarantine signal (Wazuh's quarantine AR removes the file from its original location).
-        # The previous `"quarantine" in str(e)` matched any path whose stringified event merely
-        # contained the substring "quarantine" — a false positive on any file under such a path.
-        quarantined = any(e.get("type") == "deleted" for e in events)
+        present = bool(result.get("data", {}).get("affected_items", []))
         return {
             "data": {
                 "agent_id": agent_id,
                 "file_path": file_path,
-                "quarantined": quarantined,
-                "note": "Inferred from a FIM deletion of the exact path; verify the quarantine store on the host.",
+                "quarantined": False if present else None,
+                "present_in_fim_db": present,
+                "note": (
+                    "File is still tracked at this path."
+                    if present
+                    else "Not in the FIM database, which also happens when the path isn't monitored. "
+                    "Configure WAZUH_INDEXER_HOST to confirm removal from FIM alerts."
+                ),
             }
         }
 

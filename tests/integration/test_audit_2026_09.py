@@ -272,3 +272,93 @@ class TestToolsCallScoping:
         await mcp_server.handle_tools_call({"name": "get_wazuh_vulnerability_summary", "arguments": args}, _session())
         await mcp_server.handle_tools_call({"name": "get_wazuh_vulnerability_summary", "arguments": {}}, _session())
         assert calls == [("30d", "005"), (None, None)]
+
+
+class TestWazuhApiSemantics:
+    @pytest.mark.asyncio
+    async def test_block_duration_refused_not_silently_permanent(self, monkeypatch):
+        calls = []
+
+        class Stub:
+            async def block_ip(self, *a, **k):
+                calls.append((a, k))
+                return {}
+
+        monkeypatch.setattr(mcp_server, "cluster_registry", ClusterRegistry({"default": Stub()}, "default", False))
+        args = {"ip_address": "198.51.100.7", "agent_id": "001", "duration": 3600}
+        result = await mcp_server.handle_tools_call({"name": "wazuh_block_ip", "arguments": args}, _session())
+        assert result["isError"] is True and "duration" in result["content"][0]["text"]
+        assert not calls
+        args["duration"] = 0
+        await mcp_server.handle_tools_call({"name": "wazuh_block_ip", "arguments": args}, _session())
+        assert calls
+
+    @pytest.mark.asyncio
+    async def test_ar_result_says_dispatched_not_executed(self):
+        client = _client()
+
+        async def request(method, path, json=None, params=None):
+            return {"data": {"total_affected_items": 1, "total_failed_items": 0, "failed_items": []}}
+
+        client._request = request
+        result = await client.execute_active_response({"command": "!host-isolation", "agent_list": ["001"]})
+        assert result["data"]["execution_status"] == "dispatched"
+
+    @pytest.mark.parametrize(
+        "query,expected",
+        [
+            ("sshd AND fail*", "sshd + fail*"),
+            ("root OR admin", "root | admin"),
+            ('ssh NOT "accepted password"', 'ssh -"accepted password"'),
+            ('"error AND warning" AND sshd', '"error AND warning" + sshd'),
+        ],
+    )
+    def test_boolean_words_become_simple_query_operators(self, query, expected):
+        from wazuh_mcp_server.api.wazuh_indexer import _to_simple_query_syntax
+
+        assert _to_simple_query_syntax(query) == expected
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("event,expected", [({"timestamp": "2026-09-23T10:00:00Z"}, True), (None, False)])
+    async def test_quarantine_from_fim_deleted_alert(self, event, expected):
+        client = _client()
+        seen = {}
+
+        class Indexer:
+            async def latest_fim_event(self, agent_id, path, kind):
+                seen.update(agent_id=agent_id, path=path, kind=kind)
+                return event
+
+        client._indexer_client = Indexer()
+        result = await client.check_file_quarantine("001", "/tmp/evil")
+        assert result["data"]["quarantined"] is expected
+        assert seen == {"agent_id": "001", "path": "/tmp/evil", "kind": "deleted"}
+
+    @pytest.mark.asyncio
+    async def test_quarantine_fallback_refuses_q_operators(self):
+        client = _client()
+        client._indexer_client = None
+        with pytest.raises(ValueError, match="Indexer"):
+            await client.check_file_quarantine("001", "/tmp/x,type=deleted")
+
+    @pytest.mark.asyncio
+    async def test_rules_summary_counts_every_page(self):
+        client = _client()
+        pages = {0: [{"level": 3, "groups": ["a"]}] * 500, 500: [{"level": 5, "groups": ["b"]}] * 200}
+
+        async def request(method, path, params=None, **kw):
+            return {"data": {"affected_items": pages.get(params["offset"], []), "total_affected_items": 700}}
+
+        client._request = request
+        summary = (await client.get_rules_summary())["data"]
+        assert summary["total_rules"] == 700 and summary["by_level"] == {3: 500, 5: 200}
+
+    def test_retry_after_http_date(self):
+        from email.utils import format_datetime
+
+        from wazuh_mcp_server.api.wazuh_client import _retry_after_seconds
+
+        future = format_datetime(datetime.now(timezone.utc).replace(microsecond=0), usegmt=True)
+        assert _retry_after_seconds("12") == 12
+        assert _retry_after_seconds(future) in (0, 1)
+        assert _retry_after_seconds("garbage") == 30

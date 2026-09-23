@@ -10,6 +10,7 @@ Wazuh stores alerts and vulnerability data in the Wazuh Indexer
 import asyncio
 import json
 import logging
+import re
 from typing import Any, Dict, List, Optional
 
 import httpx
@@ -20,6 +21,24 @@ logger = logging.getLogger(__name__)
 # Index patterns for Wazuh 4.x
 ALERTS_INDEX = "wazuh-alerts-*"
 VULNERABILITY_INDEX = "wazuh-states-vulnerabilities-*"
+
+
+_QUOTED = re.compile(r'("[^"]*")')
+
+
+def _to_simple_query_syntax(query: str) -> str:
+    """Map AND/OR/NOT to simple_query_string's +, |, - operators (outside quoted phrases).
+
+    simple_query_string has no word operators: "sshd AND fail*" searched for the literal term
+    "AND" and, with default_operator=AND, required it in every hit, silently emptying results.
+    The tool description advertises AND/OR/NOT, so translate them.
+    """
+    parts = _QUOTED.split(query)
+    for i in range(0, len(parts), 2):  # even indexes are outside quotes
+        seg = re.sub(r"\bNOT\s+", "-", parts[i])
+        seg = re.sub(r"\bAND\b", "+", seg)
+        parts[i] = re.sub(r"\bOR\b", "|", seg)
+    return "".join(parts)
 
 
 class WazuhIndexerClient:
@@ -397,7 +416,7 @@ class WazuhIndexerClient:
             # syntax — unlike query_string, which allowed Lucene injection and wildcard/regex
             # denial-of-service from authenticated read users. AND/OR/NOT, quoted phrases,
             # and trailing-wildcard prefixes remain supported.
-            qt = query_text.strip().lstrip("*?")  # forbid a leading wildcard (full-index scan)
+            qt = _to_simple_query_syntax(query_text.strip().lstrip("*?"))  # no leading wildcard
             must_clauses.append(
                 {
                     "simple_query_string": {
@@ -429,6 +448,21 @@ class WazuhIndexerClient:
                 "failed_items": [],
             }
         }
+
+    async def latest_fim_event(self, agent_id: str, path: str, event: str) -> Optional[Dict[str, Any]]:
+        """Most recent FIM alert of `event` type ("added"/"modified"/"deleted") for an exact path."""
+        query = {
+            "bool": {
+                "filter": [
+                    {"term": {"agent.id": agent_id}},
+                    {"term": {"syscheck.path": path}},
+                    {"term": {"syscheck.event": event}},
+                ]
+            }
+        }
+        result = await self._search(ALERTS_INDEX, query, size=1, sort=[{"timestamp": {"order": "desc"}}])
+        hits = result.get("hits", {}).get("hits", [])
+        return hits[0].get("_source", {}) if hits else None
 
     async def get_vulnerabilities(
         self,
