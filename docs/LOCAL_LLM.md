@@ -12,7 +12,7 @@ analyst ─► Open WebUI / LibreChat (MCP client) ──► vLLM or Ollama (mod
 |---|---|---|
 | Best for | One analyst, laptop or workstation | A team sharing one GPU server |
 | Concurrency | `OLLAMA_NUM_PARALLEL` defaults to 1 | Continuous batching |
-| Repeated tool catalogue | Recomputed per request | Prefix caching on by default — the ~5–6k-token tool list is computed once |
+| Repeated tool catalogue (~6.6k tokens) | Cached per slot; with one slot, concurrent users evict each other | Prefix caching on by default, shared across all requests |
 | Hardware | Apple Silicon, consumer GPUs, CPU | NVIDIA/AMD datacenter or workstation GPUs |
 | Ops | Single binary | Container + GPU drivers |
 
@@ -72,11 +72,18 @@ OLLAMA_CONTEXT_LENGTH=16384 ollama serve
 ollama pull qwen3.5:9b
 ```
 
-Then point Open WebUI (or LibreChat) at `http://localhost:11434` and add the MCP server as above. With a 7–9B model, trim the catalogue (next section).
+Then point Open WebUI (or LibreChat) at `http://localhost:11434` and add the MCP server as above. On a laptop, trim the catalogue (next section) — it's the cheapest latency win.
 
 ## Trim the tool catalogue
 
-Every request carries every tool definition. Smaller models choose tools noticeably worse from a long list, and the tokens count against context. Expose only what the deployment needs:
+Every request carries every tool definition (~6.6k tokens for all 55). Measured with the eval below on qwen3.5:9b (Ollama, Apple M5, temperature 0):
+
+| Catalogue | Tokens | Scenarios passed | Median response |
+|---|---|---|---|
+| All 55 tools | ~6.6k | 25/25 | 15.8 s |
+| `alerts,agents,vulnerabilities,analysis,response` (38 tools) | ~4.9k | 21/21 (same 21 as the full run) | 10.9 s |
+
+On these scenarios the smaller catalogue didn't change accuracy — it made every answer faster. Accuracy effects show up with weaker models and harder, multi-step requests, so measure your own. Expose only what the deployment needs:
 
 ```bash
 WAZUH_TOOLSETS=alerts,agents,vulnerabilities,analysis   # read-only triage
@@ -96,7 +103,7 @@ python evals/tool_selection.py --base-url http://vllm-host:8000/v1 --api-key "$V
 WAZUH_TOOLSETS=alerts,agents,response python evals/tool_selection.py ...   # compare a trimmed catalogue
 ```
 
-Run it before rolling out a new model or a new `WAZUH_TOOLSETS` choice. `--repeat 3 --temperature 0.7` shows how stable the choices are.
+Run it before rolling out a new model or a new `WAZUH_TOOLSETS` choice. `--repeat 3 --temperature 0.7` shows how stable the choices are. The bundled scenarios are single-turn and direct — a floor check that a capable 9B model already passes; add scenarios from your own analysts' questions to `evals/scenarios.json` to separate models.
 
 ## LiteLLM (optional gateway)
 

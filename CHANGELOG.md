@@ -9,7 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 - **Local LLM stack** (`compose.local-llm.yml`, [Local LLM Guide](docs/LOCAL_LLM.md)): vLLM v0.30.0 (Qwen3.6-35B-A3B FP8 by default, tool calling + reasoning parsers, text-only, not published on a host port) and Open WebUI next to the server. The guide covers Ollama for single analysts and LiteLLM as an optional gateway, with its identity and approval caveats. Replaces the mcphost quick start (mcphost is unmaintained).
-- **Toolsets**: `WAZUH_TOOLSETS` and `WAZUH_DISABLED_TOOLS` limit which tools are exposed. Hidden tools are removed from `tools/list` and refused by `tools/call`; unknown names fail at startup. The full catalogue is ~6.6k tokens, which matters for small local models.
+- **Toolsets**: `WAZUH_TOOLSETS` and `WAZUH_DISABLED_TOOLS` limit which tools are exposed. Hidden tools are removed from `tools/list` and refused by `tools/call`; unknown names fail at startup. The full catalogue is ~6.6k tokens; on qwen3.5:9b (Ollama, Apple M5) trimming to 38 tools cut median response time from 15.8s to 10.9s with no change in tool-selection accuracy.
 - **MCP tool annotations** on every tool (`readOnlyHint`, `destructiveHint`, `idempotentHint`, `openWorldHint`), derived from scope, so clients and gateways can gate approvals.
 - **Tool-selection eval** (`evals/tool_selection.py`): 25 SOC scenarios, including two prompt-injection cases, run against any OpenAI-compatible endpoint (vLLM, Ollama, LiteLLM proxy). Scores tool choice and argument validity without executing anything.
 
