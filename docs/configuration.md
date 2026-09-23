@@ -106,6 +106,17 @@ OAuth requires **PKCE with `S256`**; authorization codes are single-use and refr
 | `YDC_BASE_URL` | `https://ydc-index.io` | You.com Search API base URL |
 | `YDC_VERIFY_SSL` | `true` | Verify You.com TLS certificates |
 
+## Tool exposure
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `WAZUH_TOOLSETS` | `all` | Comma-separated toolsets to expose: `alerts`, `agents`, `vulnerabilities`, `analysis`, `web_search`, `compliance`, `system`, `response`. Unknown names fail at startup |
+| `WAZUH_DISABLED_TOOLS` | — | Comma-separated tool names to hide on top of `WAZUH_TOOLSETS` |
+
+Hidden tools are dropped from `tools/list` and refused by `tools/call`; scope filtering still applies to what remains. Trimming the catalogue matters most for local models (see [Local LLMs](LOCAL_LLM.md)): the full list is ~6.6k tokens resent on every request, so a smaller list means less prompt processing and more room for results. `web_search` is the only toolset that sends data off-box — drop it for air-gapped deployments.
+
+Every tool also carries MCP [tool annotations](https://modelcontextprotocol.io/specification/2025-06-18/server/tools#tool-annotations) (`readOnlyHint`, `destructiveHint`, `idempotentHint`, `openWorldHint`) and a closed input schema (`additionalProperties: false`). Annotations are hints for clients and gateways deciding what needs human approval; authorization is still enforced server-side by scope.
+
 ## TLS / HTTPS
 
 The server speaks plain HTTP on `MCP_PORT`. There is **no built-in HTTPS listener** — terminate TLS at a reverse proxy (nginx, Caddy, Traefik) or a load balancer, which is also where you set HSTS, client-cert policies, and TLS versions.

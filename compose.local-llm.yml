@@ -1,0 +1,86 @@
+# Local LLM stack: vLLM (model server) + Open WebUI (chat + MCP client) + this server.
+# Nothing leaves the host once the model weights are cached. See docs/LOCAL_LLM.md.
+#
+#   docker compose -f compose.yml -f compose.local-llm.yml up -d
+#
+# Requires an NVIDIA GPU and the NVIDIA Container Toolkit. The default model
+# (Qwen3.6-35B-A3B FP8) needs ~42 GB VRAM; for a 24 GB card set
+#   VLLM_MODEL=openai/gpt-oss-20b VLLM_TOOL_PARSER=openai VLLM_REASONING_PARSER=openai_gptoss VLLM_EXTRA_ARGS=
+# in .env. Open WebUI is then at http://127.0.0.1:8080; add the MCP server there
+# (Admin Settings → tool server, type MCP / Streamable HTTP, URL http://wazuh-main-server:3000/mcp).
+
+services:
+  vllm:
+    image: vllm/vllm-openai:${VLLM_VERSION:-v0.30.0}
+    container_name: wazuh-vllm
+    restart: unless-stopped
+    ipc: host
+    # Word-split on purpose so VLLM_EXTRA_ARGS can carry several flags.
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - >-
+        exec vllm serve "$$VLLM_MODEL"
+        --served-model-name "$$VLLM_SERVED_NAME"
+        --host 0.0.0.0 --port 8000
+        --api-key "$$VLLM_API_KEY"
+        --max-model-len "$$VLLM_MAX_MODEL_LEN"
+        --enable-auto-tool-choice
+        --tool-call-parser "$$VLLM_TOOL_PARSER"
+        --reasoning-parser "$$VLLM_REASONING_PARSER"
+        $$VLLM_EXTRA_ARGS
+    environment:
+      VLLM_MODEL: ${VLLM_MODEL:-Qwen/Qwen3.6-35B-A3B-FP8}
+      VLLM_SERVED_NAME: ${VLLM_SERVED_NAME:-soc-model}
+      VLLM_API_KEY: ${VLLM_API_KEY:?set VLLM_API_KEY in .env (openssl rand -hex 32)}
+      VLLM_MAX_MODEL_LEN: ${VLLM_MAX_MODEL_LEN:-65536}
+      VLLM_TOOL_PARSER: ${VLLM_TOOL_PARSER:-qwen3_coder}
+      VLLM_REASONING_PARSER: ${VLLM_REASONING_PARSER:-qwen3}
+      # Text-only: skips the vision encoder (more KV cache, none of the multimodal attack surface)
+      VLLM_EXTRA_ARGS: ${VLLM_EXTRA_ARGS---language-model-only}
+      # Set to 1 once weights are in the cache volume to guarantee no network access
+      HF_HUB_OFFLINE: ${HF_HUB_OFFLINE:-0}
+      HF_TOKEN: ${HF_TOKEN:-}
+    volumes:
+      - vllm-cache:/root/.cache/huggingface
+    # Not published: --api-key only covers /v1-style routes, so vLLM stays on the compose
+    # network and only Open WebUI talks to it.
+    expose:
+      - "8000"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:8000/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 900s  # first start downloads and compiles the model
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: ${VLLM_GPU_COUNT:-1}
+              capabilities: [gpu]
+
+  open-webui:
+    image: ghcr.io/open-webui/open-webui:${OPEN_WEBUI_VERSION:-v0.11.4}
+    container_name: wazuh-open-webui
+    restart: unless-stopped
+    depends_on:
+      vllm:
+        condition: service_healthy
+      wazuh-main-server:
+        condition: service_healthy
+    environment:
+      OPENAI_API_BASE_URL: http://vllm:8000/v1
+      OPENAI_API_KEY: ${VLLM_API_KEY}
+      ENABLE_OLLAMA_API: "false"
+      WEBUI_SECRET_KEY: ${WEBUI_SECRET_KEY:?set WEBUI_SECRET_KEY in .env (openssl rand -hex 32)}
+      # Air-gap: no model/embedding downloads or update checks (telemetry is already off in the image)
+      OFFLINE_MODE: "true"
+    volumes:
+      - open-webui-data:/app/backend/data
+    ports:
+      - "${WEBUI_BIND:-127.0.0.1}:${WEBUI_PORT:-8080}:8080"
+
+volumes:
+  vllm-cache:
+  open-webui-data:
