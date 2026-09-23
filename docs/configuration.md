@@ -133,9 +133,30 @@ Because the hash depends on `AUTH_SECRET_KEY`, changing the secret invalidates e
 
 How the OAuth flow works:
 
-- **Sign-in:** users sign in on `/oauth/authorize` with a `wazuh_` API key. Configure `MCP_API_KEY` or `API_KEYS` before enabling OAuth; without a key, nobody can sign in. The granted scopes are the intersection of the requested scopes, the client's registered scopes and the key's scopes.
+- **Sign-in:** users sign in on `/oauth/authorize` with a `wazuh_` API key, or at an OpenID Connect provider when `OAUTH_IDP_ISSUER` is set (below). Configure `MCP_API_KEY` or `API_KEYS` before enabling OAuth; without a key, nobody can sign in. The granted scopes are the intersection of the requested scopes, the client's registered scopes and the key's scopes.
 - **Pre-registered client:** a public client, `claude-desktop`, is registered for the `https://claude.ai/api/mcp/auth_callback` and `https://claude.com/api/mcp/auth_callback` redirect URIs.
 - **Token handling:** PKCE with `S256` is mandatory, authorization codes are single-use, and refresh tokens rotate on every use.
+
+#### Sign-in through an OpenID Connect identity provider
+
+Set `OAUTH_IDP_ISSUER` to have users authenticate at Entra ID, Google Workspace, Okta, Keycloak or another OIDC provider instead of the API-key sign-in page. `/oauth/authorize` then redirects to the provider; `/oauth/callback` verifies the ID token (RS256 signature from the provider's JWKS, `iss`, `aud`, `exp`, `nonce`), applies the allow-lists below and issues the MCP authorization code. Register `<OAUTH_ISSUER_URL>/oauth/callback` as the redirect URI at the provider.
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `OAUTH_IDP_ISSUER` | *(none)* | Provider issuer URL (`https://` only), e.g. `https://login.microsoftonline.com/<tenant-id>/v2.0`. Multi-tenant Entra issuers (`/common/`, `/organizations/`, `/consumers/`) require `OAUTH_IDP_ALLOWED_TENANTS`; Google requires `OAUTH_IDP_ALLOWED_DOMAINS` or `OAUTH_IDP_ALLOWED_USERS` |
+| `OAUTH_IDP_CLIENT_ID` | *(none)* | Client ID registered at the provider. Required with `OAUTH_IDP_ISSUER` |
+| `OAUTH_IDP_CLIENT_SECRET` | *(none)* | Client secret; when empty the server is a public client using PKCE |
+| `OAUTH_IDP_SCOPES` | `openid email profile` | Scopes requested from the provider |
+| `OAUTH_IDP_ALLOWED_TENANTS` | *(none)* | Comma-separated Entra tenant IDs (`tid` claim) |
+| `OAUTH_IDP_ALLOWED_DOMAINS` | *(none)* | Comma-separated domains, matched against Google's `hd` or the e-mail domain. The e-mail must be vouched for (`email_verified: true`, matching `hd`, or an allow-listed tenant) |
+| `OAUTH_IDP_ALLOWED_USERS` | *(none)* | Comma-separated subjects or vouched e-mail addresses |
+| `OAUTH_IDP_GROUP_CLAIM` | `groups` | Claim holding group or role names (`roles` for Entra app roles) |
+| `OAUTH_IDP_GROUP_SCOPE_MAP` | *(none)* | JSON map of group to scopes, e.g. `{"soc-admins": "wazuh:read wazuh:write", "soc-analysts": "wazuh:read"}` |
+| `OAUTH_IDP_DEFAULT_SCOPE` | `wazuh:read` | Scope for users in no mapped group; empty denies them |
+| `OAUTH_IDP_SUBJECT_CLAIM` | `email` | Claim used as the audited identity. An unverified e-mail is never used; the server falls back to `preferred_username`, then `sub` |
+| `OAUTH_IDP_LOGIN_TTL` | `600` | Seconds a parked authorization request waits for the user to return from the provider (1–3600) |
+
+The granted scope is the user's mapped scope intersected with the client's registered scope. With an IdP configured, the API-key sign-in form is disabled. Parked logins live in process memory, so run one instance or route `/oauth/authorize` and `/oauth/callback` to the same one.
 
 ## Network, CORS and rate limiting
 

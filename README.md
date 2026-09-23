@@ -112,7 +112,7 @@ All clients use the Streamable HTTP endpoint `https://<your-host>/mcp`.
 
 | Client | Auth mode | How it authenticates |
 |--------|-----------|----------------------|
-| Claude custom connectors (claude.ai, Claude Desktop) | `oauth` | OAuth authorization code with PKCE. The server pre-registers a public client, `claude-desktop`, for Claude's callback URLs. Users sign in on the server's `/oauth/authorize` page with a `wazuh_` API key; the grant is capped at that key's scopes. |
+| Claude custom connectors (claude.ai, Claude Desktop) | `oauth` | OAuth authorization code with PKCE. The server pre-registers a public client, `claude-desktop`, for Claude's callback URLs. Users sign in on the server's `/oauth/authorize` page with a `wazuh_` API key (the grant is capped at that key's scopes), or at your OpenID Connect provider when `OAUTH_IDP_ISSUER` is set. |
 | Open WebUI, LibreChat, scripts and other MCP clients | `bearer` (default) | `Authorization: Bearer <token>` using a token from `POST /auth/token`. |
 
 In OAuth mode, set `OAUTH_ISSUER_URL` to the server's public HTTPS URL (otherwise it is derived from each request, which behind a proxy may not be the public URL). Dynamic Client Registration (`/oauth/register`) is off unless `OAUTH_ENABLE_DCR=true`.

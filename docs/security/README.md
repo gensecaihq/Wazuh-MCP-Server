@@ -76,7 +76,13 @@ There is no refresh flow for these tokens; clients request a new one with the AP
 
 Implemented in `oauth.py`:
 
-- **Sign-in with an API key.** `GET /oauth/authorize` renders a sign-in page. The user pastes a
+- **Sign-in at an identity provider** (optional, `OAUTH_IDP_ISSUER`). The user authenticates at the OIDC
+  provider; the ID token's RS256 signature (from the provider's JWKS; `none`/HMAC are never accepted),
+  `iss`, `aud`, `exp` and `nonce` are verified, tenant/domain/user allow-lists are applied, and the scope
+  comes from the user's groups. An e-mail is only used as identity when vouched for
+  (`email_verified`, Google `hd`, or an allow-listed Entra tenant). A Google issuer without an allow-list,
+  and multi-tenant Entra issuers without `OAUTH_IDP_ALLOWED_TENANTS`, are refused at startup.
+- **Sign-in with an API key** (without an IdP). `GET /oauth/authorize` renders a sign-in page. The user pastes a
   `wazuh_` API key; the granted scope is the intersection of the requested scope, the client's
   registered scope and the key's scopes. If the key has none of the requested scopes the
   request is refused. Tokens carry the key id, so rate limits and audit records are per user.

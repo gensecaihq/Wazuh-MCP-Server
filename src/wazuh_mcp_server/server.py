@@ -168,7 +168,7 @@ async def _do_verify_authentication(authorization: Optional[str], config) -> Opt
             token = authorization.replace("Bearer ", "") if authorization.startswith("Bearer ") else authorization
             token_obj = _oauth_manager.validate_access_token(token)
             subject = getattr(token_obj, "subject", None) if token_obj else None
-            if subject:
+            if subject and getattr(token_obj, "subject_kind", None) == "api_key":
                 # Same binding as bearer JWTs: removing or deactivating the API key the user
                 # signed in with ends their OAuth tokens too, not just at TTL expiry.
                 from wazuh_mcp_server.auth import auth_manager
@@ -180,9 +180,9 @@ async def _do_verify_authentication(authorization: Optional[str], config) -> Opt
                 # Return AuthToken with OAuth scopes (fail closed to read-only)
                 scope_str = getattr(token_obj, "scope", "") or ""
                 scopes = scope_str.split() if scope_str else ["wazuh:read"]
-                # Per-user principal for RBAC audit, rate limiting and session bounds: the API
-                # key the user logged in with on /oauth/authorize. Tokens minted before that
-                # login existed carry only the (shared) client id.
+                # Per-user principal for RBAC audit, rate limiting and session bounds: the API key
+                # the user signed in with, or the person the IdP authenticated. Tokens minted
+                # before sign-in existed carry only the (shared) client id.
                 subject = getattr(token_obj, "subject", None)
                 client = getattr(token_obj, "client_id", None)
                 oauth_principal = f"{client}:{subject}" if subject and client else (subject or client)
@@ -653,6 +653,10 @@ async def lifespan(app: FastAPI):
         auth_manager.cleanup_expired()
         auth_manager.tokens.clear()
         logger.info("Authentication tokens cleared")
+
+        # Release the identity-provider HTTP client (OAuth mode with OAUTH_IDP_ISSUER)
+        if _oauth_manager is not None and _oauth_manager.idp is not None:
+            await _oauth_manager.idp.aclose()
 
         # Do NOT clear the session store on shutdown. In-memory sessions vanish with the process
         # anyway, and a shared Redis store is the whole point of multi-instance deployments —

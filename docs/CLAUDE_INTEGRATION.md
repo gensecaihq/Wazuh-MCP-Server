@@ -115,6 +115,20 @@ With `OAUTH_ENABLE_DCR=true` the endpoint is advertised in the metadata and acce
 
 Registered clients still need a user API key to obtain a grant. Enable DCR only for clients that cannot use `claude-desktop`.
 
+### Sign-in through your identity provider
+
+Instead of API keys, users can sign in with their organisation account (Entra ID, Google Workspace, Okta, Keycloak). Register an application at the provider with the redirect URI `<OAUTH_ISSUER_URL>/oauth/callback`, then set at least:
+
+```env
+AUTH_MODE=oauth
+OAUTH_ISSUER_URL=https://mcp.example.com
+OAUTH_IDP_ISSUER=https://login.microsoftonline.com/<tenant-id>/v2.0
+OAUTH_IDP_CLIENT_ID=<application id>
+OAUTH_IDP_GROUP_SCOPE_MAP={"soc-admins": "wazuh:read wazuh:write", "soc-analysts": "wazuh:read"}
+```
+
+The connector setup in Claude is unchanged (client ID `claude-desktop`). When a user connects, the browser goes to the provider; after sign-in the server checks the ID token and allow-lists and grants the scope mapped from the user's groups. Tokens carry the user's identity, so the audit log records `oauth:claude-desktop:<user>`. All settings: [Configuration](configuration.md#sign-in-through-an-openid-connect-identity-provider).
+
 ### Token lifetimes and revocation
 
 | Setting | Default |
