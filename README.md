@@ -45,7 +45,7 @@ You:    "Which agents have unpatched critical CVEs?"
 AI:     [calls get_wazuh_critical_vulnerabilities] 3 agents with critical vulnerabilities...
 ```
 
-It works with **Claude Desktop**, **Open WebUI + Ollama** (fully local, air-gapped), **mcphost**, or any MCP-compliant client.
+It works with **Claude Desktop**, **Open WebUI** or **LibreChat** backed by **vLLM** or **Ollama** (fully local, air-gapped), or any MCP-compliant client.
 
 ---
 
@@ -56,36 +56,24 @@ This is a standard MCP tool server. It doesn't care what LLM you use — it just
 | Mode | LLM | Client | Data leaves your network? |
 |------|-----|--------|--------------------------|
 | **Cloud** | Claude, GPT, etc. | Claude Desktop, any MCP client | Yes (to LLM provider) |
-| **Local** | Llama, Qwen, Mistral via Ollama | Open WebUI, mcphost, IBM/mcp-cli | **No. Fully air-gappable.** |
+| **Local — team** | Qwen3.6, gpt-oss via **vLLM** | Open WebUI, LibreChat | **No. Fully air-gappable.** |
+| **Local — single analyst** | Qwen3.5 via **Ollama** | Open WebUI, LibreChat | **No. Fully air-gappable.** |
 
-**For security teams that can't send SIEM data to cloud APIs** (compliance, air-gapped networks, data sovereignty), the local mode with Ollama keeps everything on-premises. Both modes coexist — same server, same tools, same API.
+**For security teams that can't send SIEM data to cloud APIs** (compliance, air-gapped networks, data sovereignty), the local modes keep everything on-premises. Both modes coexist — same server, same tools, same API.
 
-### Quick Start: Local LLM with mcphost
+### Quick Start: Local SOC stack with vLLM
 
 ```bash
-# 1. Start the MCP server
-docker compose up -d
-
-# 2. Install mcphost (Go binary, no dependencies)
-go install github.com/mark3labs/mcphost@latest
-
-# 3. Configure
-cat > ~/.mcphost.yml << 'EOF'
-mcpServers:
-  wazuh:
-    type: remote
-    url: http://localhost:3000/mcp
-    headers: ["Authorization: Bearer ${env://MCP_API_KEY}"]
+cat >> .env <<EOF
+VLLM_API_KEY=$(openssl rand -hex 32)
+WEBUI_SECRET_KEY=$(openssl rand -hex 32)
 EOF
-
-# 4. Chat with your SIEM using a local model
-export MCP_API_KEY="your-key-from-server-logs"
-mcphost --model ollama/qwen2.5:7b
+docker compose -f compose.yml -f compose.local-llm.yml up -d   # vLLM + Open WebUI + this server
 ```
 
-### Quick Start: Multi-User SOC with Open WebUI
+Then add `http://wazuh-main-server:3000/mcp` as an MCP (Streamable HTTP) tool server in Open WebUI's admin settings. Needs one NVIDIA GPU (~42 GB for the default Qwen3.6-35B-A3B FP8; gpt-oss-20b fits in 24 GB).
 
-Open WebUI v0.6.31+ connects to our `/mcp` endpoint natively. Add it as an MCP tool server in Admin Settings, and your entire team gets AI-powered SIEM analysis with conversation history, RBAC, and a web UI.
+For small models, expose only the toolsets you need (`WAZUH_TOOLSETS=alerts,agents,vulnerabilities`), and check a model before rollout with the bundled tool-selection eval. Ollama, LiteLLM, model choices and the eval are covered in the [Local LLM Guide](docs/LOCAL_LLM.md).
 
 ---
 
@@ -334,6 +322,7 @@ Agentic SOC:   Alert → AI triages → Seconds → Response ready for approval
 | Guide | Description |
 |-------|-------------|
 | [Claude Integration](docs/CLAUDE_INTEGRATION.md) | Claude Desktop setup and authentication |
+| [Local LLMs](docs/LOCAL_LLM.md) | vLLM, Ollama, Open WebUI, LiteLLM, tool-selection eval |
 | [Configuration](docs/configuration.md) | Full configuration reference |
 | [Advanced Features](docs/ADVANCED_FEATURES.md) | HA, serverless, compact mode |
 | [API Documentation](docs/api/) | Per-tool documentation |
@@ -361,7 +350,7 @@ We welcome contributions. See [Issues](https://github.com/gensecaihq/Wazuh-MCP-S
 - [Model Context Protocol](https://modelcontextprotocol.io/) — AI tool integration standard
 - [Ollama](https://ollama.com/) — Local LLM inference
 - [Open WebUI](https://github.com/open-webui/open-webui) — Self-hosted AI chat interface
-- [mcphost](https://github.com/mark3labs/mcphost) — MCP CLI host with LLM support
+- [vLLM](https://github.com/vllm-project/vllm) — High-throughput local LLM serving
 
 ---
 
