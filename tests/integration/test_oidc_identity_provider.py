@@ -528,22 +528,20 @@ class TestPendingLogins:
         assert mgr.pending_logins == {}
 
 
-class TestLegacyWithoutIdP:
-    """Tests: legacy without id p."""
+class TestWithoutIdP:
+    """Without an IdP, users sign in with an API key; the IdP callback doesn't exist."""
 
-    async def test_authorize_auto_approves_and_callback_is_404(self):
-        """Authorize auto approves and callback is 404."""
+    async def test_authorize_shows_api_key_sign_in_and_callback_is_404(self):
+        """No anonymous code: the API-key sign-in page is shown and /oauth/callback is 404."""
         mgr = OAuthManager(_config(OAUTH_IDP_ISSUER=""))
         assert not mgr.requires_idp and mgr.idp is None
         app = FastAPI()
         app.include_router(create_oauth_router(mgr))
         async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url=SERVER_ISSUER) as c:
-            verifier, challenge = _pkce()
+            _, challenge = _pkce()
             r = await c.get("/oauth/authorize", params=_authorize_params(challenge))
-            back = parse_qs(urlparse(r.headers["location"]).query)
-            assert "code" in back and back["state"] == ["client-state-xyz"]
-            tokens = mgr.exchange_code_for_tokens(back["code"][0], "claude-desktop", CLAUDE_REDIRECT, verifier)
-            assert mgr.validate_access_token(tokens["access_token"]).subject is None
+            assert r.status_code == 200 and 'name="api_key"' in r.text
+            assert not mgr.authorization_codes
             assert (await c.get("/oauth/callback", params={"state": "x", "code": "y"})).status_code == 404
 
 
@@ -600,3 +598,55 @@ class TestJWKSRobustness:
         provider = OIDCProvider(_config(), transport=FakeIdP(broken).transport())
         claims = await provider.verify_id_token(_id_token(rsa_key, nonce="n"), nonce="n")
         assert claims["sub"] == "idp-sub-42"
+
+
+class TestReviewFixes:
+    """Unverified e-mail is never an identity; Google without an allow-list is refused."""
+
+    def _provider(self, **over):
+        return OIDCProvider(_config(**over), transport=httpx.MockTransport(lambda r: httpx.Response(404)))
+
+    def test_unverified_email_is_not_the_subject(self):
+        identity = self._provider().authorize(
+            {"sub": "idp-sub-9", "email": "admin@corp.example", "email_verified": False}
+        )
+        assert identity.subject == "idp-sub-9"
+
+    def test_unverified_email_does_not_match_allowed_users(self):
+        with pytest.raises(IdentityDenied):
+            self._provider(OAUTH_IDP_ALLOWED_USERS="admin@corp.example").authorize(
+                {"sub": "attacker", "email": "admin@corp.example", "email_verified": False}
+            )
+
+    def test_verified_email_is_the_subject(self):
+        identity = self._provider().authorize({"sub": "x", "email": "Alice@Corp.Example", "email_verified": True})
+        assert identity.subject == "alice@corp.example"
+
+    def test_google_without_allow_list_refused(self):
+        from wazuh_mcp_server.oidc import validate_idp_settings
+
+        with pytest.raises(ValueError, match="Google"):
+            validate_idp_settings(_config(OAUTH_IDP_ISSUER="https://accounts.google.com"))
+        validate_idp_settings(
+            _config(OAUTH_IDP_ISSUER="https://accounts.google.com", OAUTH_IDP_ALLOWED_DOMAINS="corp.example")
+        )
+
+    async def test_non_object_jwks_is_an_idp_error(self, rsa_key):
+        idp = FakeIdP(["not", "an", "object"])
+        provider = OIDCProvider(_config(), transport=idp.transport())
+        token = _id_token(rsa_key, nonce="n1")  # well-formed and signed: verification must fetch the JWKS
+        with pytest.raises(IdPError, match="JWKS"):
+            await provider.verify_id_token(token, nonce="n1")
+
+
+class TestIdpTokensAtTheServer:
+    """IdP subjects aren't API keys: the key binding must not reject them."""
+
+    async def test_idp_token_accepted_by_verify_authentication(self, monkeypatch, mgr):
+        from wazuh_mcp_server import server as mcp_server
+
+        token = mgr._create_jwt_token("claude-desktop", "wazuh:read", "access", "alice@corp.example", "fam", "idp_user")
+        monkeypatch.setattr(mcp_server, "_oauth_manager", mgr)
+        monkeypatch.setattr(mcp_server.config, "AUTH_MODE", "oauth")
+        principal = await mcp_server.verify_authentication(f"Bearer {token}", mcp_server.config)
+        assert principal.api_key_id == "oauth:claude-desktop:alice@corp.example"

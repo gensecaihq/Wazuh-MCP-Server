@@ -100,7 +100,10 @@ class _JWKSCache:
             resp = await self._client.get(self._url, timeout=httpx.Timeout(5.0))
             resp.raise_for_status()
             keys: Dict[str, PyJWK] = {}
-            for entry in resp.json().get("keys", []):
+            document = resp.json()
+            if not isinstance(document, dict) or not isinstance(document.get("keys", []), list):
+                raise IdPError("JWKS response is not a JSON object with a 'keys' list")
+            for entry in document.get("keys", []):
                 if not isinstance(entry, dict):
                     continue
                 if entry.get("kty") != "RSA" or entry.get("use", "sig") != "sig" or not entry.get("kid"):
@@ -307,6 +310,15 @@ class OIDCProvider:
         hosted_domain = str(claims.get("hd") or "").lower()
 
         tid = str(claims.get("tid") or "")
+        # An e-mail is only an identity when someone vouched for it. Providers with
+        # self-service sign-up (Keycloak, Okta, Auth0) let a user set any unverified address,
+        # e.g. admin@corp.example; trusting it would let them match OAUTH_IDP_ALLOWED_USERS
+        # and be audited as someone else.
+        email_vouched = bool(email) and (
+            claims.get("email_verified") is True
+            or (bool(hosted_domain) and hosted_domain == domain)
+            or (bool(tid) and tid in self.allowed_tenants)
+        )
         if self.allowed_tenants and tid not in self.allowed_tenants:
             raise IdentityDenied("tenant not allowed")
         if self.allowed_domains:
@@ -326,6 +338,8 @@ class OIDCProvider:
 
         subject, claim_used = "", ""
         for claim in (self.subject_claim, "preferred_username", "sub"):
+            if claim == "email" and not email_vouched:
+                continue  # fall back to preferred_username / sub
             value = claims.get(claim)
             if isinstance(value, str) and value.strip():
                 subject, claim_used = value.strip(), claim
@@ -339,7 +353,12 @@ class OIDCProvider:
         if claim_used != self.subject_claim:
             logger.debug(f"subject claim {self.subject_claim!r} absent; using {claim_used!r}")
 
-        if self.allowed_users and subject.lower() not in self.allowed_users and email not in self.allowed_users:
+        vouched_email = email if email_vouched else ""
+        if (
+            self.allowed_users
+            and subject.lower() not in self.allowed_users
+            and (not vouched_email or vouched_email not in self.allowed_users)
+        ):
             raise IdentityDenied("user not allowed")
 
         groups_raw = claims.get(self.group_claim, [])
@@ -379,6 +398,15 @@ def validate_idp_settings(config) -> None:
         raise ValueError(
             "OAUTH_IDP_ISSUER is a multi-tenant issuer; set OAUTH_IDP_ALLOWED_TENANTS "
             "or use the tenant-specific issuer URL"
+        )
+    # Google's issuer accepts every Google account in the world; without an allow-list that
+    # is an open door with OAUTH_IDP_DEFAULT_SCOPE for anyone
+    if "accounts.google.com" in issuer.lower() and not (
+        _csv(getattr(config, "OAUTH_IDP_ALLOWED_DOMAINS", "")) or _csv(getattr(config, "OAUTH_IDP_ALLOWED_USERS", ""))
+    ):
+        raise ValueError(
+            "OAUTH_IDP_ISSUER is Google, which admits any Google account; set OAUTH_IDP_ALLOWED_DOMAINS "
+            "(your Workspace domain) or OAUTH_IDP_ALLOWED_USERS"
         )
     _parse_group_scope_map(getattr(config, "OAUTH_IDP_GROUP_SCOPE_MAP", ""))
     default_scope = getattr(config, "OAUTH_IDP_DEFAULT_SCOPE", "") or ""

@@ -3,7 +3,9 @@
 import logging
 import os
 from dataclasses import dataclass
-from typing import Optional
+from typing import FrozenSet, Optional
+
+from wazuh_mcp_server.toolsets import ALL_TOOLS, resolve_enabled_tools
 
 
 class ConfigurationError(Exception):
@@ -57,6 +59,18 @@ def validate_positive_int(value: str, name: str, max_val: Optional[int] = None) 
         return num
     except ValueError:
         raise ConfigurationError(f"{name} must be a valid integer, got '{value}'")
+
+
+_ENVIRONMENTS = {"development": "development", "dev": "development", "production": "production", "prod": "production"}
+
+
+def normalize_environment(raw: Optional[str]) -> str:
+    """ENVIRONMENT -> "development" | "production". Unknown values fail rather than silently
+    running without the production-only safety checks (e.g. "prod" used to mean development)."""
+    value = (raw or "development").strip().lower()
+    if value not in _ENVIRONMENTS:
+        raise ConfigurationError(f"ENVIRONMENT must be 'development' or 'production', got '{raw}'")
+    return _ENVIRONMENTS[value]
 
 
 def normalize_host(host: str) -> str:
@@ -244,6 +258,9 @@ class ServerConfig:
     MAX_CONNECTIONS: int = 10
     MAX_ALERTS_PER_QUERY: int = 1000
 
+    # Tool exposure (see toolsets.py): which tools tools/list advertises and tools/call accepts
+    ENABLED_TOOLS: FrozenSet[str] = ALL_TOOLS
+
     # Logging
     LOG_LEVEL: str = "INFO"
 
@@ -255,12 +272,13 @@ class ServerConfig:
         """Create configuration from environment variables with validation."""
         import secrets
 
-        environment = os.getenv("ENVIRONMENT", "development").lower()
+        environment = normalize_environment(os.getenv("ENVIRONMENT"))
 
         # Validate auth mode
-        auth_mode = os.getenv("AUTH_MODE", "bearer").lower()
+        auth_mode = os.getenv("AUTH_MODE", "bearer").strip().lower()
         if auth_mode not in ("bearer", "oauth", "none"):
-            auth_mode = "bearer"
+            # A typo used to fall back to bearer silently — the operator thinks OAuth is on
+            raise ConfigurationError(f"AUTH_MODE must be one of bearer, oauth, none; got '{auth_mode}'")
 
         # Signing secret. In production with auth enabled it MUST be provided — a random
         # per-process key invalidates all tokens on restart and breaks multi-instance
@@ -306,6 +324,11 @@ class ServerConfig:
             indexer_ssl = env_bool("WAZUH_INDEXER_SSL", True)
         else:
             indexer_ssl = not indexer_host_raw.strip().lower().startswith("http://")
+
+        try:
+            enabled_tools = resolve_enabled_tools(os.getenv("WAZUH_TOOLSETS"), os.getenv("WAZUH_DISABLED_TOOLS"))
+        except ValueError as e:
+            raise ConfigurationError(str(e)) from e
 
         config = cls(
             MCP_HOST=os.getenv("MCP_HOST", "0.0.0.0"),
@@ -361,6 +384,7 @@ class ServerConfig:
             MAX_ALERTS_PER_QUERY=validate_positive_int(
                 os.getenv("MAX_ALERTS_PER_QUERY", "1000"), "MAX_ALERTS_PER_QUERY", max_val=10000
             ),
+            ENABLED_TOOLS=enabled_tools,
             LOG_LEVEL=log_level,
             ENVIRONMENT=environment,
         )
