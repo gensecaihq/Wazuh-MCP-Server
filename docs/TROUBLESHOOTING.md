@@ -108,6 +108,8 @@ Tool failures come back as `isError` results, which the model reads, not as HTTP
 
 | Tool result | Cause | Fix |
 |-------------|-------|-----|
+| `TLS certificate verification failed for <host>. The stock Wazuh API certificate ...` | The Manager certificate isn't trusted or doesn't name `WAZUH_HOST`. The stock certificate (`CN=wazuh.com`, no subjectAltName) always fails | Reissue the certificate with a matching subjectAltName and set `WAZUH_CA_BUNDLE`, or set `WAZUH_ALLOW_SELF_SIGNED=true`. See [Manager TLS](configuration.md#manager-tls) |
+| `... CA cert does not include key usage extension` | Python 3.13's strict X.509 checks: the CA in `WAZUH_CA_BUNDLE` lacks `keyUsage` | Reissue the CA with `keyUsage=critical,keyCertSign,cRLSign` |
 | `Connection failed: Cannot connect to Wazuh server at <host>:<port>. Check Wazuh server connectivity and try again.` | The Manager is unreachable: wrong `WAZUH_HOST`/`WAZUH_PORT`, a firewall, or DNS. It is also the result when **TLS verification fails**: with `WAZUH_ALLOW_SELF_SIGNED=false`, a certificate the server does not trust produces this same message | Test from the container (see [First checks](#first-checks)). If `curl -k` succeeds and `curl` without `-k` fails, it is a certificate problem: set `WAZUH_ALLOW_SELF_SIGNED=true`, or present a trusted certificate |
 | `Tool execution failed: Invalid Wazuh credentials. Check WAZUH_USER and WAZUH_PASS` | The Manager rejected the login (HTTP 401) | Check the credentials with the command below |
 | `Tool execution failed: Wazuh user does not have sufficient permissions` | The Manager returned 403 at login | Give the API user the Wazuh RBAC roles it needs |

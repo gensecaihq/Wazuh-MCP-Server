@@ -72,6 +72,7 @@ cp config/clusters.json.example config/clusters.json
 | `indexer_user`, `indexer_pass` | | | Indexer credentials |
 | `indexer_ssl` | | `true` | Ignored when `indexer_host` has an explicit scheme |
 | `indexer_verify_ssl` | | `true` | Indexer TLS verification |
+| `ca_bundle` | | global `WAZUH_CA_BUNDLE` | CA PEM trusted for this cluster's Manager and Indexer instead of the system store. Must exist at startup. Ignored when the matching `verify_ssl` is `false` |
 | `request_timeout_seconds` | | `30` | 1–300 |
 | `ccs_prefix` | | | Cross-Cluster Search remote name |
 | `default_cluster` (top level) | | `default` | Cluster used when `cluster_id` is omitted |

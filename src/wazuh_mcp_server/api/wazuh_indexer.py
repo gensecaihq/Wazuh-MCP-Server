@@ -16,6 +16,8 @@ from typing import Any, Dict, List, Optional, Union
 import httpx
 from tenacity import retry, retry_if_exception_type, stop_after_attempt, wait_exponential
 
+from wazuh_mcp_server.config import tls_verify
+
 logger = logging.getLogger(__name__)
 
 # Index patterns for Wazuh 4.x
@@ -132,7 +134,7 @@ class WazuhIndexerClient:
             auth = (self.username, self.password)
 
         self.client = httpx.AsyncClient(
-            verify=self.verify_ssl,
+            verify=tls_verify(self.verify_ssl),
             timeout=self.timeout,
             auth=auth,
             limits=httpx.Limits(max_connections=20, max_keepalive_connections=10),

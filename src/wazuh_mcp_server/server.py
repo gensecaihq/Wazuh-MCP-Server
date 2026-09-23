@@ -705,12 +705,13 @@ if config.wazuh_tls_verification_disabled:
     _tls_msg = (
         "TLS certificate verification for the Wazuh Manager is DISABLED "
         "(WAZUH_VERIFY_SSL=false or WAZUH_ALLOW_SELF_SIGNED=true). The API credentials travel "
-        "over an unauthenticated channel. Export the Manager's CA and set WAZUH_CA_BUNDLE instead."
+        "over an unauthenticated channel. Reissue the Manager API certificate with a subjectAltName "
+        "for WAZUH_HOST and set WAZUH_CA_BUNDLE (docs/configuration.md#manager-tls)."
     )
     if config.ENVIRONMENT == "production":
-        logger.error("🔓 " + _tls_msg)
+        logger.error(_tls_msg)
     else:
-        logger.warning("🔓 " + _tls_msg)
+        logger.warning(_tls_msg)
 wazuh_config = WazuhConfig(
     wazuh_host=config.WAZUH_HOST,
     wazuh_user=config.WAZUH_USER,

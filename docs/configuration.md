@@ -31,13 +31,28 @@ There are two kinds of boolean variable:
 | `WAZUH_USER` | *(none)* | Manager API user |
 | `WAZUH_PASS` | *(none)* | Manager API password |
 | `WAZUH_PORT` | `55000` | Manager API port (1–65535) |
-| `WAZUH_VERIFY_SSL` | `true` | *Strict.* Verify the Manager's TLS certificate. Has no effect while `WAZUH_ALLOW_SELF_SIGNED` is `true` |
-| `WAZUH_ALLOW_SELF_SIGNED` | `true` | *Strict.* Accept the Manager's self-signed certificate, which a stock Wazuh install uses. **While this is `true`, the Manager certificate is not verified at all**, whatever `WAZUH_VERIFY_SSL` says. To verify the certificate, set it to `false` and keep `WAZUH_VERIFY_SSL=true` |
+| `WAZUH_VERIFY_SSL` | `true` | *Strict.* Verify the Manager's TLS certificate |
+| `WAZUH_ALLOW_SELF_SIGNED` | `false` | *Strict.* `true` disables Manager certificate verification (needed for the stock self-signed certificate unless you reissue it; see [Manager TLS](#manager-tls)) |
+| `WAZUH_CA_BUNDLE` | *(none)* | PEM file of the CA(s) to trust for the Manager and Indexer instead of the system store. Must exist at startup. Ignored, with a warning, when verification is disabled |
 | `REQUEST_TIMEOUT_SECONDS` | `30` | Timeout for Manager and Indexer requests (1–300) |
 | `MAX_CONNECTIONS` | `10` | Maximum concurrent Manager requests, and the Manager connection pool size (1–100) |
 | `MAX_ALERTS_PER_QUERY` | `1000` | Checked at startup (1–10000) but currently has no effect. Each tool's `limit` argument is capped by its own input schema, for example 1000 for `get_wazuh_alerts` |
 
-Manager certificate verification works out as `WAZUH_VERIFY_SSL and not WAZUH_ALLOW_SELF_SIGNED`. With the defaults, the Manager certificate is **not verified**.
+Manager certificate verification is on unless `WAZUH_VERIFY_SSL=false` or `WAZUH_ALLOW_SELF_SIGNED=true`.
+
+### Manager TLS
+
+The Manager certificate is verified by default. How to satisfy that depends on the certificate:
+
+- **Stock install.** Wazuh generates `<WAZUH_PATH>/api/configuration/ssl/server.crt` (default `/var/ossec/...`) self-signed for `CN=wazuh.com` with no subjectAltName. Python matches hostnames only against the subjectAltName, so this certificate cannot be verified for any `WAZUH_HOST`, even if you pin it as the CA bundle. Either reissue it (next point) or set `WAZUH_ALLOW_SELF_SIGNED=true` to connect without verification, which is how earlier versions behaved.
+- **Reissued certificate.** Issue a server certificate whose subjectAltName matches `WAZUH_HOST` (DNS name or IP), configure it in the Manager's `api.yaml` (`https.cert` / `https.key`), and point `WAZUH_CA_BUNDLE` at the PEM of the CA that signed it.
+- **Publicly trusted certificate.** Nothing to set; the system trust store is used.
+
+`WAZUH_CA_BUNDLE` replaces the system trust store for both the Manager and the Indexer. If they are signed by different CAs (for example your CA and the Indexer's `root-ca.pem` from `wazuh-certs-tool`), concatenate both PEM files into one bundle.
+
+The container runs Python 3.13, which applies strict X.509 checks: a CA certificate needs a `keyUsage` extension with `keyCertSign`, and server certificates need a subjectAltName. A CA made without `keyUsage` fails with `CA cert does not include key usage extension`.
+
+When verification fails, the first request reports `TLS certificate verification failed for <host>` with these options. The server logs a startup warning (an error in production) whenever Manager verification is disabled.
 
 ## Wazuh Indexer
 
@@ -243,8 +258,7 @@ ENVIRONMENT=production
 WAZUH_HOST=wazuh.example.com
 WAZUH_USER=mcp-service-account
 WAZUH_PASS=<secret>
-WAZUH_ALLOW_SELF_SIGNED=false        # verify the Manager certificate
-WAZUH_VERIFY_SSL=true
+WAZUH_CA_BUNDLE=/app/certs/ca.pem    # CA that signed the Manager (and Indexer) certificates
 
 WAZUH_INDEXER_HOST=wazuh-indexer.example.com
 WAZUH_INDEXER_USER=<user>

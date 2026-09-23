@@ -15,7 +15,7 @@ from typing import Any, Dict, Optional, Tuple
 import httpx
 
 from wazuh_mcp_server.api.wazuh_indexer import IndexerNotConfiguredError, WazuhIndexerClient
-from wazuh_mcp_server.config import WazuhConfig, env_bool
+from wazuh_mcp_server.config import TLS_FAILURE_HINT, WazuhConfig, env_bool, tls_verify
 from wazuh_mcp_server.resilience import CircuitBreaker, CircuitBreakerConfig, RetryConfig
 
 logger = logging.getLogger(__name__)
@@ -151,6 +151,11 @@ _ISO27001_CONTROL_MAP: Dict[str, Dict] = {
 }
 
 
+def _is_tls_failure(exc: Exception) -> bool:
+    text = str(exc).lower()
+    return "ssl" in text or "certificate" in text or "verify" in text
+
+
 def _retry_after_seconds(value: Optional[str], default: int = 30) -> int:
     """Retry-After is either delta-seconds or an HTTP-date (RFC 9110); int() on a date crashed."""
     if not value:
@@ -257,7 +262,7 @@ class WazuhClient:
             except Exception:
                 pass
         self.client = httpx.AsyncClient(
-            verify=self.config.verify_ssl,
+            verify=tls_verify(self.config.verify_ssl),
             timeout=self.config.request_timeout_seconds,
             limits=httpx.Limits(
                 max_connections=self.config.max_connections,
@@ -292,7 +297,13 @@ class WazuhClient:
             self.token = data["data"]["token"]
             logger.info(f"Authenticated with Wazuh server at {self.config.wazuh_host}")
 
-        except httpx.ConnectError:
+        except httpx.ConnectError as e:
+            # Authentication is the first request, so this is where a TLS failure shows up; a
+            # generic "Cannot connect" here hid the reason and the fix.
+            if _is_tls_failure(e):
+                raise ConnectionError(
+                    f"TLS certificate verification failed for {self.config.wazuh_host}. {TLS_FAILURE_HINT}"
+                ) from None
             raise ConnectionError(
                 f"Cannot connect to Wazuh server at {self.config.wazuh_host}:{self.config.wazuh_port}"
             )
@@ -743,12 +754,10 @@ class WazuhClient:
                 raise err
         except httpx.ConnectError as e:
             # Distinguish SSL errors from generic connection failures
-            err_str = str(e).lower()
-            if "ssl" in err_str or "certificate" in err_str or "verify" in err_str:
-                logger.error(f"SSL certificate validation failed for {self.config.wazuh_host}")
+            if _is_tls_failure(e):
+                logger.error(f"TLS certificate verification failed for {self.config.wazuh_host}")
                 raise ConnectionError(
-                    f"SSL certificate validation failed for {self.config.wazuh_host}. "
-                    "Export the Manager's CA (or its self-signed certificate) and point WAZUH_CA_BUNDLE at it."
+                    f"TLS certificate verification failed for {self.config.wazuh_host}. {TLS_FAILURE_HINT}"
                 )
             # Let other connection errors propagate for retry logic
             logger.error(f"Lost connection to Wazuh server at {self.config.wazuh_host}")

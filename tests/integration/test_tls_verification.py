@@ -161,3 +161,68 @@ class TestIgnoredBundleWarning:
         with caplog.at_level(logging.WARNING, logger="wazuh_mcp_server.config"):
             assert ServerConfig.from_env().wazuh_tls_verify is False
         assert any("bundle is ignored" in r.getMessage() for r in caplog.records)
+
+
+class TestCaBundleReachesHttpx:
+    @pytest.mark.asyncio
+    async def test_bundle_becomes_ssl_context_on_both_clients(self, monkeypatch, tmp_path):
+        import ssl as _ssl
+        import subprocess
+
+        import httpx
+
+        from wazuh_mcp_server.api.wazuh_client import WazuhClient
+        from wazuh_mcp_server.config import WazuhConfig
+
+        ca = tmp_path / "ca.pem"
+        subprocess.run(
+            [
+                "openssl",
+                "req",
+                "-x509",
+                "-newkey",
+                "rsa:2048",
+                "-nodes",
+                "-keyout",
+                str(tmp_path / "k"),
+                "-out",
+                str(ca),
+                "-days",
+                "1",
+                "-subj",
+                "/CN=t",
+            ],
+            check=True,
+            capture_output=True,
+        )
+        seen = []
+        real = httpx.AsyncClient
+
+        def capture(*a, **kw):
+            seen.append(kw.get("verify"))
+            return real(*a, **kw)
+
+        monkeypatch.setattr(httpx, "AsyncClient", capture)
+        client = WazuhClient(
+            WazuhConfig(
+                wazuh_host="h",
+                wazuh_user="u",
+                wazuh_pass="p",
+                verify_ssl=str(ca),
+                wazuh_indexer_host="i",
+                wazuh_indexer_user="u",
+                wazuh_indexer_pass="p",
+                wazuh_indexer_verify_ssl=str(ca),
+            )
+        )
+        try:
+            await client.initialize()
+        except Exception:
+            pass  # no Manager here; only the client construction matters
+        if client._indexer_client is not None:
+            try:
+                await client._indexer_client._ensure_initialized()
+            except Exception:
+                pass
+        # Manager and Indexer clients both get an SSLContext (a bare path is deprecated in httpx)
+        assert len(seen) >= 2 and all(isinstance(v, _ssl.SSLContext) for v in seen), seen

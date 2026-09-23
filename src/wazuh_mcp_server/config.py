@@ -2,6 +2,7 @@
 
 import logging
 import os
+import ssl
 from dataclasses import dataclass
 from typing import FrozenSet, Optional, Union
 
@@ -16,6 +17,22 @@ class ConfigurationError(Exception):
 
 _TRUE_TOKENS = frozenset({"1", "true", "yes", "y", "on"})
 _FALSE_TOKENS = frozenset({"0", "false", "no", "n", "off", ""})
+
+
+def tls_verify(value: Union[bool, str]) -> Union[bool, ssl.SSLContext]:
+    """httpx `verify` for a config value: a CA-bundle path becomes an SSLContext (passing the
+    path string itself is deprecated in httpx 0.28); booleans pass through."""
+    if isinstance(value, str) and value:
+        return ssl.create_default_context(cafile=value)
+    return bool(value)
+
+
+TLS_FAILURE_HINT = (
+    "The stock Wazuh API certificate (<WAZUH_PATH>/api/configuration/ssl/server.crt) is self-signed "
+    "for CN=wazuh.com with no subjectAltName, so it cannot be verified for your host. Reissue it with "
+    "a subjectAltName matching WAZUH_HOST and set WAZUH_CA_BUNDLE to the CA that signed it, or set "
+    "WAZUH_ALLOW_SELF_SIGNED=true to connect without verification."
+)
 
 
 def env_bool(name: str, default: bool) -> bool:

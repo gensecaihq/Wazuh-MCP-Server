@@ -201,7 +201,7 @@ All settings are environment variables (usually via `.env`). The ones most deplo
 |----------|---------|---------|
 | `WAZUH_HOST`, `WAZUH_USER`, `WAZUH_PASS` | — | Manager API connection (required) |
 | `WAZUH_PORT` | `55000` | Manager API port |
-| `WAZUH_VERIFY_SSL` | `true` | Verify the Manager's TLS certificate |
+| `WAZUH_CA_BUNDLE` | — | CA PEM for verifying the Manager/Indexer. The stock Manager certificate needs reissuing or `WAZUH_ALLOW_SELF_SIGNED=true`; see [Manager TLS](docs/configuration.md#manager-tls) |
 | `WAZUH_INDEXER_HOST`, `WAZUH_INDEXER_USER`, `WAZUH_INDEXER_PASS` | — | Indexer connection; an `http://` host prefix selects plain HTTP |
 | `WAZUH_INDEXER_PORT` | `9200` | Indexer port |
 | `ENVIRONMENT` | `development` | `production` requires a strong `AUTH_SECRET_KEY` (unless `AUTH_MODE=none`) |
@@ -322,7 +322,7 @@ Thanks to everyone who has contributed code, reviews, bug reports and design fee
 - [@aiunmukto](https://github.com/aiunmukto) — `.env.example`, CI workflow and Glama registry listing (#12)
 - [@Karibusan](https://github.com/Karibusan) — dependency fixes (#38)
 - [@lwsinclair](https://github.com/lwsinclair) — MseeP.ai listing (#9)
-- [@markeclaudio](https://github.com/markeclaudio) — OIDC login, active-response guard-rails, session bounds and TLS-by-default hardening (#123–#127, in review)
+- [@markeclaudio](https://github.com/markeclaudio) — OIDC sign-in and Manager TLS verification by default (#123, #127); active-response guard-rails and session bounds (#124–#126, in review)
 - [@MilkyWay88](https://github.com/MilkyWay88) and [@taylorwalton](https://github.com/taylorwalton) — early pull requests on configuration, logging and packaging
 
 **Bug reports and discussions**
