@@ -1021,9 +1021,16 @@ class SecurityManager:
         body = None
         if request.method == "POST":
             try:
-                raw = await request.body()
-                if len(raw) > max_size:
-                    raise HTTPException(status_code=413, detail="Payload too large")
+                # Stream with a running cap: a chunked upload has no Content-Length, and
+                # request.body() would buffer all of it before the size check.
+                chunks, received = [], 0
+                async for chunk in request.stream():
+                    received += len(chunk)
+                    if received > max_size:
+                        raise HTTPException(status_code=413, detail="Payload too large")
+                    chunks.append(chunk)
+                raw = b"".join(chunks)
+                request._body = raw  # Starlette replays a cached _body to the endpoint
                 body = raw.decode("utf-8") if raw else None
             except (UnicodeDecodeError, RuntimeError) as e:
                 logger.debug(f"Failed to read request body: {e}")
@@ -1138,7 +1145,8 @@ async def security_middleware(request: Request, call_next):
         response.headers["X-Frame-Options"] = "DENY"
         response.headers["X-XSS-Protection"] = "1; mode=block"
         response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
-        response.headers["Content-Security-Policy"] = "default-src 'self'"
+        # Keep a stricter policy a route set itself (e.g. the OAuth sign-in page)
+        response.headers.setdefault("Content-Security-Policy", "default-src 'self'")
 
         return response
 

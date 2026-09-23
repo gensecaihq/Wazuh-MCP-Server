@@ -452,3 +452,71 @@ class TestBearerTokenBinding:
 
         monkeypatch.setenv("MCP_API_KEY", "wazuh_" + "a" * 43)
         assert list(AuthManager().api_keys) == list(AuthManager().api_keys)
+
+
+class TestBodyLimit:
+    @pytest.mark.asyncio
+    async def test_chunked_upload_stops_at_the_limit(self):
+        consumed = 0
+
+        async def receive():
+            nonlocal consumed
+            consumed += 1
+            return {"type": "http.request", "body": b"x" * (1024 * 1024), "more_body": consumed < 200}
+
+        status = {}
+
+        async def send(message):
+            if message["type"] == "http.response.start":
+                status["code"] = message["status"]
+
+        scope = {
+            "type": "http",
+            "method": "POST",
+            "path": "/auth/token",
+            "raw_path": b"/auth/token",
+            "query_string": b"",
+            "headers": [(b"content-type", b"application/json"), (b"host", b"t")],
+            "client": ("127.0.0.1", 1),
+            "server": ("t", 80),
+            "scheme": "http",
+            "http_version": "1.1",
+            "root_path": "",
+        }
+        await mcp_server.app(scope, receive, send)
+        # No Content-Length: the body used to be buffered in full before the size check
+        assert status["code"] == 413 and consumed <= 3
+
+
+class TestEndpointGuards:
+    @pytest.mark.asyncio
+    async def test_root_rejects_unsupported_protocol_version(self):
+        async with _http() as client:
+            resp = await client.post(
+                "/", json={"jsonrpc": "2.0", "id": 1, "method": "ping"}, headers={"MCP-Protocol-Version": "2099-01-01"}
+            )
+        assert resp.status_code == 400
+
+    @pytest.mark.asyncio
+    async def test_delete_checks_origin(self):
+        async with _http() as client:
+            resp = await client.delete("/mcp", headers={"MCP-Session-Id": "x", "Origin": "https://evil.example"})
+        assert resp.status_code == 403
+
+    @pytest.mark.asyncio
+    async def test_failed_auth_is_rate_limited(self, monkeypatch):
+        from fastapi import HTTPException
+
+        from wazuh_mcp_server.security import RateLimiter
+
+        async def reject(*a, **k):
+            raise HTTPException(status_code=401, detail="bad token")
+
+        monkeypatch.setattr(mcp_server, "verify_authentication", reject)
+        monkeypatch.setattr(mcp_server, "rate_limiter", RateLimiter(max_requests=5, window_seconds=60))
+        async with _http() as client:
+            codes = [
+                (await client.post("/mcp", json={"jsonrpc": "2.0", "id": 1, "method": "ping"})).status_code
+                for _ in range(8)
+            ]
+        assert codes[:5] == [401] * 5 and 429 in codes[5:]

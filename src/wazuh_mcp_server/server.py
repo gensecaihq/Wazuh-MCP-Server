@@ -850,6 +850,21 @@ def _rate_limit_key(request: Request, auth_token: Any = None) -> str:
     return f"{api_key_id}|{ip}"
 
 
+async def _authenticate(request: Request, authorization: Optional[str]) -> Any:
+    """verify_authentication, with failed attempts counted against a per-IP bucket.
+
+    The MCP endpoints rate-limit per principal *after* authenticating, so bad tokens were
+    never limited at all (250 x 401 in a row). A client that keeps failing now gets 429."""
+    try:
+        return await verify_authentication(authorization, config)
+    except HTTPException as exc:
+        if exc.status_code == 401:
+            allowed, retry_after = rate_limiter.is_allowed(f"authfail|{security_manager.get_client_ip(request)}")
+            if not allowed:
+                raise _rate_limited_response(retry_after)
+        raise
+
+
 def _rate_limited_response(retry_after: Optional[int]) -> HTTPException:
     """Record the rate-limit metric and build the 429 response."""
     from wazuh_mcp_server.monitoring import record_rate_limit_hit
@@ -891,7 +906,7 @@ def create_error_response(
     # Normalize the id defensively: legacy error paths pass the raw body id, which may be a
     # list/object/non-finite float. Coercing to a valid JSON-RPC id here means building the
     # error response can never itself raise and turn a client mistake into an HTTP 500.
-    return MCPResponse(id=_normalize_jsonrpc_id(request_id), error=error.dict())
+    return MCPResponse(id=_normalize_jsonrpc_id(request_id), error=error.model_dump())
 
 
 def create_success_response(request_id: Optional[Union[str, int]], result: Any) -> MCPResponse:
@@ -3648,14 +3663,24 @@ async def mcp_endpoint(
     accept: Optional[str] = Header(None),
     mcp_session_id: Optional[str] = Header(None, alias="MCP-Session-Id"),
     last_event_id: Optional[str] = Header(None, alias="Last-Event-ID"),
+    mcp_protocol_version: Optional[str] = Header(None, alias="MCP-Protocol-Version"),
 ):
     """
     Main MCP protocol endpoint supporting both GET and POST.
     GET: Returns SSE stream for real-time communication
     POST: Handles JSON-RPC requests
     """
+    # Same version gate as /mcp (spec: an unsupported MCP-Protocol-Version gets 400)
+    if mcp_protocol_version and mcp_protocol_version not in SUPPORTED_PROTOCOL_VERSIONS:
+        return _modern_error_response(
+            None,
+            MCP_ERRORS["UNSUPPORTED_PROTOCOL_VERSION"],
+            "Unsupported protocol version",
+            data={"supported": SUPPORTED_PROTOCOL_VERSIONS, "requested": mcp_protocol_version},
+        )
+
     # Verify authentication based on configured mode
-    auth_token = await verify_authentication(authorization, config)
+    auth_token = await _authenticate(request, authorization)
 
     # Track active connections (request counting handled by monitoring middleware)
     ACTIVE_CONNECTIONS.inc()
@@ -3927,7 +3952,7 @@ async def mcp_streamable_http_endpoint(
     protocol_version = validate_protocol_version(mcp_protocol_version)
 
     # Verify authentication based on configured mode
-    auth_token = await verify_authentication(authorization, config)
+    auth_token = await _authenticate(request, authorization)
 
     # Origin validation per 2025-11-25 spec
     # Only validate if Origin is present; if present and invalid, return 403
@@ -4143,14 +4168,23 @@ async def mcp_streamable_http_endpoint(
 
 @app.delete("/mcp")
 async def close_mcp_session(
-    mcp_session_id: str = Header(..., alias="MCP-Session-Id"), authorization: str = Header(None)
+    request: Request,
+    mcp_session_id: str = Header(..., alias="MCP-Session-Id"),
+    authorization: str = Header(None),
+    origin: Optional[str] = Header(None),
 ):
     """
     Close MCP session explicitly (2025-11-25 spec).
     Allows clients to cleanly terminate sessions.
     """
     # Use the same auth logic as other endpoints (respects authless mode)
-    await verify_authentication(authorization, config)
+    auth_token = await _authenticate(request, authorization)
+    # Same Origin (DNS-rebinding) and rate-limit checks as POST/GET: a hostile page could
+    # otherwise end sessions cross-origin
+    validate_origin_header(origin, config.ALLOWED_ORIGINS)
+    allowed, retry_after = rate_limiter.is_allowed(_rate_limit_key(request, auth_token))
+    if not allowed:
+        raise _rate_limited_response(retry_after)
 
     # Remove session
     existing = await sessions.get(mcp_session_id)
