@@ -119,10 +119,24 @@ WAZUH_USER=your-api-user
 WAZUH_PASS=your-api-password
 ```
 
+Generate the two secrets. Compose runs with `ENVIRONMENT=production`, which refuses to start without a signing key:
+```bash
+echo "AUTH_SECRET_KEY=$(openssl rand -hex 32)" >> .env
+echo "MCP_API_KEY=wazuh_$(openssl rand -base64 32 | tr '+/' '-_' | tr -d '=')" >> .env
+```
+
 ```bash
 docker compose up -d
 curl http://localhost:3000/health
 ```
+
+Exchange the API key for the bearer token clients use (valid for `TOKEN_LIFETIME_HOURS`, default 24):
+```bash
+curl -s -X POST http://localhost:3000/auth/token -H 'Content-Type: application/json' \
+  -d "{\"api_key\": \"$(grep ^MCP_API_KEY= .env | cut -d= -f2)\"}"
+```
+
+The key is read-only by default. Add `MCP_API_KEY_SCOPES=wazuh:read wazuh:write` to `.env` to allow active-response tools.
 
 ### Pre-built image
 
@@ -137,9 +151,11 @@ Release tags carry no leading `v` (`4.3.0`, `4.3`). Releases after v4.3.0 also
 publish the `v`-prefixed alias (`v4.3.1`), so either form works from then on.
 
 ```bash
-docker run -d --name wazuh-mcp-server --env-file .env -p 3000:3000 \
-  ghcr.io/gensecaihq/wazuh-mcp-server:latest
+docker run -d --name wazuh-mcp-server --env-file .env -e MCP_HOST=0.0.0.0 \
+  -p 127.0.0.1:3000:3000 ghcr.io/gensecaihq/wazuh-mcp-server:latest
 ```
+
+`MCP_HOST=0.0.0.0` is needed inside the container (`.env.example` binds loopback for bare-metal installs); `-p 127.0.0.1:…` keeps it off the network until a TLS proxy is in front.
 
 No login is needed — the package is public. If a pull returns `unauthorized` or
 `denied`, that is a registry-side visibility problem on our end, not a missing
@@ -151,7 +167,7 @@ above) works in the meantime.
 
 1. **Settings** → **Connectors** → **Add custom connector**
 2. URL: `https://your-server/mcp`
-3. Add Bearer token in Advanced settings
+3. Add the bearer token from `/auth/token` in Advanced settings
 
 > Detailed setup: [Claude Integration Guide](docs/CLAUDE_INTEGRATION.md)
 
@@ -345,6 +361,31 @@ We welcome contributions. See [Issues](https://github.com/gensecaihq/Wazuh-MCP-S
 ---
 
 ## Acknowledgments
+
+This project is built by its community. Thank you to everyone who has written code, reviewed, reported bugs, and shaped the design.
+
+**Code and pull requests**
+
+- [@alokemajumder](https://github.com/alokemajumder) — maintainer; architecture, MCP transport, security hardening, releases
+- [@gensecai-dev](https://github.com/gensecai-dev) — the 19 action, verification and rollback tools, broken-endpoint fixes, production hardening
+- [@andrzej-piotrowski-pl](https://github.com/andrzej-piotrowski-pl) — ISO 27001:2022 compliance tools: Annex A control mapping, domain scoring, gap analysis (#74)
+- [@blackwell-systems](https://github.com/blackwell-systems) — opt-in GCF response encoding for record tools (#102, #104)
+- [@lucascruzb](https://github.com/lucascruzb) — period-wide alert aggregation via scroll, the basis of `get_alerts_aggregated` (#79)
+- [@kanylbullen](https://github.com/kanylbullen) — compact output mode for token-efficient responses (#65)
+- [@mouse-value-add](https://github.com/mouse-value-add) — optional You.com web-search context (#85)
+- [@DrRSatzteil](https://github.com/DrRSatzteil) — `tools/list` pagination fix (#70)
+- [@SiM22](https://github.com/SiM22) — MCP 2025-06-18 support for Windsurf compatibility (#66)
+- [@aiunmukto](https://github.com/aiunmukto) — `.env.example`, CI workflow and Glama registry listing (#12)
+- [@Karibusan](https://github.com/Karibusan) — dependency fixes (#38)
+- [@lwsinclair](https://github.com/lwsinclair) — MseeP.ai listing (#9)
+- [@markeclaudio](https://github.com/markeclaudio) — OIDC login, active-response guard-rails, session bounds and TLS-by-default hardening (#123–#127, in review)
+- [@MilkyWay88](https://github.com/MilkyWay88) and [@taylorwalton](https://github.com/taylorwalton) — early pull requests on configuration, logging and packaging
+
+**Bug reports and discussions**
+
+[@cbassonbgroup](https://github.com/cbassonbgroup), [@cybersentinel-06](https://github.com/cybersentinel-06), [@daod-arshad](https://github.com/daod-arshad), [@mamema](https://github.com/mamema), [@marcolinux46](https://github.com/marcolinux46), [@matveevandrey](https://github.com/matveevandrey), [@punkpeye](https://github.com/punkpeye), [@tonyliu9189](https://github.com/tonyliu9189), [@Uberkarhu](https://github.com/Uberkarhu), [@bl4ck5w4n07](https://github.com/bl4ck5w4n07), [@gnix45](https://github.com/gnix45), [@hackdefendr](https://github.com/hackdefendr), [@melmasry1987](https://github.com/melmasry1987), [@Vasanth120v](https://github.com/Vasanth120v), [@wqfh](https://github.com/wqfh)
+
+**Built on**
 
 - [Wazuh](https://wazuh.com/) — Open source security platform
 - [Model Context Protocol](https://modelcontextprotocol.io/) — AI tool integration standard
