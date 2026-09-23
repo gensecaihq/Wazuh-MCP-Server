@@ -151,7 +151,6 @@ class TestManagerAgentGuardCoversBlockingTools:
     @pytest.fixture
     def stub(self, monkeypatch):
         """Install a stub cluster whose blocking methods only record which tool was reached."""
-        from datetime import datetime, timezone
 
         from wazuh_mcp_server import server as mcp_server
         from wazuh_mcp_server.clusters import ClusterRegistry
