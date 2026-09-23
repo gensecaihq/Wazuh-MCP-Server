@@ -150,7 +150,9 @@ class AuthManager:
         # key plus a loud warning — operators should set MCP_API_KEY explicitly. In
         # development it grants write for convenience.
         if not self.api_keys:
-            is_prod = os.getenv("ENVIRONMENT", "development").lower() == "production"
+            from wazuh_mcp_server.config import get_config
+
+            is_prod = get_config().ENVIRONMENT == "production"
             if is_prod:
                 default_scopes = ["wazuh:read"]
                 logger.warning(

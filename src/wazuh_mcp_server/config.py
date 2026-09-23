@@ -60,6 +60,18 @@ def validate_positive_int(value: str, name: str, max_val: Optional[int] = None) 
         raise ConfigurationError(f"{name} must be a valid integer, got '{value}'")
 
 
+_ENVIRONMENTS = {"development": "development", "dev": "development", "production": "production", "prod": "production"}
+
+
+def normalize_environment(raw: Optional[str]) -> str:
+    """ENVIRONMENT -> "development" | "production". Unknown values fail rather than silently
+    running without the production-only safety checks (e.g. "prod" used to mean development)."""
+    value = (raw or "development").strip().lower()
+    if value not in _ENVIRONMENTS:
+        raise ConfigurationError(f"ENVIRONMENT must be 'development' or 'production', got '{raw}'")
+    return _ENVIRONMENTS[value]
+
+
 def normalize_host(host: str) -> str:
     """
     Normalize hostname by stripping protocol prefix if present.
@@ -243,7 +255,7 @@ class ServerConfig:
         """Create configuration from environment variables with validation."""
         import secrets
 
-        environment = os.getenv("ENVIRONMENT", "development").lower()
+        environment = normalize_environment(os.getenv("ENVIRONMENT"))
 
         # Validate auth mode
         auth_mode = os.getenv("AUTH_MODE", "bearer").lower()

@@ -17,7 +17,7 @@ import uuid
 from collections import OrderedDict
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Dict, List, Optional, Tuple, Union
 from urllib.parse import urlparse
 
 from fastapi import FastAPI, Header, HTTPException, Request, Response
@@ -37,6 +37,7 @@ from wazuh_mcp_server.security import (
     MAX_JSON_DEPTH,
     RateLimiter,
     ToolValidationError,
+    memory_manager,
     parse_json_body_safe,
     security_manager,
     security_middleware,
@@ -697,7 +698,7 @@ def validate_cors_origins(origins_config: str) -> List[str]:
     """Validate and parse CORS origins configuration."""
     if not origins_config or origins_config.strip() == "*":
         # Only allow wildcard in development
-        if os.getenv("ENVIRONMENT") == "development":
+        if get_config().ENVIRONMENT == "development":
             return ["*"]
         else:
             # In production, default to common Claude origins
@@ -756,7 +757,7 @@ def validate_origin_header(origin: Optional[str], allowed_origins_config: str) -
             # must not disable DNS-rebinding protection — the CORS layer already refuses
             # it there (validate_cors_origins), so keep the two layers consistent and
             # require an exact match instead of blanket-allowing every Origin.
-            if os.getenv("ENVIRONMENT", "development").lower() == "development":
+            if get_config().ENVIRONMENT == "development":
                 return
             continue
         if allowed == origin:
@@ -4165,14 +4166,34 @@ async def health_check():
     )
 
 
+# /ready is unauthenticated and exempt from rate limiting (probes must always answer), but each
+# evaluation calls the Wazuh Manager — using the client's shared request budget — and walks the
+# session store. Serve a briefly cached result and let only one probe run at a time, so a flood
+# of /ready can't starve real tool calls.
+READY_CACHE_SECONDS = 5.0
+_ready_cache: Optional[Tuple[float, JSONResponse]] = None
+_ready_lock = asyncio.Lock()
+
+
 @app.get("/ready")
 async def readiness_check():
     """Readiness probe with detailed component status.
 
-    Verifies Wazuh Manager (and Indexer, if configured) reachability and returns
-    503 when a dependency is unhealthy. Intended for load-balancer / orchestrator
-    readiness gating, not for liveness (see /health).
+    Verifies Wazuh Manager (and Indexer, if configured) reachability and memory headroom,
+    and returns 503 when any is unhealthy. Intended for load-balancer / orchestrator
+    readiness gating, not for liveness (see /health). Results are cached for
+    READY_CACHE_SECONDS.
     """
+    global _ready_cache
+    async with _ready_lock:
+        now = time.monotonic()
+        if _ready_cache is None or now - _ready_cache[0] >= READY_CACHE_SECONDS:
+            _ready_cache = (now, await _evaluate_readiness())
+        response = _ready_cache[1]
+    return JSONResponse(content=json.loads(response.body), status_code=response.status_code)
+
+
+async def _evaluate_readiness() -> JSONResponse:
     try:
         # Test Wazuh connectivity with an UNCACHED probe so a fresh Manager outage
         # isn't masked by the 5-minute cache on get_manager_info().
@@ -4221,9 +4242,15 @@ async def readiness_check():
         # alert/vuln tool, so when it is configured any non-healthy state (unhealthy,
         # degraded/red, unknown) must degrade readiness — otherwise the orchestrator
         # keeps routing traffic to a node whose core tools all fail.
+        # Over MAX_MEMORY_MB the security middleware 503s every non-probe request; report it
+        # here too so the orchestrator stops routing to (and can recycle) this node.
+        memory_status = "healthy" if memory_manager.check_memory_usage() else "over_limit"
+
         if wazuh_status != "healthy":
             overall_status = "degraded"
         elif indexer_status not in ("healthy", "not_configured"):
+            overall_status = "degraded"
+        elif memory_status != "healthy":
             overall_status = "degraded"
         else:
             overall_status = "healthy"
@@ -4248,7 +4275,12 @@ async def readiness_check():
                     "configured": cluster_registry.cluster_ids,
                 },
                 "authentication": auth_info,
-                "services": {"wazuh_manager": wazuh_status, "wazuh_indexer": indexer_status, "mcp": "healthy"},
+                "services": {
+                    "wazuh_manager": wazuh_status,
+                    "wazuh_indexer": indexer_status,
+                    "memory": memory_status,
+                    "mcp": "healthy",
+                },
                 "vulnerability_tools": {
                     "available": wazuh_client._indexer_client is not None,
                     "note": (

@@ -546,18 +546,26 @@ class TestCompletionRefResource:
         assert out["completion"]["values"] == ["001", "002", "003", "004", "005"]
 
 
+def _set_environment(monkeypatch, env):
+    import dataclasses
+
+    from wazuh_mcp_server import config as config_module
+
+    monkeypatch.setattr(config_module, "_config", dataclasses.replace(config_module.get_config(), ENVIRONMENT=env))
+
+
 class TestOriginWildcardProduction:
     def test_wildcard_rejected_in_production(self, monkeypatch):
         from wazuh_mcp_server.server import validate_origin_header
 
-        monkeypatch.setenv("ENVIRONMENT", "production")
+        _set_environment(monkeypatch, "production")
         with pytest.raises(Exception):  # HTTPException 403
             validate_origin_header("https://evil.example", "*")
 
     def test_wildcard_allowed_in_development(self, monkeypatch):
         from wazuh_mcp_server.server import validate_origin_header
 
-        monkeypatch.setenv("ENVIRONMENT", "development")
+        _set_environment(monkeypatch, "development")
         # No raise = allowed.
         validate_origin_header("https://anything.example", "*")
 
