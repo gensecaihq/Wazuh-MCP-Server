@@ -1,23 +1,29 @@
 # Multi-Cluster Guide
 
-Manage several Wazuh deployments from one MCP server. Multi-cluster is **opt-in** — with no
-clusters file the server behaves exactly as a single-cluster deployment configured from
-environment variables.
+One server can route tool calls to several Wazuh deployments. Multi-cluster mode is opt-in: without a clusters file the server runs as a single-cluster deployment configured from environment variables, and tool schemas are unchanged.
 
 ## How it works
 
-- **No clusters file** → single cluster from the env vars (`WAZUH_HOST`, `WAZUH_INDEXER_HOST`, …). Tools take no `cluster_id`.
-- **Clusters file present** (`WAZUH_CLUSTERS_FILE`, default `./config/clusters.json`) → each entry becomes a named cluster with its own Manager (and optional Indexer) credentials. Every tool gains an optional `cluster_id` argument, a `list_wazuh_clusters` tool appears, and `/health`/`/ready` report the configured clusters.
+The server reads `WAZUH_CLUSTERS_FILE` (default `./config/clusters.json`, relative to the working directory; `/app/config/clusters.json` in the container).
 
-The env-configured cluster remains reachable as `default`, so existing automation keeps working.
+| | No clusters file | Clusters file present |
+|---|---|---|
+| Clusters | One, from `WAZUH_HOST`, `WAZUH_INDEXER_HOST`, … | The environment cluster (id `default`) plus one per file entry |
+| Tool arguments | Unchanged | Every tool except `list_wazuh_clusters` gains an optional `cluster_id` |
+| `list_wazuh_clusters` | Not listed | Listed (in the `system` toolset) |
+| Tool count | 55 | 56 |
+
+`WAZUH_HOST`, `WAZUH_USER` and `WAZUH_PASS` are still required in multi-cluster mode, because the environment cluster is always loaded as `default`. The id `default` is therefore reserved and cannot be used in the file.
+
+Connections are opened lazily on first use, so an unreachable cluster does not prevent startup; tools targeting it return the connection error.
 
 ## Configuration
-
-Copy the example and edit it:
 
 ```bash
 cp config/clusters.json.example config/clusters.json
 ```
+
+`compose.yml` mounts `./config` read-only at `/app/config`, so the file is picked up on the next `docker compose up -d`. The example defines `prod-eu`, `prod-us` and an `all` entry (see [Cross-Cluster Search](#cross-cluster-search-ccs)):
 
 ```json
 {
@@ -31,8 +37,11 @@ cp config/clusters.json.example config/clusters.json
       "wazuh_pass": "${WAZUH_EU_PASS}",
       "verify_ssl": true,
       "indexer_host": "ccs-coordinator.example.com",
+      "indexer_port": 9200,
       "indexer_user": "${INDEXER_USER}",
       "indexer_pass": "${INDEXER_PASS}",
+      "indexer_ssl": true,
+      "indexer_verify_ssl": true,
       "ccs_prefix": "eu"
     },
     {
@@ -51,43 +60,81 @@ cp config/clusters.json.example config/clusters.json
 
 ### Fields
 
-| Field | Required | Description |
-|-------|----------|-------------|
-| `id` | ✅ | Cluster identifier used as the `cluster_id` tool argument (`[A-Za-z0-9_.*-]`, ≤64 chars) |
-| `wazuh_host` / `wazuh_user` / `wazuh_pass` | ✅ | Manager API connection |
-| `wazuh_port` | | Manager API port (default `55000`) |
-| `verify_ssl` | | Verify the Manager TLS cert (default `true`) |
-| `ca_bundle` | | PEM file used to verify this cluster's Manager/Indexer certificates (defaults to the global `WAZUH_CA_BUNDLE`) |
-| `indexer_host` / `indexer_user` / `indexer_pass` | | Indexer connection (required for alert/vulnerability tools on this cluster) |
-| `indexer_port` / `indexer_ssl` / `indexer_verify_ssl` | | Indexer options (defaults `9200` / `true` / `true`) |
-| `ccs_prefix` | | OpenSearch Cross-Cluster Search remote name (see below) |
-| `default_cluster` (top level) | | Which `id` is used when a tool omits `cluster_id` (defaults to `default`, the env cluster) |
+| Field | Required | Default | Notes |
+|-------|:--------:|---------|-------|
+| `id` | yes | | 1–64 characters from `A-Z a-z 0-9 _ . * -`; unique; not `default` |
+| `wazuh_host` | yes | | A leading `http://` or `https://` and trailing `/` are stripped |
+| `wazuh_user`, `wazuh_pass` | yes | | Manager API credentials |
+| `wazuh_port` | | `55000` | 1–65535 |
+| `verify_ssl` | | `true` | Manager TLS verification |
+| `indexer_host` | | | Needed for alert and vulnerability tools on this cluster. An `http://` prefix selects plain HTTP |
+| `indexer_port` | | `9200` | 1–65535 |
+| `indexer_user`, `indexer_pass` | | | Indexer credentials |
+| `indexer_ssl` | | `true` | Ignored when `indexer_host` has an explicit scheme |
+| `indexer_verify_ssl` | | `true` | Indexer TLS verification |
+| `request_timeout_seconds` | | `30` | 1–300 |
+| `ccs_prefix` | | | Cross-Cluster Search remote name |
+| `default_cluster` (top level) | | `default` | Cluster used when `cluster_id` is omitted |
 
-**Secrets never live in the file.** Any value of the form `${ENV_VAR}` is resolved from the
-environment at load time — set those variables via your secret manager / `.env`.
+### Secrets
+
+A value written as exactly `${VAR_NAME}` is replaced with that environment variable at startup. Put the credentials in `.env` (or your secret manager) rather than in the file. References are resolved for whole values only, not inside longer strings.
+
+### Validation
+
+The file is validated at startup. Any error stops the server with a message naming the cluster and field, for example:
+
+```
+cluster 'eu': invalid verify_ssl: expected a boolean (true/false), got 'enabled'
+cluster 'eu': invalid wazuh_port: wazuh_port must be between 1 and 65535, got 70000
+cluster 'eu': invalid request_timeout_seconds: request_timeout_seconds must be <= 300, got 301
+clusters file references unset environment variable 'NOPE_UNSET'
+clusters file ./config/clusters.json: duplicate cluster id 'default'
+```
+
+- Booleans accept JSON `true`/`false`, numbers, or the strings `true/false`, `1/0`, `yes/no`, `y/n`, `on/off` (so `"${VERIFY_SSL}"` resolving to `"false"` disables verification as intended). Anything else is an error.
+- The file must be a JSON object with a non-empty `clusters` list, each entry an object with a valid, unique `id`.
+- `default_cluster` must name a configured cluster.
 
 ## Routing tools to a cluster
 
-Every tool accepts an optional `cluster_id`:
-
 ```json
-{ "name": "get_wazuh_alerts", "arguments": { "limit": 20, "cluster_id": "prod-us" } }
+{"name": "get_wazuh_alerts", "arguments": {"limit": 20, "cluster_id": "prod-us"}}
 ```
 
-Omit `cluster_id` to use the default cluster. Use `list_wazuh_clusters` to see what's configured:
+Omit `cluster_id` to use `default_cluster`. The `cluster_id` schema description names the current default:
 
 ```json
-{ "name": "list_wazuh_clusters", "arguments": {} }
+{"type": "string", "description": "Target Wazuh cluster (default: prod-eu). Use list_wazuh_clusters to see configured clusters."}
+```
+
+`list_wazuh_clusters` takes no arguments. Output with the example file:
+
+```
+Configured Wazuh Clusters:
+{
+  "multi_cluster": true,
+  "default_cluster": "prod-eu",
+  "clusters": [
+    "default",
+    "prod-eu",
+    "prod-us",
+    "all"
+  ]
+}
+```
+
+An unknown id is rejected with a JSON-RPC invalid-params error:
+
+```json
+{"code": -32602, "message": "Unknown cluster_id 'nope'. Configured clusters: all, default, prod-eu, prod-us"}
 ```
 
 ## Cross-Cluster Search (CCS)
 
-If your Wazuh Indexers are joined by an OpenSearch **Cross-Cluster Search** coordinator, set
-`ccs_prefix` to the remote-cluster name. Indexer queries for that cluster are then qualified
-against the remote — e.g. `eu:wazuh-alerts-*` instead of `wazuh-alerts-*`.
+When your Indexers are joined through an OpenSearch Cross-Cluster Search coordinator, point `indexer_host` at the coordinator and set `ccs_prefix` to the remote cluster name. Indexer queries for that entry then target `<prefix>:<index>`, for example `eu:wazuh-alerts-*`.
 
-A special entry with `"ccs_prefix": "*"` searches **every** remote cluster the coordinator
-knows about — useful as an `all` pseudo-cluster for fleet-wide alert and vulnerability reads:
+`"ccs_prefix": "*"` queries every remote cluster the coordinator knows, which gives a fleet-wide pseudo-cluster:
 
 ```json
 {
@@ -103,15 +150,19 @@ knows about — useful as an `all` pseudo-cluster for fleet-wide alert and vulne
 ```
 
 ```json
-{ "name": "get_alerts_aggregated", "arguments": { "cluster_id": "all", "timestamp_start": "now-24h" } }
+{"name": "get_alerts_aggregated", "arguments": {"cluster_id": "all", "timestamp_start": "now-24h"}}
 ```
 
-## Notes
+The prefix applies only to Indexer queries (alerts, events, vulnerabilities). Manager API tools called with `cluster_id: "all"` go to that entry's `wazuh_host`, a single Manager.
 
-- A single unreachable cluster does not stop the server; tools targeting it surface the connection error per call.
-- RBAC scopes apply the same way across all clusters — a `wazuh:write` token is required for active-response tools on any cluster, and destructive calls are audited with the target `cluster_id`.
-- `docker compose` mounts `./config` into the container, so `config/clusters.json` is picked up automatically.
+## Limitations
+
+- **Readiness:** `/ready` probes only the environment-configured cluster (`default`), even when `default_cluster` points elsewhere. It lists the configured clusters under `clusters` but does not check them. `/health` does not report clusters. Use `validate_wazuh_connection` with a `cluster_id` to test a specific cluster.
+- **Audit log:** write-tool audit entries record the tool, principal, session and arguments, but not the target `cluster_id`.
+- **Scopes:** RBAC is per token, not per cluster. A token with `wazuh:write` can run active response on every configured cluster.
+- **Toolsets:** `list_wazuh_clusters` belongs to the `system` toolset and is hidden when `WAZUH_TOOLSETS` excludes it.
+- **Reloading:** the file is read once at startup; restart the server after editing it.
 
 ---
 
-[← Configuration](configuration.md) · [Operations](OPERATIONS.md) · [Back to README](../README.md)
+[Configuration](configuration.md) · [Operations](OPERATIONS.md) · [Back to README](../README.md)

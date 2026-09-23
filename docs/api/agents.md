@@ -1,628 +1,349 @@
-# Agent Management API
+# Agents
 
-Complete reference for Wazuh agent management and monitoring tools. These tools provide comprehensive visibility into agent status, health, configuration, and running processes across your infrastructure.
+Tools in the `agents` toolset. All six read from the Wazuh Manager API and do not need the Indexer.
 
-## Overview
+| Tool | Purpose | Manager API endpoint |
+|------|---------|----------------------|
+| [`get_wazuh_agents`](#get_wazuh_agents) | List agents, optionally filtered | `GET /agents` |
+| [`get_wazuh_running_agents`](#get_wazuh_running_agents) | List active agents | `GET /agents?status=active` |
+| [`check_agent_health`](#check_agent_health) | Status summary for one agent | `GET /agents` |
+| [`get_agent_processes`](#get_agent_processes) | Process inventory for one agent | `GET /syscollector/{agent_id}/processes` |
+| [`get_agent_ports`](#get_agent_ports) | Open-port inventory for one agent | `GET /syscollector/{agent_id}/ports` |
+| [`get_agent_configuration`](#get_agent_configuration) | Agent group configuration | `GET /agents`, `GET /groups/{group}/configuration` |
 
-The agent management tools offer six main capabilities:
-- **Agent Discovery**: List and filter agents by various criteria
-- **Health Monitoring**: Check agent connectivity and operational status
-- **Configuration Management**: View agent configurations and settings
-- **Process Monitoring**: Monitor running processes on agents
-- **Network Monitoring**: Track open ports and network connections
-- **Operational Intelligence**: Real-time agent status and performance
-
----
-
-## 🖥️ get_wazuh_agents
-
-Retrieve comprehensive information about Wazuh agents with flexible filtering options.
-
-### Parameters
-
-| Parameter | Type | Default | Required | Description |
-|-----------|------|---------|----------|-------------|
-| `agent_id` | string | `null` | No | Specific agent ID to query (3-8 alphanumeric characters) |
-| `status` | string | `null` | No | Filter by agent status |
-| `limit` | integer | `100` | No | Maximum number of agents to retrieve (1-1000) |
-
-### Agent Status Values
-
-| Status | Description | Typical Use Case |
-|--------|-------------|------------------|
-| `active` | Agent is connected and sending data | Normal operations |
-| `disconnected` | Agent is not currently connected | Troubleshooting connectivity |
-| `never_connected` | Agent registered but never connected | Initial setup verification |
-| `pending` | Agent registration pending approval | New agent deployment |
-
-### Usage Examples
-
-#### List All Active Agents
-```
-Ask Claude: "Show me all active Wazuh agents"
-```
-
-This queries:
-- `status`: "active"
-- `limit`: 100 (default)
-
-#### Get Specific Agent Details
-```
-Ask Claude: "Get details for agent 001"
-```
-
-This queries:
-- `agent_id`: "001"
-
-#### Find Disconnected Agents
-```
-Ask Claude: "Show me all disconnected agents"
-```
-
-This queries:
-- `status`: "disconnected"
-
-#### List First 50 Agents
-```
-Ask Claude: "List the first 50 agents in the system"
-```
-
-This queries:
-- `limit`: 50
-
-### Response Format
-
-```json
-{
-  "agents": [
-    {
-      "id": "001",
-      "name": "web-server-01",
-      "ip": "192.168.1.100",
-      "status": "active",
-      "last_keep_alive": "2024-01-01T14:58:30Z",
-      "os": {
-        "platform": "ubuntu",
-        "version": "20.04",
-        "arch": "x86_64"
-      },
-      "version": "4.8.0",
-      "manager": "wazuh-manager-01",
-      "group": ["default", "web-servers"],
-      "node_name": "worker-01",
-      "register_date": "2024-01-01T10:00:00Z",
-      "configuration_hash": "ab12cd34ef56",
-      "merged_sum": "98765432",
-      "config_sum": "12345678"
-    }
-  ],
-  "total_agents": 156,
-  "summary": {
-    "active": 142,
-    "disconnected": 12,
-    "never_connected": 2,
-    "pending": 0
-  },
-  "metadata": {
-    "query_time": "2024-01-01T15:00:00Z",
-    "api_source": "wazuh_server"
-  }
-}
-```
-
-### Agent Information Fields
-
-| Field | Description | Example |
-|-------|-------------|---------|
-| `id` | Unique agent identifier | "001", "web-01" |
-| `name` | Agent hostname | "web-server-01" |
-| `ip` | Agent IP address | "192.168.1.100" |
-| `status` | Current connection status | "active", "disconnected" |
-| `last_keep_alive` | Last communication timestamp | "2024-01-01T14:58:30Z" |
-| `os.platform` | Operating system | "ubuntu", "windows", "centos" |
-| `version` | Wazuh agent version | "4.8.0" |
-| `group` | Agent groups | ["default", "web-servers"] |
+Agent IDs are 1 to 5 digits and are zero-padded to three digits (`"3"` becomes `"003"`). Conventions shared by all tools are described in the [tool reference overview](README.md).
 
 ---
 
-## ✅ get_wazuh_running_agents
+## get_wazuh_agents
 
-Get a quick list of currently active and running Wazuh agents.
+Returns agents from the Manager API, optionally filtered by ID or status.
 
-### Parameters
-
-None - returns all active agents.
-
-### Usage Examples
-
-#### Quick Status Check
-```
-Ask Claude: "Show me all running agents"
-```
-
-#### Operational Overview
-```
-Ask Claude: "Which agents are currently online?"
-```
-
-### Response Format
-
-```json
-{
-  "running_agents": [
-    {
-      "id": "001",
-      "name": "web-server-01",
-      "ip": "192.168.1.100",
-      "last_keep_alive": "2024-01-01T14:58:30Z",
-      "uptime": "72h 15m",
-      "status": "active"
-    },
-    {
-      "id": "003",
-      "name": "db-server-01",
-      "ip": "192.168.1.103",
-      "last_keep_alive": "2024-01-01T14:58:45Z",
-      "uptime": "168h 22m",
-      "status": "active"
-    }
-  ],
-  "summary": {
-    "total_running": 142,
-    "average_uptime": "96h 30m",
-    "oldest_uptime": "720h 15m",
-    "newest_connection": "2h 15m"
-  }
-}
-```
-
----
-
-## 🏥 check_agent_health
-
-Perform comprehensive health check on a specific Wazuh agent.
+- **Scope:** `wazuh:read`
+- **Data source:** Manager API, `GET /agents`
 
 ### Parameters
 
-| Parameter | Type | Default | Required | Description |
-|-----------|------|---------|----------|-------------|
-| `agent_id` | string | - | **Yes** | ID of the agent to check (3-8 alphanumeric characters) |
+| Name | Type | Required | Default | Constraints |
+|------|------|----------|---------|-------------|
+| `agent_id` | string | no | none | Agent ID; sent as `agents_list` |
+| `status` | string | no | none | `active`, `disconnected`, `never_connected`, `pending` |
+| `limit` | integer | no | `100` | 1 to 1000 |
 
-### Usage Examples
+### Notes
 
-#### Basic Health Check
-```
-Ask Claude: "Check the health of agent 001"
-```
+- The Manager API response is returned unchanged: `data.affected_items` holds full agent records (`id`, `name`, `ip`, `status`, `os`, `version`, `lastKeepAlive`, `dateAdd`, `group`, `node_name` and other fields reported by the Manager), and `data.total_affected_items` is the Manager's total.
 
-#### Troubleshooting
-```
-Ask Claude: "Is agent web-01 healthy?"
-```
+### Example
 
-### Response Format
+Arguments:
 
 ```json
+{"status": "disconnected"}
+```
+
+Result:
+
+```text
+Wazuh Agents:
 {
-  "agent_health": {
-    "agent_id": "001",
-    "agent_name": "web-server-01",
-    "overall_status": "healthy",
-    "health_score": 95,
-    "checks": {
-      "connectivity": {
-        "status": "pass",
-        "last_seen": "2024-01-01T14:58:30Z",
-        "latency_ms": 12
-      },
-      "version_compatibility": {
-        "status": "pass",
-        "agent_version": "4.8.0",
-        "manager_version": "4.8.0",
-        "compatible": true
-      },
-      "configuration": {
-        "status": "pass",
-        "config_hash": "ab12cd34ef56",
-        "last_updated": "2024-01-01T10:00:00Z"
-      },
-      "performance": {
-        "status": "warning",
-        "cpu_usage": 85,
-        "memory_usage": 67,
-        "disk_usage": 42
-      },
-      "log_collection": {
-        "status": "pass",
-        "events_per_second": 15.2,
-        "queue_usage": 12
+  "data": {
+    "affected_items": [
+      {
+        "id": "007",
+        "name": "win-ws-07",
+        "ip": "10.0.4.37",
+        "status": "disconnected",
+        "os": {"name": "Microsoft Windows 11 Pro", "version": "10.0.22631", "platform": "windows"},
+        "version": "Wazuh v4.14.1",
+        "lastKeepAlive": "2026-09-22T17:03:44+00:00",
+        "dateAdd": "2026-03-02T10:21:09+00:00",
+        "group": ["default", "windows"],
+        "node_name": "node01"
       }
+    ],
+    "total_affected_items": 1,
+    "total_failed_items": 0,
+    "failed_items": []
+  },
+  "message": "All selected items were returned",
+  "error": 0
+}
+```
+
+---
+
+## get_wazuh_running_agents
+
+Returns agents whose status is `active`.
+
+- **Scope:** `wazuh:read`
+- **Data source:** Manager API, `GET /agents?status=active`
+
+### Parameters
+
+None.
+
+### Notes
+
+- No `limit` is sent, so the Manager API's default page size applies. Use `get_wazuh_agents` with `status: "active"` and an explicit `limit` for larger fleets.
+- The response has the same shape as `get_wazuh_agents`, under the label `Running Agents:`.
+
+### Example
+
+Arguments:
+
+```json
+{}
+```
+
+Result (one record shown):
+
+```text
+Running Agents:
+{
+  "data": {
+    "affected_items": [
+      {
+        "id": "001",
+        "name": "mail-01",
+        "ip": "10.0.1.10",
+        "status": "active",
+        "os": {"name": "Ubuntu", "version": "22.04.4 LTS", "platform": "ubuntu"},
+        "version": "Wazuh v4.14.1",
+        "lastKeepAlive": "2026-09-24T09:42:10+00:00",
+        "group": ["default", "linux"],
+        "node_name": "node01"
+      }
+    ],
+    "total_affected_items": 2,
+    "total_failed_items": 0,
+    "failed_items": []
+  },
+  "message": "All selected items were returned",
+  "error": 0
+}
+```
+
+---
+
+## check_agent_health
+
+Returns a status summary for one agent.
+
+- **Scope:** `wazuh:read`
+- **Data source:** Manager API, `GET /agents` with `agents_list` and a field selection
+
+### Parameters
+
+| Name | Type | Required | Default | Constraints |
+|------|------|----------|---------|-------------|
+| `agent_id` | string | yes | | Agent ID |
+
+### Notes
+
+- `health` is `healthy` when the agent's status is `active` and `unhealthy` for any other status. No other checks are performed.
+- An unknown agent ID returns an `isError` result: `Agent <id> not found`.
+
+### Example
+
+Arguments:
+
+```json
+{"agent_id": "1"}
+```
+
+Result:
+
+```text
+Agent Health:
+{
+  "data": {
+    "agent_id": "001",
+    "name": "mail-01",
+    "status": "active",
+    "health": "healthy",
+    "ip": "10.0.1.10",
+    "os": {"name": "Ubuntu", "version": "22.04.4 LTS", "platform": "ubuntu"},
+    "version": "Wazuh v4.14.1",
+    "last_keep_alive": "2026-09-24T09:42:10+00:00",
+    "date_add": "2026-01-12T08:00:03+00:00",
+    "group": ["default", "linux"],
+    "node_name": "node01"
+  }
+}
+```
+
+---
+
+## get_agent_processes
+
+Returns the syscollector process inventory for one agent.
+
+- **Scope:** `wazuh:read`
+- **Data source:** Manager API, `GET /syscollector/{agent_id}/processes`
+
+### Parameters
+
+| Name | Type | Required | Default | Constraints |
+|------|------|----------|---------|-------------|
+| `agent_id` | string | yes | | Agent ID |
+| `limit` | integer | no | `100` | 1 to 1000 |
+
+### Notes
+
+- Syscollector is a periodic inventory, not a live process list. Each record's `scan.time` shows when it was collected.
+- The syscollector module must be enabled on the agent. The Manager API response is returned unchanged.
+
+### Example
+
+Arguments:
+
+```json
+{"agent_id": "003", "limit": 2}
+```
+
+Result (one record shown):
+
+```text
+Agent Processes:
+{
+  "data": {
+    "affected_items": [
+      {
+        "pid": "2207",
+        "name": "nginx",
+        "state": "S",
+        "ppid": 1,
+        "euser": "www-data",
+        "cmd": "nginx: worker process",
+        "vm_size": 57680,
+        "resident": 6104,
+        "start_time": 1727100100,
+        "scan": {"id": 0, "time": "2026-09-24T09:30:02+00:00"},
+        "agent_id": "003"
+      }
+    ],
+    "total_affected_items": 2,
+    "total_failed_items": 0,
+    "failed_items": []
+  },
+  "message": "All selected items were returned",
+  "error": 0
+}
+```
+
+---
+
+## get_agent_ports
+
+Returns the syscollector network-port inventory for one agent.
+
+- **Scope:** `wazuh:read`
+- **Data source:** Manager API, `GET /syscollector/{agent_id}/ports`
+
+### Parameters
+
+| Name | Type | Required | Default | Constraints |
+|------|------|----------|---------|-------------|
+| `agent_id` | string | yes | | Agent ID |
+| `limit` | integer | no | `100` | 1 to 1000 |
+
+### Notes
+
+- Like processes, ports come from the periodic syscollector inventory. The Manager API response is returned unchanged.
+
+### Example
+
+Arguments:
+
+```json
+{"agent_id": "003", "limit": 2}
+```
+
+Result (one record shown):
+
+```text
+Agent Ports:
+{
+  "data": {
+    "affected_items": [
+      {
+        "protocol": "tcp",
+        "local": {"ip": "0.0.0.0", "port": 22},
+        "remote": {"ip": "0.0.0.0", "port": 0},
+        "state": "listening",
+        "pid": 1123,
+        "process": "sshd",
+        "tx_queue": 0,
+        "rx_queue": 0,
+        "inode": 23114,
+        "scan": {"id": 0, "time": "2026-09-24T09:30:05+00:00"},
+        "agent_id": "003"
+      }
+    ],
+    "total_affected_items": 2,
+    "total_failed_items": 0,
+    "failed_items": []
+  },
+  "message": "All selected items were returned",
+  "error": 0
+}
+```
+
+---
+
+## get_agent_configuration
+
+Returns an agent's identity and configuration checksums, plus the shared configuration of its first group.
+
+- **Scope:** `wazuh:read`
+- **Data source:** Manager API, `GET /agents` (fields `id`, `name`, `group`, `configSum`, `mergedSum`, `status`, `version`) and `GET /groups/{group}/configuration`
+
+### Parameters
+
+| Name | Type | Required | Default | Constraints |
+|------|------|----------|---------|-------------|
+| `agent_id` | string | yes | | Agent ID |
+
+### Notes
+
+- Only the first group in the agent's `group` list is read. If that request fails, `group_configuration` is an empty list rather than an error.
+- This is the centrally managed group configuration (`agent.conf`), not the agent's local `ossec.conf`.
+- An unknown agent ID returns an `isError` result: `Agent <id> not found`.
+
+### Example
+
+Arguments:
+
+```json
+{"agent_id": "001"}
+```
+
+Result:
+
+```text
+Agent Configuration:
+{
+  "data": {
+    "agent": {
+      "id": "001",
+      "name": "mail-01",
+      "status": "active",
+      "version": "Wazuh v4.14.1",
+      "group": ["default", "linux"],
+      "configSum": "ab73af41699f13fdd81903b5f23d8d00",
+      "mergedSum": "4a8724b20dee0124ff9656783c490c4e"
     },
-    "recommendations": [
-      "Monitor CPU usage - currently at 85%",
-      "Consider increasing log buffer size"
+    "group_configuration": [
+      {
+        "filters": {},
+        "config": {
+          "syscheck": {"frequency": 43200, "directories": ["/etc", "/usr/bin"]},
+          "sca": {"enabled": "yes", "interval": "12h"}
+        }
+      }
     ]
   }
 }
 ```
-
-### Health Check Categories
-
-| Category | Description | Status Values |
-|----------|-------------|---------------|
-| `connectivity` | Network connection status | pass, fail |
-| `version_compatibility` | Agent/manager version compatibility | pass, warning, fail |
-| `configuration` | Configuration sync status | pass, warning, fail |
-| `performance` | System resource usage | pass, warning, critical |
-| `log_collection` | Log processing performance | pass, warning, fail |
-
----
-
-## ⚙️ get_agent_configuration
-
-Retrieve detailed configuration information for a specific Wazuh agent.
-
-### Parameters
-
-| Parameter | Type | Default | Required | Description |
-|-----------|------|---------|----------|-------------|
-| `agent_id` | string | - | **Yes** | ID of the agent |
-
-### Usage Examples
-
-#### View Agent Configuration
-```
-Ask Claude: "Show me the configuration for agent 001"
-```
-
-#### Configuration Audit
-```
-Ask Claude: "What is the current configuration of agent web-01?"
-```
-
-### Response Format
-
-```json
-{
-  "agent_configuration": {
-    "agent_id": "001",
-    "agent_name": "web-server-01",
-    "configuration": {
-      "client": {
-        "server": [
-          {
-            "address": "192.168.1.10",
-            "port": 1514,
-            "protocol": "tcp"
-          }
-        ],
-        "config-profile": "ubuntu, ubuntu20, ubuntu20.04",
-        "notify_time": 10,
-        "time-reconnect": 60
-      },
-      "rootcheck": {
-        "disabled": "no",
-        "check_files": "yes",
-        "check_trojans": "yes",
-        "check_dev": "yes",
-        "check_sys": "yes",
-        "check_pids": "yes",
-        "check_ports": "yes",
-        "check_if": "yes"
-      },
-      "sca": {
-        "enabled": "yes",
-        "scan_on_start": "yes",
-        "interval": "12h",
-        "skip_nfs": "yes"
-      },
-      "wodle": [
-        {
-          "name": "cis-cat",
-          "disabled": "yes"
-        },
-        {
-          "name": "osquery",
-          "disabled": "yes"
-        },
-        {
-          "name": "syscollector",
-          "disabled": "no",
-          "interval": "1h",
-          "scan_on_start": "yes"
-        }
-      ],
-      "localfile": [
-        {
-          "log_format": "syslog",
-          "location": "/var/log/auth.log"
-        },
-        {
-          "log_format": "syslog",
-          "location": "/var/log/syslog"
-        },
-        {
-          "log_format": "apache",
-          "location": "/var/log/apache2/access.log"
-        }
-      ]
-    },
-    "metadata": {
-      "config_hash": "ab12cd34ef56",
-      "last_updated": "2024-01-01T10:00:00Z",
-      "merged_sum": "98765432"
-    }
-  }
-}
-```
-
----
-
-## 🔄 get_agent_processes
-
-Monitor running processes on a specific Wazuh agent.
-
-### Parameters
-
-| Parameter | Type | Default | Required | Description |
-|-----------|------|---------|----------|-------------|
-| `agent_id` | string | - | **Yes** | ID of the agent |
-| `limit` | integer | `100` | No | Maximum number of processes to retrieve |
-
-### Usage Examples
-
-#### List Agent Processes
-```
-Ask Claude: "Show me running processes on agent 001"
-```
-
-#### Security Monitoring
-```
-Ask Claude: "What processes are running on web-server-01?"
-```
-
-### Response Format
-
-```json
-{
-  "agent_processes": {
-    "agent_id": "001",
-    "agent_name": "web-server-01",
-    "scan_time": "2024-01-01T15:00:00Z",
-    "total_processes": 156,
-    "processes": [
-      {
-        "pid": "1",
-        "name": "systemd",
-        "state": "S",
-        "ppid": "0",
-        "utime": "15",
-        "stime": "25",
-        "cmd": "/sbin/init",
-        "argvs": "/sbin/init",
-        "euser": "root",
-        "ruser": "root",
-        "suser": "root",
-        "egroup": "root",
-        "rgroup": "root",
-        "sgroup": "root",
-        "fgroup": "root",
-        "priority": "20",
-        "nice": "0",
-        "size": "225280",
-        "vm_size": "225280",
-        "resident": "9472",
-        "share": "6784",
-        "start_time": "1673308800",
-        "pgrp": "1",
-        "session": "1",
-        "nlwp": "1",
-        "tgid": "1",
-        "tty": "0"
-      }
-    ],
-    "summary": {
-      "by_user": {
-        "root": 45,
-        "www-data": 12,
-        "mysql": 8
-      },
-      "by_state": {
-        "running": 2,
-        "sleeping": 148,
-        "zombie": 0,
-        "stopped": 6
-      },
-      "resource_usage": {
-        "total_memory": "2048000",
-        "used_memory": "1456000",
-        "memory_percentage": 71.1
-      }
-    }
-  }
-}
-```
-
-### Process Information Fields
-
-| Field | Description | Example |
-|-------|-------------|---------|
-| `pid` | Process ID | "1234" |
-| `name` | Process name | "apache2" |
-| `state` | Process state | "S" (sleeping), "R" (running) |
-| `cmd` | Command line | "/usr/sbin/apache2" |
-| `euser` | Effective user | "www-data" |
-| `size` | Virtual memory size (KB) | "225280" |
-| `resident` | Resident memory (KB) | "9472" |
-
----
-
-## 🌐 get_agent_ports
-
-Monitor open ports and network connections on a specific Wazuh agent.
-
-### Parameters
-
-| Parameter | Type | Default | Required | Description |
-|-----------|------|---------|----------|-------------|
-| `agent_id` | string | - | **Yes** | ID of the agent |
-| `limit` | integer | `100` | No | Maximum number of ports to retrieve |
-
-### Usage Examples
-
-#### Network Security Audit
-```
-Ask Claude: "Show me open ports on agent 001"
-```
-
-#### Service Discovery
-```
-Ask Claude: "What services are listening on web-server-01?"
-```
-
-### Response Format
-
-```json
-{
-  "agent_ports": {
-    "agent_id": "001",
-    "agent_name": "web-server-01",
-    "scan_time": "2024-01-01T15:00:00Z",
-    "total_ports": 12,
-    "ports": [
-      {
-        "protocol": "tcp",
-        "local_ip": "0.0.0.0",
-        "local_port": "22",
-        "remote_ip": "0.0.0.0",
-        "remote_port": "0",
-        "tx_queue": "0",
-        "rx_queue": "0",
-        "inode": "12345",
-        "state": "listening",
-        "pid": "1234",
-        "process": "sshd"
-      },
-      {
-        "protocol": "tcp",
-        "local_ip": "0.0.0.0",
-        "local_port": "80",
-        "remote_ip": "0.0.0.0",
-        "remote_port": "0",
-        "tx_queue": "0",
-        "rx_queue": "0",
-        "inode": "67890",
-        "state": "listening",
-        "pid": "5678",
-        "process": "apache2"
-      }
-    ],
-    "summary": {
-      "by_protocol": {
-        "tcp": 10,
-        "udp": 2
-      },
-      "by_state": {
-        "listening": 8,
-        "established": 3,
-        "time_wait": 1
-      },
-      "services": {
-        "ssh": 1,
-        "http": 1,
-        "https": 1,
-        "mysql": 1
-      }
-    },
-    "security_analysis": {
-      "exposed_services": ["ssh", "http", "https"],
-      "unusual_ports": [],
-      "security_score": 85,
-      "recommendations": [
-        "Consider restricting SSH access to specific IP ranges",
-        "Ensure HTTPS is properly configured with valid certificates"
-      ]
-    }
-  }
-}
-```
-
-### Port Information Fields
-
-| Field | Description | Security Relevance |
-|-------|-------------|-------------------|
-| `protocol` | Network protocol | tcp, udp |
-| `local_port` | Listening port | 22 (SSH), 80 (HTTP), 443 (HTTPS) |
-| `state` | Connection state | listening, established, time_wait |
-| `process` | Associated process | sshd, apache2, mysql |
-| `pid` | Process ID | Correlation with process monitoring |
-
----
-
-## 💡 Best Practices
-
-### Agent Monitoring Strategy
-
-1. **Regular Health Checks**: Monitor agent health periodically
-2. **Process Monitoring**: Track unusual processes and resource usage
-3. **Network Security**: Monitor open ports for security exposure
-4. **Configuration Audits**: Verify configurations match security policies
-
-### Performance Optimization
-
-1. **Targeted Queries**: Use agent_id for specific agent monitoring
-2. **Appropriate Limits**: Set reasonable limits for large environments
-3. **Status Filtering**: Use status filters to focus on problematic agents
-
-### Security Considerations
-
-1. **Access Control**: Ensure proper permissions for agent data access
-2. **Sensitive Data**: Process and port information may contain sensitive details
-3. **Network Exposure**: Monitor for unexpected open ports
-
----
-
-## 🔧 Troubleshooting
-
-### Common Issues
-
-#### Agent Not Found
-```json
-{
-  "error": "Agent with ID '999' not found",
-  "error_code": "AGENT_NOT_FOUND"
-}
-```
-
-**Solution**: Verify agent ID exists using `get_wazuh_agents`
-
-#### Agent Disconnected
-```json
-{
-  "error": "Agent '001' is disconnected - cannot retrieve process/port information",
-  "error_code": "AGENT_DISCONNECTED"
-}
-```
-
-**Solution**: Check agent connectivity and restart if necessary
-
-#### Insufficient Permissions
-```json
-{
-  "error": "Insufficient permissions to access agent data",
-  "error_code": "ACCESS_DENIED"
-}
-```
-
-**Solution**: Ensure Wazuh user has proper agent read permissions
-
-### Diagnostic Workflow
-
-1. **Check Agent Status**: Use `get_wazuh_agents` to verify agent exists and is active
-2. **Health Assessment**: Use `check_agent_health` for comprehensive status
-3. **Detailed Investigation**: Use specific tools (`get_agent_processes`, `get_agent_ports`) for deep analysis
-4. **Configuration Review**: Use `get_agent_configuration` for configuration issues
-
----
-
-**Next**: See [Vulnerability Management API](vulnerabilities.md) for vulnerability scanning tools.

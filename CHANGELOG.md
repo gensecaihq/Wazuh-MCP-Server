@@ -8,7 +8,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Security
-- **TLS verification to the Wazuh Manager was silently off by default**: `WAZUH_ALLOW_SELF_SIGNED` defaulted to `true`, and since accepting a self-signed certificate means not verifying at all, the httpx client was built with `verify=False` even with the documented `WAZUH_VERIFY_SSL=true` — the API credentials (HTTP Basic on every re-authentication) travelled over an unauthenticated channel. The default is now `false`; a new `WAZUH_CA_BUNDLE` (PEM path, validated at startup, applied to Manager and Indexer) is the supported way to trust stock self-signed Wazuh certificates, and the server logs an error (production) or warning when verification is disabled. **Upgrade note**: deployments that relied on the old default must either set `WAZUH_CA_BUNDLE` (recommended) or explicitly set `WAZUH_ALLOW_SELF_SIGNED=true`.
+- **OAuth now requires sign-in.** `/oauth/authorize` auto-approved every request, and the pre-registered public client was registered for read+write, so anyone who could reach the server got a `wazuh:write` token and could run active response. Users now sign in with their `wazuh_` API key; the grant is capped at that key's scopes and tokens carry the key's identity, so RBAC, rate limits and the audit log are per user. A refresh-token replay revokes that grant only, instead of every user of the shared client. DCR rejects grant types and auth methods the server doesn't implement.
+- **Tokens are bound to their API key**: revoking or rotating the key ends its bearer JWTs and the OAuth access tokens from sign-ins with it (they used to stay valid until expiry). Tokens must carry `exp`; refresh tokens are refused as access tokens. `MCP_API_KEY` gets a stable id derived from the key, identical across replicas and restarts.
+- **Protected-target checks cover every blocking tool.** `wazuh_firewall_drop` and `wazuh_host_deny` never checked `WAZUH_PROTECTED_IPS`/loopback/the Manager, and leading-zero or IPv4-mapped IPv6 spellings (`127.000.000.001`, `::ffff:7f00:1`) slipped past `wazuh_block_ip`'s check.
+- **Tool output is redacted in every mode**: credentials in log lines were only redacted for compact alerts; `compact=false`, GCF output, manager logs and resource reads returned them verbatim. Log redaction also covers tracebacks, structured `extra` fields and bare JWTs.
+- `RATE_LIMIT_REQUESTS`/`RATE_LIMIT_WINDOW` now apply to `/mcp` and `/`, which used hard-coded constants.
+- Chunked request bodies are size-capped while streaming (they were buffered in full first); failed authentication on the MCP endpoints is rate limited; `DELETE /mcp` checks Origin; `resources/read` no longer returns raw backend exception text; the Trivy filesystem scan in CI actually gates.
+
+### Added
+- **Local LLM stack** (`compose.local-llm.yml`, [Local LLM Guide](docs/LOCAL_LLM.md)): vLLM v0.30.0 (Qwen3.6-35B-A3B FP8 by default, tool calling + reasoning parsers, text-only, not published on a host port) and Open WebUI next to the server. The guide covers Ollama for single analysts and LiteLLM as an optional gateway, with its identity and approval caveats. Replaces the mcphost quick start (mcphost is unmaintained).
+- **Toolsets**: `WAZUH_TOOLSETS` and `WAZUH_DISABLED_TOOLS` limit which tools are exposed. Hidden tools are removed from `tools/list` and refused by `tools/call`; unknown names fail at startup. The full catalogue is ~6.6k tokens; on qwen3.5:9b (Ollama, Apple M5) trimming to 38 tools cut median response time from 15.8s to 10.9s with no change in tool-selection accuracy.
+- **MCP tool annotations** on every tool (`readOnlyHint`, `destructiveHint`, `idempotentHint`, `openWorldHint`), derived from scope, so clients and gateways can gate approvals.
+- **Tool-selection eval** (`evals/tool_selection.py`): 25 SOC scenarios, including two prompt-injection cases, run against any OpenAI-compatible endpoint (vLLM, Ollama, LiteLLM proxy). Scores tool choice and argument validity without executing anything.
+
+### Changed
+- Tool input schemas are closed (`additionalProperties: false`). When `WAZUH_REQUIRE_ACTION_CONFIRMATION` is on, write tools declare the `confirm` flag, which strict clients previously had no way to send.
+
+### Fixed (September 2026 production audit)
+- **Deploy paths**: the README Quick Start, `deploy.py`/`deploy.bat` and `docker run --env-file` all failed as documented (no `AUTH_SECRET_KEY` under compose's production mode, loopback bind inside the container, generated API key redacted from the logs). All three are verified working end to end.
+- **Active response semantics** (checked against the Wazuh v4.14 source): `duration` never did anything (the agent zeroes the timeout for API-dispatched `!` commands), so blocks were permanent; `all_agents` sent `agents_list=all`, which the API rejects; results claimed execution when Wazuh only confirms delivery; `check_file_quarantine` could never return true.
+- **Per-agent tools returned fleet-wide numbers**: `perform_risk_assessment` and the ISO 27001 dashboard / gap analysis ignored `agent_id` for vulnerabilities, alerts and SCA; `get_wazuh_vulnerability_summary` ignored `time_range`.
+- **Search**: `AND`/`OR`/`NOT` in `search_security_events` were matched as literal words, silently emptying results.
+- **Resilience**: `/ready` could starve tool calls (unauthenticated, not rate limited, one Manager call each) and ignored memory pressure; a Redis outage looked like "session not found"; an open SSE stream blocked SIGTERM forever; legacy requests stored a session per call.
+- **Config**: `ENVIRONMENT=prod`, `AUTH_MODE` typos, `RATE_LIMIT_REQUESTS=0`, bad `SESSION_TTL_SECONDS`, `YDC_VERIFY_SSL=1` and malformed `clusters.json` values were silently misread; they now fail at startup.
+- **MCP conformance**: `Mcp-Method`/`Mcp-Name` blocked by CORS preflight; business refusals (scope, confirmation, disabled tool) now reach the model as `isError` results; `resources/templates/list` entries are readable; resource-not-found is `-32002`; JSON-RPC envelope and batch validation; SSE event ids unique per session.
+- Many smaller fixes: `process_id: true` meant PID 1, Windows paths couldn't be quarantined, `rule.groups` counts depended on order, rules summary stopped at 500, manager-log limits above 500 errored, HTTP-date `Retry-After` crashed, unknown tool arguments were silently ignored, oversized results are truncated with a note.
+
+### Changed
+- `/sse` answers **410 Gone** (the legacy HTTP+SSE transport never worked); use `/mcp`.
+- The Docker image ships `redis` and `gcf-python`, and no longer includes pip.
+- `compose.yml` mounts `./config` read-only and its healthcheck always probes the in-container port 3000.
 
 ### Fixed
 - **Missing `resultType` under MCP 2026-07-28** (#121): routing onto the modern stateless path keyed only on `params._meta`, so a request carrying `MCP-Protocol-Version: 2026-07-28` without that `_meta` fell through to the legacy handler — which minted a session and returned a result without `resultType` while echoing the modern version header. A modern header now always selects the modern path (missing `_meta` → `-32020`), modern batches are rejected with `-32600`, and `/` routes modern requests the same way as `/mcp`.

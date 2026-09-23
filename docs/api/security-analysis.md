@@ -1,109 +1,126 @@
-# Security Analysis API
+# Security Analysis
 
-Reference for Wazuh security analysis and threat intelligence tools. These tools query live Wazuh data (Manager API + Indexer) and perform server-side enrichment including threat scoring, indicator extraction, and risk calculation.
+Tools in the `analysis` toolset, plus `search_external_context`, which is in its own `web_search` toolset because it is the only tool that sends data outside the Wazuh deployment.
 
-## Overview
+| Tool | Toolset | Purpose | Data source |
+|------|---------|---------|-------------|
+| [`analyze_security_threat`](#analyze_security_threat) | `analysis` | Alerts that mention an indicator | Indexer |
+| [`check_ioc_reputation`](#check_ioc_reputation) | `analysis` | Local sighting count and highest alert level for an indicator | Indexer |
+| [`perform_risk_assessment`](#perform_risk_assessment) | `analysis` | Weighted risk score for one agent or the environment | Manager API + Indexer |
+| [`get_top_security_threats`](#get_top_security_threats) | `analysis` | Rules ranked by severity, volume and spread | Indexer |
+| [`generate_security_report`](#generate_security_report) | `analysis` | Multi-section report for a daily, weekly, monthly or incident window | Manager API + Indexer |
+| [`search_external_context`](#search_external_context) | `web_search` | Web search results for an indicator or topic | You.com Search API |
 
-Six capabilities:
-- **Threat Analysis**: Search alerts for threat indicators (IPs, domains, hashes)
-- **IOC Reputation**: Indicator of Compromise lookup against alert history
-- **External Context Search**: Opt-in web search (You.com) for context around an indicator or topic
-- **Risk Assessment**: Multi-factor risk scoring from agents, vulnerabilities, alerts, and SCA
-- **Threat Ranking**: Top threats with source IPs, affected agents, timeline, and composite scores
-- **Security Reporting**: Reports differentiated by type (daily/weekly/monthly/incident) with recommendations
-
-> **Note:** Except for `search_external_context` (an opt-in web search enabled via `YDC_API_KEY`), these tools return structured data from the Wazuh APIs and Indexer queries with server-side enrichment — they do not call external threat-intelligence feeds (VirusTotal, AbuseIPDB, etc.) or use AI/ML models. The LLM client can further analyze the returned data.
+None of these tools queries an external threat-intelligence feed. `analyze_security_threat` and `check_ioc_reputation` reflect only what your own Wazuh deployment has recorded. Conventions shared by all tools are described in the [tool reference overview](README.md).
 
 ---
 
 ## analyze_security_threat
 
-Search Wazuh alert history for a threat indicator via Elasticsearch.
+Searches alert history for an indicator and returns the match count with a sample of matching alerts.
+
+- **Scope:** `wazuh:read`
+- **Data source:** Indexer, `wazuh-alerts-*` (free-text search over all alert fields)
 
 ### Parameters
 
-| Parameter | Type | Default | Required | Description |
-|-----------|------|---------|----------|-------------|
-| `indicator` | string | — | **Yes** | Threat indicator (IP, hash, domain, URL) |
-| `indicator_type` | string | `"ip"` | No | Type: `ip`, `hash`, `domain`, `url` |
+| Name | Type | Required | Default | Constraints |
+|------|------|----------|---------|-------------|
+| `indicator` | string | yes | | Validated against `indicator_type`: a valid IPv4/IPv6 address, a hex hash of 32 to 128 characters, a domain name, or a URL starting with `http://` or `https://` |
+| `indicator_type` | string | no | `ip` | `ip`, `hash`, `domain`, `url` |
 
-### Response
+### Notes
+
+- The indicator is searched as free text across all alert fields, with no time bound. The newest 100 matches are fetched; `matching_alerts` is the true total and `truncated` is `true` when it exceeds the sample.
+- `alerts` contains up to 20 full alert documents (not compacted).
+- `indicator_type` controls validation only; it does not restrict which alert fields are searched.
+
+### Example
+
+Arguments:
 
 ```json
+{"indicator": "203.0.113.45"}
+```
+
+Result (one alert shown):
+
+```text
+Threat Analysis:
 {
   "data": {
-    "indicator": "203.0.113.15",
+    "indicator": "203.0.113.45",
     "type": "ip",
-    "matching_alerts": 12,
+    "matching_alerts": 4231,
+    "alerts_sampled": 3,
+    "truncated": true,
     "alerts": [
       {
-        "timestamp": "2026-03-31T14:23:00Z",
-        "rule": {"id": "5712", "level": 10, "description": "SSH brute force"},
-        "agent": {"id": "003", "name": "web-prod-01"},
-        "srcip": "203.0.113.15"
+        "timestamp": "2026-09-24T09:41:07.512+0000",
+        "id": "1727170867.4512338",
+        "agent": {"id": "003", "name": "web-01", "ip": "10.0.2.15"},
+        "manager": {"name": "wazuh-manager"},
+        "rule": {
+          "id": "5710",
+          "level": 5,
+          "description": "sshd: Attempt to login using a non-existent user",
+          "groups": ["syslog", "sshd", "authentication_failed", "invalid_login"],
+          "mitre": {"id": ["T1110.001"], "tactic": ["Credential Access"], "technique": ["Password Guessing"]},
+          "firedtimes": 14,
+          "pci_dss": ["10.2.4", "10.2.5"]
+        },
+        "decoder": {"name": "sshd", "parent": "sshd"},
+        "data": {"srcip": "203.0.113.45", "srcuser": "admin", "srcport": "51122"},
+        "full_log": "Sep 24 09:41:07 web-01 sshd[23114]: Invalid user admin from 203.0.113.45 port 51122",
+        "location": "/var/log/auth.log"
       }
     ]
   }
 }
 ```
 
-The `alerts` array contains up to 20 matching alerts (compact format). The LLM can analyze patterns, timelines, and affected assets from this data.
-
 ---
 
 ## check_ioc_reputation
 
-Check how frequently an indicator appears in Wazuh alert history and the maximum alert severity associated with it.
+Counts local alert sightings of an indicator and derives a coarse risk label from the highest alert level seen. This is not an external reputation lookup: zero sightings means "not seen locally", not "known clean".
+
+- **Scope:** `wazuh:read`
+- **Data source:** Indexer, `wazuh-alerts-*` (free-text search over all alert fields)
 
 ### Parameters
 
-| Parameter | Type | Default | Required | Description |
-|-----------|------|---------|----------|-------------|
-| `indicator` | string | — | **Yes** | IOC to check |
-| `indicator_type` | string | `"ip"` | No | Type: `ip`, `domain`, `hash`, `url` |
+| Name | Type | Required | Default | Constraints |
+|------|------|----------|---------|-------------|
+| `indicator` | string | yes | | Validated against `indicator_type`, as for `analyze_security_threat` |
+| `indicator_type` | string | no | `ip` | `ip`, `domain`, `hash`, `url` |
 
-### Response
+### Notes
+
+- No time bound. `occurrences` is the true match count; `max_alert_level` is taken from the newest 500 matches (`occurrences_sampled`).
+- `risk` is `high` when `max_alert_level` is 10 or more, `medium` when it is 5 to 9, and `low` otherwise (including no sightings).
+
+### Example
+
+Arguments:
 
 ```json
-{
-  "data": {
-    "indicator": "198.51.100.15",
-    "type": "ip",
-    "occurrences": 47,
-    "max_alert_level": 12,
-    "risk": "high"
-  }
-}
+{"indicator": "203.0.113.45", "indicator_type": "ip"}
 ```
 
-Risk levels: `"high"` (max level >= 10), `"medium"` (>= 5), `"low"` (< 5).
+Result:
 
----
-
-## search_external_context
-
-Search the web (via You.com) for additional context around a security topic or indicator.
-**Opt-in:** disabled unless `YDC_API_KEY` is set — otherwise it returns `enabled: false` with an
-empty result and a hint. Runs behind its own circuit breaker, isolated from the Wazuh API.
-
-### Parameters
-
-| Parameter | Type | Default | Required | Description |
-|-----------|------|---------|----------|-------------|
-| `query` | string | — | Yes | Security topic or indicator to search for |
-| `count` | integer | `5` | No | Number of results (1–10) |
-
-### Response
-
-```json
+```text
+IoC Reputation:
 {
   "data": {
-    "query": "CVE-2026-XXXX exploitation",
-    "enabled": true,
-    "results": [
-      { "title": "…", "url": "https://…", "description": "…", "snippets": ["…"] }
-    ],
-    "search_uuid": "…"
+    "indicator": "203.0.113.45",
+    "type": "ip",
+    "occurrences": 4231,
+    "occurrences_sampled": 3,
+    "truncated": true,
+    "max_alert_level": 10,
+    "risk": "high"
   }
 }
 ```
@@ -112,131 +129,222 @@ empty result and a hint. Runs behind its own circuit breaker, isolated from the 
 
 ## perform_risk_assessment
 
-Multi-factor risk assessment combining agent status, vulnerabilities, alert severity, and SCA compliance scores.
+Computes a 0 to 100 risk score for one agent, or for the environment, from agent connectivity, vulnerability counts, recent high-severity alerts and SCA scores.
+
+- **Scope:** `wazuh:read`
+- **Data source:** Manager API (`GET /agents`, `GET /sca/{agent_id}`) and, when configured, the Indexer (vulnerability summary and alerts)
 
 ### Parameters
 
-| Parameter | Type | Default | Required | Description |
-|-----------|------|---------|----------|-------------|
-| `agent_id` | string | `null` | No | Specific agent (null = entire environment) |
+| Name | Type | Required | Default | Constraints |
+|------|------|----------|---------|-------------|
+| `agent_id` | string | no | none | Agent ID. When set, every data source is scoped to this agent |
 
-### Response
+### Risk factors
+
+| Factor | Condition | Severity |
+|--------|-----------|----------|
+| `disconnected_agents` | Any agent in scope whose status is not `active` | high |
+| `critical_vulnerabilities` | One or more open Critical vulnerabilities | critical |
+| `high_vulnerabilities` | One or more open High vulnerabilities | high |
+| `high_severity_alerts` | More than 10 alerts of level 10 or above in the last 24 hours | high |
+| `elevated_alert_activity` | 1 to 10 alerts of level 10 or above in the last 24 hours | medium |
+| `low_sca_compliance` | Average SCA policy score below 50 | high |
+| `moderate_sca_compliance` | Average SCA policy score from 50 to 69 | medium |
+
+### Scoring
+
+- Each factor contributes `weight × min(log2(count + 1), 5)`, with weights critical 30, high 20, medium 10, low 5. SCA factors count as 1. The sum is capped at 100.
+- `risk_level` is `critical` at 70 or above, `high` at 50 to 69, `medium` at 25 to 49, and `low` below 25.
+
+### Notes
+
+- The SCA average is taken from the first active agent in scope only (`sca_average_score`).
+- Without the Indexer, or if an Indexer query fails, the vulnerability and alert factors are skipped and `vulnerability_summary` / `alert_summary` are `null`. The result is not an error in that case, so a low score can reflect missing data.
+- The agent list is requested without a `limit`, so the Manager API's default page size applies.
+
+### Example
+
+Arguments:
 
 ```json
+{}
+```
+
+Result:
+
+```text
+Risk Assessment:
 {
   "data": {
-    "overall_risk_score": 62,
-    "risk_level": "high",
-    "total_agents": 15,
+    "overall_risk_score": 100,
+    "risk_level": "critical",
+    "total_agents": 3,
     "risk_factors": [
-      {"factor": "disconnected_agents", "count": 3, "severity": "high", "details": [{"id": "005", "name": "db-backup"}]},
-      {"factor": "critical_vulnerabilities", "count": 8, "severity": "critical"},
-      {"factor": "high_severity_alerts", "count": 23, "severity": "high"},
-      {"factor": "moderate_sca_compliance", "score": 58, "severity": "medium"}
+      {"factor": "disconnected_agents", "count": 1, "severity": "high", "details": [{"id": "007", "name": "win-ws-07"}]},
+      {"factor": "critical_vulnerabilities", "count": 9, "severity": "critical"},
+      {"factor": "high_vulnerabilities", "count": 157, "severity": "high"},
+      {"factor": "high_severity_alerts", "count": 4231, "severity": "high"},
+      {"factor": "moderate_sca_compliance", "score": 57, "severity": "medium"}
     ],
-    "vulnerability_summary": {"critical": 8, "high": 15, "medium": 42, "low": 12},
-    "alert_summary": {"high_severity_alerts_24h": 23},
-    "sca_average_score": 58
+    "vulnerability_summary": {
+      "total_vulnerabilities": 639,
+      "affected_agents": 3,
+      "by_severity": {"Medium": 412, "High": 157, "Low": 61, "Critical": 9},
+      "critical": 9,
+      "high": 157,
+      "medium": 412,
+      "low": 61
+    },
+    "alert_summary": {"high_severity_alerts_24h": 4231},
+    "sca_average_score": 57
   }
 }
 ```
-
-**Risk score calculation:** Weighted sum of risk factors: critical=30, high=20, medium=10, low=5 points per factor, with logarithmic diminishing returns on count. Scale: 0-100.
-
-| Score | Level | Interpretation |
-|-------|-------|---------------|
-| 70-100 | critical | Immediate action required |
-| 50-69 | high | Investigate within hours |
-| 25-49 | medium | Review within 24 hours |
-| 0-24 | low | Routine monitoring |
 
 ---
 
 ## get_top_security_threats
 
-Top threats ranked by composite score, with source IPs, affected agents, MITRE ATT&CK mapping, and timeline.
+Ranks the rules that fired in a time window by a threat score that weights severity above volume.
+
+- **Scope:** `wazuh:read`
+- **Data source:** Indexer, `wazuh-alerts-*`
 
 ### Parameters
 
-| Parameter | Type | Default | Required | Description |
-|-----------|------|---------|----------|-------------|
-| `limit` | integer | `10` | No | Number of top threats (1-50) |
-| `time_range` | string | `"24h"` | No | Time window |
+| Name | Type | Required | Default | Constraints |
+|------|------|----------|---------|-------------|
+| `limit` | integer | no | `10` | 1 to 50 |
+| `time_range` | string | no | `24h` | `1h`, `6h`, `12h`, `1d`, `24h`, `7d`, `30d` |
 
-### Response
+### Notes
+
+- Computed over the newest 1,000 alerts in the window. When more alerts match, `truncated` is `true` and counts and rankings are lower bounds. `total_alerts` is the true match count.
+- `threat_score = 100 × (0.6 × level/15 + 0.25 × min(log2(count + 1), 6)/6 + 0.15 × min(agents, 10)/10)`, rounded down. Threats are sorted by score, then by count.
+- Each threat lists up to 20 `source_ips` (from `data.srcip`) and up to 20 `affected_agents`, with `first_seen` and `last_seen` timestamps. `mitre` is `null` when the rule has no MITRE mapping.
+
+### Example
+
+Arguments:
 
 ```json
+{"limit": 2, "time_range": "24h"}
+```
+
+Result (one threat shown):
+
+```text
+Top Security Threats:
 {
   "data": {
     "time_range": "24h",
-    "total_alerts_analyzed": 1247,
+    "total_alerts": 4231,
+    "total_alerts_analyzed": 3,
+    "truncated": true,
     "threats": [
       {
-        "rule_id": "5712",
-        "description": "SSHD brute force trying to get access to the system",
+        "rule_id": "5763",
+        "description": "sshd: brute force trying to get access to the system. Non existent user.",
         "level": 10,
-        "count": 245,
-        "threat_score": 87,
+        "count": 1,
+        "threat_score": 45,
         "groups": ["syslog", "sshd", "authentication_failures"],
         "mitre": {"id": ["T1110"], "tactic": ["Credential Access"], "technique": ["Brute Force"]},
-        "source_ips": ["198.51.100.10", "203.0.113.25"],
-        "affected_agents": [
-          {"id": "003", "name": "web-prod-01"},
-          {"id": "007", "name": "api-server-02"}
-        ],
-        "first_seen": "2026-03-31T02:00:00Z",
-        "last_seen": "2026-03-31T14:30:00Z"
+        "source_ips": ["203.0.113.45"],
+        "affected_agents": [{"id": "003", "name": "web-01"}],
+        "first_seen": "2026-09-24T09:40:55.101+0000",
+        "last_seen": "2026-09-24T09:40:55.101+0000"
       }
     ],
-    "total_unique_rules": 42
+    "total_unique_rules": 3,
+    "truncation_warning": "Threat ranking reflects the newest 3 of 4231 matching alerts; counts and rankings are lower bounds."
   }
 }
 ```
-
-**Threat score calculation:** `level * 5 * log2(count + 1) * (1 + 0.1 * affected_agents_count)`, capped at 100. Higher scores = more severe, more frequent, more widespread.
 
 ---
 
 ## generate_security_report
 
-Reports with content that varies by type. Includes alert summaries, vulnerability counts, top threats, and data-driven recommendations.
+Builds a structured report whose sections depend on the report type.
+
+- **Scope:** `wazuh:read`
+- **Data source:** Manager API (`GET /agents`, `GET /`, `GET /sca/{agent_id}`) and, when configured, the Indexer (alerts, vulnerability summary, top threats)
 
 ### Parameters
 
-| Parameter | Type | Default | Required | Description |
-|-----------|------|---------|----------|-------------|
-| `report_type` | string | `"daily"` | No | `daily`, `weekly`, `monthly`, `incident` |
-| `include_recommendations` | boolean | `true` | No | Include action recommendations |
+| Name | Type | Required | Default | Constraints |
+|------|------|----------|---------|-------------|
+| `report_type` | string | no | `daily` | `daily`, `weekly`, `monthly`, `incident` |
+| `include_recommendations` | boolean | no | `true` | Add a `recommendations` section |
 
-### Report Type Behavior
+### Sections
 
-| Type | Time Range | Includes SCA | Includes Recommendations | Use Case |
-|------|-----------|-------------|--------------------------|----------|
-| `daily` | 24h | No | Yes | SOC shift handoff |
-| `weekly` | 7d | Yes | Yes | Management briefing |
-| `monthly` | 30d | Yes | Yes | Executive summary |
-| `incident` | 1h | No | Yes | Active incident triage |
+| Section | Report types | Content |
+|---------|--------------|---------|
+| `agents` | all | Total, active and disconnected counts for up to 500 agents |
+| `manager` | all | Manager API version and hostname from `GET /` |
+| `alerts` | all (Indexer) | True total for the window, and a severity breakdown of the newest 500 alerts: `critical` (level 12+), `high` (10 to 11), `medium` (7 to 9), `low` (below 7) |
+| `vulnerabilities` | all (Indexer) | Vulnerability summary for all open findings (not limited to the window) |
+| `top_threats` | all (Indexer) | Top 5 entries from `get_top_security_threats` for the window |
+| `compliance_summary` | `weekly`, `monthly` | Average SCA score for up to 3 active agents |
+| `recommendations` | when `include_recommendations` is true | Actions for critical alerts in the sample, critical vulnerabilities and disconnected agents, or an `info` entry when none apply |
 
-### Response (daily example)
+The window is 24 hours for `daily`, 7 days for `weekly`, 30 days for `monthly` and 1 hour for `incident`.
+
+### Notes
+
+- Without the Indexer, the `alerts`, `vulnerabilities` and `top_threats` sections are omitted. A section whose query fails contains `{"error": "..."}` instead of data; the report as a whole still succeeds.
+
+### Example
+
+Arguments:
 
 ```json
+{"report_type": "daily"}
+```
+
+Result (`top_threats` trimmed to one entry):
+
+```text
+Security Report:
 {
   "data": {
     "report_type": "daily",
-    "generated_at": "2026-03-31T15:00:00Z",
+    "generated_at": "2026-09-23T19:20:19.274921+00:00",
     "time_range": "24h",
     "sections": {
-      "agents": {"total": 15, "active": 12, "disconnected": 3},
-      "manager": {"version": "4.14.1", "hostname": "wazuh-mgr"},
-      "alerts": {"total": 1247, "by_severity": {"critical": 5, "high": 23, "medium": 89, "low": 1130}, "time_range": "24h"},
-      "vulnerabilities": {"critical": 8, "high": 15, "medium": 42, "low": 12, "total_vulnerabilities": 77},
+      "agents": {"total": 3, "active": 2, "disconnected": 1},
+      "manager": {"version": "4.14.1", "hostname": "wazuh-manager", "type": null},
+      "alerts": {"total": 4231, "sampled": 3, "truncated": true, "by_severity": {"low": 1, "high": 1, "medium": 1}, "time_range": "24h"},
+      "vulnerabilities": {
+        "total_vulnerabilities": 639,
+        "affected_agents": 3,
+        "by_severity": {"Medium": 412, "High": 157, "Low": 61, "Critical": 9},
+        "critical": 9,
+        "high": 157,
+        "medium": 412,
+        "low": 61
+      },
       "top_threats": [
-        {"rule_id": "5712", "description": "SSH brute force", "threat_score": 87, "count": 245}
+        {
+          "rule_id": "5763",
+          "description": "sshd: brute force trying to get access to the system. Non existent user.",
+          "level": 10,
+          "count": 1,
+          "threat_score": 45,
+          "groups": ["syslog", "sshd", "authentication_failures"],
+          "mitre": {"id": ["T1110"], "tactic": ["Credential Access"], "technique": ["Brute Force"]},
+          "source_ips": ["203.0.113.45"],
+          "affected_agents": [{"id": "003", "name": "web-01"}],
+          "first_seen": "2026-09-24T09:40:55.101+0000",
+          "last_seen": "2026-09-24T09:40:55.101+0000"
+        }
       ],
       "recommendations": [
-        {"priority": "critical", "action": "Investigate 5 critical-severity alerts immediately"},
-        {"priority": "critical", "action": "Patch 8 critical vulnerabilities"},
-        {"priority": "high", "action": "Investigate 3 disconnected agents"}
+        {"priority": "critical", "action": "Patch 9 critical vulnerabilities"},
+        {"priority": "high", "action": "Investigate 1 disconnected agents"}
       ]
     }
   }
@@ -245,59 +353,47 @@ Reports with content that varies by type. Includes alert summaries, vulnerabilit
 
 ---
 
-## run_compliance_check
+## search_external_context
 
-SCA-based compliance assessment. Filters SCA policies by framework relevance when framework-specific policies exist.
+Queries the You.com Search API for web context on an indicator or security topic. Disabled unless `YDC_API_KEY` is set.
+
+- **Scope:** `wazuh:read`
+- **Toolset:** `web_search`
+- **Data source:** You.com Search API (`YDC_BASE_URL`, default `https://ydc-index.io`). The query text leaves your network.
+- **Annotations:** `openWorldHint: true` (the only tool with this hint)
 
 ### Parameters
 
-| Parameter | Type | Default | Required | Description |
-|-----------|------|---------|----------|-------------|
-| `framework` | string | `"PCI-DSS"` | No | `PCI-DSS`, `HIPAA`, `SOX`, `GDPR`, `NIST`, `ISO27001` |
-| `agent_id` | string | `null` | No | Specific agent (null = sample up to 5 active agents) |
+| Name | Type | Required | Default | Constraints |
+|------|------|----------|---------|-------------|
+| `query` | string | yes | | Max 500 characters |
+| `count` | integer | no | `5` | 1 to 10 |
 
-### Response
+### Notes
+
+- Without `YDC_API_KEY`, the tool returns `enabled: false` with an explanatory `message`; this is a normal result, not an error.
+- When enabled, the result contains `query`, `enabled: true`, `results` (each with `title`, `url`, `description`, `snippets`) and `search_uuid`. Searches use `safesearch=moderate`.
+- The You.com client has its own circuit breaker, so a You.com outage does not affect Wazuh API calls. For air-gapped deployments, exclude the `web_search` toolset.
+- Web results are third-party content and should be treated as untrusted data.
+
+### Example
+
+Arguments:
 
 ```json
+{"query": "CVE-2024-5535"}
+```
+
+Result (no `YDC_API_KEY` configured):
+
+```text
+External Context:
 {
   "data": {
-    "framework": "PCI-DSS",
-    "overall_score": 62,
-    "overall_status": "fail",
-    "total_checks": 462,
-    "total_pass": 287,
-    "total_fail": 175,
-    "agents_checked": 2,
-    "results": [
-      {
-        "agent_id": "001",
-        "agent_name": "web-prod-01",
-        "score": 53,
-        "pass": 118,
-        "fail": 104,
-        "total_checks": 222,
-        "policies": [
-          {"policy_id": "cis_ubuntu24-04", "name": "CIS Ubuntu 24.04 LTS Benchmark v1.0.0", "score": 49, "pass": 118, "fail": 119}
-        ]
-      }
-    ]
+    "query": "CVE-2024-5535",
+    "enabled": false,
+    "results": [],
+    "message": "Set YDC_API_KEY to enable optional You.com web search context."
   }
 }
 ```
-
-**Framework filtering:** When Wazuh has framework-specific SCA policies installed (e.g., PCI-DSS policies), those are prioritized. When only generic CIS benchmarks are available, all policies are included since CIS controls map broadly to all frameworks.
-
-**Overall status:** `"pass"` when `overall_score >= 70`, `"fail"` otherwise.
-
----
-
-## Limitations
-
-These tools provide factual data from Wazuh with server-side enrichment. They do NOT:
-- Query external threat intelligence APIs (VirusTotal, AbuseIPDB, Shodan)
-- Use AI/ML models for analysis
-- Provide geolocation data for IPs
-- Generate executive narrative summaries (the LLM client does this)
-- Map individual CIS benchmark checks to specific framework requirement numbers
-
-The LLM client (Claude, Ollama, etc.) is expected to interpret the structured data and provide narrative analysis, recommendations, and correlation.

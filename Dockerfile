@@ -60,6 +60,11 @@ RUN apk update && apk upgrade && apk add --no-cache \
     && rm -rf /var/cache/apk/* /tmp/* /var/tmp/* \
     && update-ca-certificates
 
+# pip is only needed in the builder stage. The base image's copy vendors its own msgpack and
+# setuptools, which trivy flags (GHSA-6v7p-g79w-8964, CVE-2025-47273) and which block the
+# publish scan until upstream pip re-vendors — drop it rather than ship an unused package manager.
+RUN python -m pip uninstall -y pip
+
 # Security: Create non-root user with proper shell
 RUN addgroup -g 1000 -S wazuh && \
     adduser -u 1000 -S wazuh -G wazuh -s /bin/sh

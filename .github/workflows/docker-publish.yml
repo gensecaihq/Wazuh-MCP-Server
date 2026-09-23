@@ -43,6 +43,9 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      # Tag set: `4.3.0` and `4.3` (bare semver), plus `v4.3.0` — the git tag verbatim.
+      # People copy the release tag straight into `docker pull`, and without the v-prefixed
+      # alias `:v4.3.0` is a manifest-unknown even though the release exists.
       - name: Extract image metadata
         id: meta
         uses: docker/metadata-action@v6
@@ -51,6 +54,7 @@ jobs:
           tags: |
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
+            type=semver,pattern=v{{version}}
             type=raw,value=latest,enable={{is_default_branch}}
             type=sha,prefix=sha-,enable={{is_default_branch}}
           labels: |
