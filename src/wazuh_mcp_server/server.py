@@ -788,6 +788,8 @@ app.add_middleware(
         "X-Requested-With",
         "MCP-Protocol-Version",  # MCP protocol version header
         "MCP-Session-Id",  # Session ID header
+        "Mcp-Method",  # 2026-07-28: required on every request
+        "Mcp-Name",  # 2026-07-28: required on tools/call, prompts/get, resources/read
         "Last-Event-ID",  # SSE reconnection header
     ],  # Specific headers only, no wildcard
     expose_headers=["MCP-Session-Id", "MCP-Protocol-Version", "Content-Type"],
@@ -1954,10 +1956,17 @@ async def handle_tools_list(params: Dict[str, Any], session: MCPSession) -> Dict
         },
         {
             "name": "get_wazuh_vulnerability_summary",
-            "description": "Get vulnerability summary statistics from Wazuh Indexer (requires WAZUH_INDEXER_HOST configuration)",
+            "description": "Get vulnerability counts by severity from Wazuh Indexer (requires WAZUH_INDEXER_HOST configuration). Covers all currently open vulnerabilities unless time_range is given",
             "inputSchema": {
                 "type": "object",
-                "properties": {"time_range": {"type": "string", "enum": ["1d", "7d", "30d"], "default": "7d"}},
+                "properties": {
+                    "time_range": {
+                        "type": "string",
+                        "enum": ["1d", "7d", "30d"],
+                        "description": "Only count vulnerabilities first detected within this window",
+                    },
+                    "agent_id": {"type": "string", "description": "Only count vulnerabilities on this agent"},
+                },
                 "required": [],
             },
         },
@@ -2818,8 +2827,15 @@ async def handle_tools_call(params: Dict[str, Any], session: MCPSession) -> Dict
             return _tool_result(render_result("Critical Vulnerabilities", result, compact=compact))
 
         elif tool_name == "get_wazuh_vulnerability_summary":
-            time_range = validate_time_range(arguments.get("time_range"))
-            result = await wazuh_client.get_vulnerability_summary(time_range)
+            # No time_range = every currently open vulnerability; with one, only those first
+            # detected inside the window.
+            time_range = arguments.get("time_range")
+            if time_range is not None:
+                time_range = validate_time_range(time_range)
+                if time_range not in ("1d", "7d", "30d"):
+                    raise ToolValidationError("time_range", f"invalid value '{time_range}'", "Use one of: 1d, 7d, 30d")
+            agent_id = validate_agent_id(arguments.get("agent_id"))
+            result = await wazuh_client.get_vulnerability_summary(time_range, agent_id=agent_id)
             _success = True
             return _tool_result(f"Vulnerability Summary:\n{json.dumps(result, indent=2, default=str)}")
 

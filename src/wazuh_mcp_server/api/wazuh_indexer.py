@@ -522,20 +522,34 @@ class WazuhIndexerClient:
         """
         return await self.get_vulnerabilities(severity="Critical", limit=limit)
 
-    async def get_vulnerability_summary(self) -> Dict[str, Any]:
+    async def get_vulnerability_summary(
+        self, agent_id: Optional[str] = None, detected_since: Optional[str] = None
+    ) -> Dict[str, Any]:
         """
         Get vulnerability summary statistics.
+
+        Args:
+            agent_id: Only count vulnerabilities on this agent
+            detected_since: Only count vulnerabilities first detected at/after this date-math
+                value (e.g. "now-7d"); None covers every currently open vulnerability
 
         Returns:
             Summary with counts by severity
         """
         await self._ensure_initialized()
 
+        filters: List[Dict[str, Any]] = []
+        if agent_id:
+            filters.append({"term": {"agent.id": agent_id}})
+        if detected_since:
+            filters.append({"range": {"vulnerability.detected_at": {"gte": detected_since}}})
+        query = {"bool": {"filter": filters}} if filters else None
+
         # Use aggregation query via circuit breaker (custom body with size=0)
         if self._circuit_breaker is not None:
-            result = await self._circuit_breaker._call(self._execute_agg_search)
+            result = await self._circuit_breaker._call(self._execute_agg_search, query)
         else:
-            result = await self._execute_agg_search()
+            result = await self._execute_agg_search(query)
 
         # Parse aggregations
         aggs = result.get("aggregations", {})
@@ -557,11 +571,11 @@ class WazuhIndexerClient:
             }
         }
 
-    async def _execute_agg_search(self) -> Dict[str, Any]:
+    async def _execute_agg_search(self, query: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         """Execute vulnerability aggregation query (called within circuit breaker)."""
         await self._ensure_initialized()
         url = f"{self.base_url}/{self._qualified(VULNERABILITY_INDEX)}/_search"
-        body = {
+        body: Dict[str, Any] = {
             "size": 0,
             "aggs": {
                 "by_severity": {"terms": {"field": "vulnerability.severity", "size": 10}},
@@ -569,6 +583,8 @@ class WazuhIndexerClient:
                 "total_vulnerabilities": {"value_count": {"field": "vulnerability.id"}},
             },
         }
+        if query:
+            body["query"] = query
 
         try:
             response = await self.client.post(url, json=body, headers={"Content-Type": "application/json"})

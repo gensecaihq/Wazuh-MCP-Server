@@ -981,12 +981,14 @@ class WazuhClient:
 
         return await self._indexer_client.get_critical_vulnerabilities(limit=limit)
 
-    async def get_vulnerability_summary(self, time_range: str) -> Dict[str, Any]:
+    async def get_vulnerability_summary(self, time_range: Optional[str] = None, agent_id: str = None) -> Dict[str, Any]:
         """
         Get vulnerability summary statistics from Wazuh Indexer (4.8.0+ required).
 
         Args:
-            time_range: Time range for the summary (currently not used, returns all current vulnerabilities)
+            time_range: Only count vulnerabilities first detected in this window ("1d", "7d", "30d");
+                None counts every currently open vulnerability
+            agent_id: Only count vulnerabilities on this agent
 
         Returns:
             Vulnerability summary with counts by severity
@@ -997,7 +999,8 @@ class WazuhClient:
         if not self._indexer_client:
             raise IndexerNotConfiguredError()
 
-        return await self._indexer_client.get_vulnerability_summary()
+        detected_since = f"now-{time_range}" if time_range else None
+        return await self._indexer_client.get_vulnerability_summary(agent_id=agent_id, detected_since=detected_since)
 
     async def analyze_security_threat(self, indicator: str, indicator_type: str) -> Dict[str, Any]:
         """Analyze security threat by searching alerts for the indicator via Elasticsearch."""
@@ -1117,7 +1120,7 @@ class WazuhClient:
         vuln_data: Dict[str, Any] = {}
         if self._indexer_client:
             try:
-                vuln_summary = await self._indexer_client.get_vulnerability_summary()
+                vuln_summary = await self._indexer_client.get_vulnerability_summary(agent_id=agent_id)
                 vuln_data = vuln_summary.get("data", {})
                 critical = vuln_data.get("critical", 0)
                 high = vuln_data.get("high", 0)
@@ -1135,7 +1138,9 @@ class WazuhClient:
         if self._indexer_client:
             try:
                 start = self._time_range_to_start("24h")
-                result = await self._indexer_client.get_alerts(limit=500, timestamp_start=start, level="10")
+                result = await self._indexer_client.get_alerts(
+                    limit=500, timestamp_start=start, level="10", agent_id=agent_id
+                )
                 high_alerts, high_total, _ = self._alerts_and_total(result)
                 alert_summary["high_severity_alerts_24h"] = high_total
                 if high_total > 10:
@@ -1639,16 +1644,21 @@ class WazuhClient:
             except Exception:
                 return default
 
-        agents_coro = self._request(
-            "GET", "/agents", params={"status": "active", "limit": 500, "select": "id,name,os.name"}
-        )
+        # With agent_id every data source is scoped to that agent (whatever its status);
+        # without it, the dashboard covers active agents fleet-wide.
+        agent_params: Dict[str, Any] = {"limit": 500, "select": "id,name,os.name"}
+        if agent_id:
+            agent_params["agents_list"] = agent_id
+        else:
+            agent_params["status"] = "active"
+        agents_coro = self._request("GET", "/agents", params=agent_params)
         # Alerts live in the Indexer — the Manager API removed its /alerts endpoint.
         # Bound to a fixed reporting window so the dashboard reflects recent posture
         # (and matches the other ISO tools) rather than counting all alert history.
         _iso_window_start = (datetime.now(timezone.utc) - timedelta(days=_ISO27001_ALERT_WINDOW_DAYS)).strftime(
             "%Y-%m-%dT%H:%M:%SZ"
         )
-        alerts_coro = self.get_alerts(limit=500, timestamp_start=_iso_window_start)
+        alerts_coro = self.get_alerts(limit=500, timestamp_start=_iso_window_start, agent_id=agent_id)
         stats_coro = self._request("GET", "/manager/stats/analysisd")
 
         agents_res, alerts_res, stats_res = await asyncio.gather(
@@ -2366,8 +2376,10 @@ class WazuhClient:
         value = value.strip()
         if not value:
             raise ValueError(f"{param_name} cannot be empty")
-        # Block shell metacharacters and control chars
-        if re.search(r'[;&|`$(){}\[\]<>!\\\'"\n\r\t]', value):
+        # Block shell metacharacters and control chars. Backslash is allowed only in file paths,
+        # where it is the Windows separator (C:\Users\x.exe); elsewhere it's an escape char.
+        forbidden = r'[;&|`$(){}\[\]<>!\'"\n\r\t]' if param_name == "file_path" else r'[;&|`$(){}\[\]<>!\\\'"\n\r\t]'
+        if re.search(forbidden, value):
             raise ValueError(f"{param_name} contains invalid characters")
         # Audit fix M6: Block flag injection for standalone values
         if not param_name.startswith("parameter:") and value.startswith("-"):
@@ -2376,19 +2388,27 @@ class WazuhClient:
 
     @staticmethod
     def _validate_ip(ip_address: str, param_name: str = "ip_address") -> str:
-        """Validate IPv4 or IPv6 address format."""
+        """Validate an IPv4/IPv6 address and return its canonical form.
+
+        Canonical output matters for the protected-target check: "127.000.000.001" or an
+        IPv4-mapped "::ffff:7f00:1" must compare equal to 127.0.0.1, not slip past it.
+        """
         import re
 
         ip_address = ip_address.strip()
-        # IPv4
-        if re.match(r"^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$", ip_address):
-            octets = ip_address.split(".")
-            if all(0 <= int(o) <= 255 for o in octets):
-                return ip_address
-        # IPv6 (simplified check)
-        if ":" in ip_address and re.match(r"^[0-9a-fA-F:]+$", ip_address):
-            return ip_address
-        raise ValueError(f"Invalid IP address format for {param_name}: {ip_address}")
+        candidate = ip_address
+        # ipaddress rejects leading zeros; read dotted-quad octets as decimal instead.
+        if re.fullmatch(r"\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}", ip_address):
+            candidate = ".".join(str(int(o)) for o in ip_address.split("."))
+        try:
+            if "%" in candidate:  # IPv6 zone ids are host-local and meaningless on an agent
+                raise ValueError
+            addr = ipaddress.ip_address(candidate)
+        except ValueError:
+            raise ValueError(f"Invalid IP address format for {param_name}: {ip_address}") from None
+        if isinstance(addr, ipaddress.IPv6Address) and addr.ipv4_mapped:
+            addr = addr.ipv4_mapped  # agents' firewall scripts expect the plain IPv4 form
+        return str(addr)
 
     def _build_protected_networks(self, extra: str) -> list:
         """Build the block_ip protected-target list from env + the manager host + loopback."""
@@ -2414,10 +2434,17 @@ class WazuhClient:
     def _is_protected_target(self, ip_address: str) -> bool:
         """True if ip_address falls inside a protected network (must never be blocked)."""
         try:
-            addr = ipaddress.ip_address(ip_address)
+            addr = ipaddress.ip_address(self._validate_ip(ip_address))
         except ValueError:
             return False
         return any(addr in net for net in self._protected_networks)
+
+    def _refuse_protected_target(self, ip_address: str) -> None:
+        if self._is_protected_target(ip_address):
+            raise ValueError(
+                f"Refusing to block protected target {ip_address}: it is loopback, the Wazuh "
+                "manager, or on the WAZUH_PROTECTED_IPS denylist. Blocking it would be self-inflicted DoS."
+            )
 
     async def block_ip(
         self, ip_address: str, duration: int = 0, agent_id: str = None, all_agents: bool = False
@@ -2429,11 +2456,7 @@ class WazuhClient:
         "block <ip>" in a log line must not weaponize the whole fleet by omission.
         """
         ip_address = self._validate_ip(ip_address)
-        if self._is_protected_target(ip_address):
-            raise ValueError(
-                f"Refusing to block protected target {ip_address}: it is loopback, the Wazuh "
-                "manager, or on the WAZUH_PROTECTED_IPS denylist. Blocking it would be self-inflicted DoS."
-            )
+        self._refuse_protected_target(ip_address)
         if not agent_id and not all_agents:
             raise ValueError(
                 "block_ip requires an explicit target: pass agent_id for a single agent, or "
@@ -2527,6 +2550,7 @@ class WazuhClient:
     async def firewall_drop(self, agent_id: str, src_ip: str, duration: int = 0) -> Dict[str, Any]:
         """Add firewall drop rule via active response."""
         src_ip = self._validate_ip(src_ip, "src_ip")
+        self._refuse_protected_target(src_ip)
         src_ip = self._sanitize_ar_argument(src_ip, "src_ip")
         arguments = [f"-srcip {src_ip}"]
         if duration and duration > 0:
@@ -2542,6 +2566,7 @@ class WazuhClient:
     async def host_deny(self, agent_id: str, src_ip: str) -> Dict[str, Any]:
         """Add hosts.deny entry via active response."""
         src_ip = self._validate_ip(src_ip, "src_ip")
+        self._refuse_protected_target(src_ip)
         src_ip = self._sanitize_ar_argument(src_ip, "src_ip")
         data = {
             "command": "!host-deny",
@@ -2753,7 +2778,7 @@ class WazuhClient:
         would silently RE-BLOCK the address. So this requires an operator-deployed undo
         script; without one it raises rather than doing the wrong thing.
         """
-        self._validate_ip(src_ip)
+        src_ip = self._validate_ip(src_ip, "src_ip")
         src_ip = self._sanitize_ar_argument(src_ip, "src_ip")
         if not undo_command:
             env_var = "WAZUH_AR_FIREWALL_UNDO_COMMAND" if block_kind == "firewall" else "WAZUH_AR_HOSTDENY_UNDO_COMMAND"

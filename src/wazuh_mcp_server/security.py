@@ -90,9 +90,17 @@ def validate_limit(
         # Clamp the default to the allowed range to prevent crashes
         return max(min_val, min(default, max_val))
 
+    # int() would turn True into 1 (a PID-1 kill for process_id), truncate 1.5, and raise
+    # OverflowError on infinity; only accept real integers, integral floats and digit strings.
+    if isinstance(value, bool) or (isinstance(value, float) and not value.is_integer()):
+        raise ToolValidationError(
+            param_name,
+            f"must be an integer, got {value!r}",
+            f"Use a whole number between {min_val} and {max_val}",
+        )
     try:
         limit = int(value)
-    except (ValueError, TypeError):
+    except (ValueError, TypeError, OverflowError):
         raise ToolValidationError(
             param_name,
             f"must be an integer, got {type(value).__name__}",
