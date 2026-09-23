@@ -258,9 +258,10 @@ class ServerConfig:
         environment = normalize_environment(os.getenv("ENVIRONMENT"))
 
         # Validate auth mode
-        auth_mode = os.getenv("AUTH_MODE", "bearer").lower()
+        auth_mode = os.getenv("AUTH_MODE", "bearer").strip().lower()
         if auth_mode not in ("bearer", "oauth", "none"):
-            auth_mode = "bearer"
+            # A typo used to fall back to bearer silently — the operator thinks OAuth is on
+            raise ConfigurationError(f"AUTH_MODE must be one of bearer, oauth, none; got '{auth_mode}'")
 
         # Signing secret. In production with auth enabled it MUST be provided — a random
         # per-process key invalidates all tokens on restart and breaks multi-instance

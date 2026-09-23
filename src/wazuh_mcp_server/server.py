@@ -63,7 +63,7 @@ from wazuh_mcp_server.security import (
     validate_timestamp,
     validate_username,
 )
-from wazuh_mcp_server.session_store import SessionStore, create_session_store
+from wazuh_mcp_server.session_store import SessionStore, SessionStoreUnavailable, create_session_store
 from wazuh_mcp_server.toolsets import tool_annotations
 
 # MCP Protocol Version Support
@@ -637,6 +637,17 @@ app = FastAPI(
     openapi_url="/openapi.json",
     lifespan=lifespan,
 )
+
+
+@app.exception_handler(SessionStoreUnavailable)
+async def _session_store_unavailable(request: Request, exc: SessionStoreUnavailable):
+    # A Redis outage is a server-side 503, not "session not found" (404 tells clients to re-init)
+    return JSONResponse(
+        status_code=503,
+        content={"error": "Session store unavailable; retry shortly"},
+        headers={"Retry-After": "5"},
+    )
+
 
 # Get configuration
 config = get_config()
@@ -4110,6 +4121,9 @@ async def mcp_streamable_http_endpoint(
     except HTTPException as exc:
         _status_code = exc.status_code
         raise
+    except SessionStoreUnavailable:
+        _status_code = 503
+        raise  # -> 503 via the app exception handler
     except Exception as e:
         _status_code = 500
         logger.error(f"MCP endpoint error: {e}")

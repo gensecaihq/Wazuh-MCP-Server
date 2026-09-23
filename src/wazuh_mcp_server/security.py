@@ -139,8 +139,9 @@ def validate_agent_id(value: Any, required: bool = False, param_name: str = "age
 
     # Wazuh zero-pads agent IDs to at least 3 digits ("1" -> "001"). The Manager API
     # requires the padded form and the Indexer stores agent.id padded, so an exact-match
-    # term on "1" would silently return nothing. Normalize here.
-    return agent_id.zfill(3)
+    # term on "1" would silently return nothing. Normalize here — including over-padded
+    # input ("0001" -> "001").
+    return str(int(agent_id)).zfill(3)
 
 
 def validate_rule_id(value: Any, required: bool = False, param_name: str = "rule_id") -> Optional[str]:
@@ -939,14 +940,12 @@ class SecurityManager:
 
     def __init__(self):
         self.metrics = SecurityMetrics()
-        try:
-            max_req = int(os.getenv("RATE_LIMIT_REQUESTS", "100"))
-        except (ValueError, TypeError):
-            max_req = 100
-        try:
-            window = int(os.getenv("RATE_LIMIT_WINDOW", "60"))
-        except (ValueError, TypeError):
-            window = 60
+        from wazuh_mcp_server.config import validate_positive_int
+
+        # Fail at startup on a bad value: 0 or negative used to make every limited route 500
+        # (IndexError on an empty window), and garbage silently fell back to the default.
+        max_req = validate_positive_int(os.getenv("RATE_LIMIT_REQUESTS", "100"), "RATE_LIMIT_REQUESTS")
+        window = validate_positive_int(os.getenv("RATE_LIMIT_WINDOW", "60"), "RATE_LIMIT_WINDOW", max_val=86400)
         self.rate_limiter = RateLimiter(max_requests=max_req, window_seconds=window)
         self.validator = SecurityValidator()
         self.trusted_proxies = {p.strip() for p in os.getenv("TRUSTED_PROXIES", "").split(",") if p.strip()}
@@ -1076,10 +1075,12 @@ class MemoryManager:
         if max_memory_mb is None:
             # Honor MAX_MEMORY_MB (same knob monitoring.py reads) so the kill-switch and the
             # metrics threshold agree; fall back to 512 only when unset/invalid.
-            try:
-                max_memory_mb = int(os.getenv("MAX_MEMORY_MB", "512"))
-            except (TypeError, ValueError):
-                max_memory_mb = 512
+            from wazuh_mcp_server.config import ConfigurationError, validate_positive_int
+
+            max_memory_mb = validate_positive_int(os.getenv("MAX_MEMORY_MB", "512"), "MAX_MEMORY_MB")
+            if max_memory_mb < 64:
+                # Below the idle footprint every request would be refused as "overloaded"
+                raise ConfigurationError(f"MAX_MEMORY_MB must be at least 64, got {max_memory_mb}")
         self.max_memory_bytes = max_memory_mb * 1024 * 1024
         self.last_check = time.time()
         self.check_interval = 30  # seconds

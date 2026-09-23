@@ -15,7 +15,7 @@ from typing import Any, Dict, Optional, Tuple
 import httpx
 
 from wazuh_mcp_server.api.wazuh_indexer import IndexerNotConfiguredError, WazuhIndexerClient
-from wazuh_mcp_server.config import WazuhConfig
+from wazuh_mcp_server.config import WazuhConfig, env_bool
 from wazuh_mcp_server.resilience import CircuitBreaker, CircuitBreakerConfig, RetryConfig
 
 logger = logging.getLogger(__name__)
@@ -175,7 +175,8 @@ class WazuhClient:
         self._cache_max_size = 100
         self._youcom_api_key = os.getenv("YDC_API_KEY", "").strip() or None
         self._youcom_base_url = os.getenv("YDC_BASE_URL", YDC_DEFAULT_BASE_URL).rstrip("/")
-        self._youcom_verify_ssl = os.getenv("YDC_VERIFY_SSL", "true").strip().lower() == "true"
+        # env_bool: "1"/"yes"/"on" mean true; the old == "true" check turned them into verify=False
+        self._youcom_verify_ssl = env_bool("YDC_VERIFY_SSL", True)
 
         # Optional custom active-response commands for unblocking. Stock Wazuh cannot
         # remove a firewall-drop / host-deny block via the API (the API only ever
