@@ -756,3 +756,34 @@ class TestRateLimitAndOAuthBinding:
         key.active = False
         with pytest.raises(Exception):
             await mcp_server.verify_authentication(f"Bearer {token}", mcp_server.config)
+
+
+class TestConfigQuirks:
+    @pytest.mark.asyncio
+    async def test_max_alerts_per_query_caps_alert_limits(self, monkeypatch):
+        import dataclasses
+
+        monkeypatch.setattr(mcp_server, "config", dataclasses.replace(mcp_server.config, MAX_ALERTS_PER_QUERY=50))
+        listed = {t["name"]: t for t in (await mcp_server.handle_tools_list({}, _session()))["tools"]}
+        assert listed["get_wazuh_alerts"]["inputSchema"]["properties"]["limit"]["maximum"] == 50
+        result = await mcp_server.handle_tools_call(
+            {"name": "get_wazuh_alerts", "arguments": {"limit": 51}}, _session()
+        )
+        assert result["isError"] is True and "limit" in result["content"][0]["text"]
+
+    def test_missing_wazuh_host_stops_startup(self):
+        import subprocess
+        import sys
+
+        env = {k: v for k, v in os.environ.items() if not k.startswith("WAZUH_")}
+        env.update(AUTH_MODE="none", WAZUH_USER="u", WAZUH_PASS="p")
+        code = (
+            "import asyncio\n"
+            "from wazuh_mcp_server import server as s\n"
+            "async def main():\n"
+            "    async with s.lifespan(s.app):\n"
+            "        pass\n"
+            "asyncio.run(main())\n"
+        )
+        out = subprocess.run([sys.executable, "-c", code], env=env, capture_output=True, text=True)
+        assert out.returncode != 0 and "WAZUH_HOST" in out.stderr

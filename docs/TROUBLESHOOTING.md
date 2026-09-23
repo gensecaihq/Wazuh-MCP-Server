@@ -111,7 +111,7 @@ Tool failures come back as `isError` results, which the model reads, not as HTTP
 | `Connection failed: Cannot connect to Wazuh server at <host>:<port>. Check Wazuh server connectivity and try again.` | The Manager is unreachable: wrong `WAZUH_HOST`/`WAZUH_PORT`, a firewall, or DNS. It is also the result when **TLS verification fails**: with `WAZUH_ALLOW_SELF_SIGNED=false`, a certificate the server does not trust produces this same message | Test from the container (see [First checks](#first-checks)). If `curl -k` succeeds and `curl` without `-k` fails, it is a certificate problem: set `WAZUH_ALLOW_SELF_SIGNED=true`, or present a trusted certificate |
 | `Tool execution failed: Invalid Wazuh credentials. Check WAZUH_USER and WAZUH_PASS` | The Manager rejected the login (HTTP 401) | Check the credentials with the command below |
 | `Tool execution failed: Wazuh user does not have sufficient permissions` | The Manager returned 403 at login | Give the API user the Wazuh RBAC roles it needs |
-| `Tool execution failed: Request URL is missing an 'http://' or 'https://' protocol.` | `WAZUH_HOST` is empty. The server starts without it | Set `WAZUH_HOST`, `WAZUH_USER`, `WAZUH_PASS` |
+| `ConfigurationError: Required Wazuh Manager settings are not set: WAZUH_HOST` (server exits at startup) | `WAZUH_HOST`, `WAZUH_USER` or `WAZUH_PASS` is empty | Set the named variables |
 | Result contains `Service temporarily unavailable - circuit breaker open` | Five connection, timeout or 5xx failures in a row opened the circuit breaker for that cluster | Fix the Manager connection. The breaker lets a trial request through after 60 s |
 
 ```bash

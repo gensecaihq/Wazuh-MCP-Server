@@ -35,7 +35,7 @@ There are two kinds of boolean variable:
 | `WAZUH_ALLOW_SELF_SIGNED` | `true` | *Strict.* Accept the Manager's self-signed certificate, which a stock Wazuh install uses. **While this is `true`, the Manager certificate is not verified at all**, whatever `WAZUH_VERIFY_SSL` says. To verify the certificate, set it to `false` and keep `WAZUH_VERIFY_SSL=true` |
 | `REQUEST_TIMEOUT_SECONDS` | `30` | Timeout for Manager and Indexer requests (1–300) |
 | `MAX_CONNECTIONS` | `10` | Maximum concurrent Manager requests, and the Manager connection pool size (1–100) |
-| `MAX_ALERTS_PER_QUERY` | `1000` | Checked at startup (1–10000) but currently has no effect. Each tool's `limit` argument is capped by its own input schema, for example 1000 for `get_wazuh_alerts` |
+| `MAX_ALERTS_PER_QUERY` | `1000` | Largest `limit` accepted by `get_wazuh_alerts` and `search_security_events` (1–10000); also advertised as the schema maximum. Other tools keep their own caps |
 
 Manager certificate verification works out as `WAZUH_VERIFY_SSL and not WAZUH_ALLOW_SELF_SIGNED`. With the defaults, the Manager certificate is **not verified**.
 
