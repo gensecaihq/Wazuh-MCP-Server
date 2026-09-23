@@ -27,7 +27,7 @@ Lets an MCP client — Claude, Open WebUI backed by a local model, or any client
 - **55 tools** in 8 toolsets: alerts, agents, vulnerabilities, threat analysis, compliance (PCI-DSS, HIPAA, SOX, GDPR, NIST, ISO 27001:2022), manager/cluster health, and active response with verification and rollback. Also 5 guided prompts, 6 resources and 3 resource templates.
 - **Read-only by default.** The 14 state-changing tools require the `wazuh:write` scope, which is never granted implicitly.
 - **MCP transport:** Streamable HTTP at `/mcp`. Serves protocol revision 2026-07-28 (stateless requests) and the `initialize` handshake for 2025-11-25, 2025-06-18, 2025-03-26 and 2024-11-05. The legacy HTTP+SSE endpoint `/sse` returns `410 Gone`.
-- **Authentication:** bearer tokens minted from an API key, OAuth 2.0 (authorization code + PKCE) with API-key sign-in, or no auth for local development.
+- **Authentication:** bearer tokens minted from an API key; OAuth 2.0 (authorization code + PKCE) with sign-in by API key or at an OpenID Connect provider (Entra ID, Google Workspace, Okta, Keycloak); or no auth for local development.
 - **Deployment:** Docker Compose or a published multi-arch image; optional Redis for multi-instance sessions; optional multi-cluster routing.
 - **Local models:** a vLLM + Open WebUI stack (`compose.local-llm.yml`) and toolset filtering for small models. The only tool that calls a service outside your Wazuh deployment is the optional `search_external_context` (You.com), which can be disabled on its own.
 
@@ -57,6 +57,8 @@ WAZUH_INDEXER_HOST=your-wazuh-indexer
 WAZUH_INDEXER_USER=your-indexer-user
 WAZUH_INDEXER_PASS=your-indexer-password
 ```
+
+The Manager's TLS certificate is verified. A stock Wazuh install uses a self-signed API certificate that cannot pass verification, so either reissue it for your host and set `WAZUH_CA_BUNDLE`, or, for a first test, add `WAZUH_ALLOW_SELF_SIGNED=true` (connects without verification; logged at startup). Details: [Manager TLS](docs/configuration.md#manager-tls).
 
 Generate the signing secret and an API key. `compose.yml` runs the server with `ENVIRONMENT=production`, which refuses to start without `AUTH_SECRET_KEY`:
 
@@ -180,8 +182,9 @@ Per-tool parameters: [API documentation](docs/api/).
 |---------|-----------|
 | **Scopes (RBAC)** | Each tool requires `wazuh:read` or `wazuh:write`. A token without a scope claim is read-only. `MCP_API_KEY` is read-only unless `MCP_API_KEY_SCOPES` includes `wazuh:write`. With `AUTH_MODE=none`, write tools are disabled unless `AUTHLESS_ALLOW_WRITE=true`. |
 | **Bearer tokens** | JWTs signed with `AUTH_SECRET_KEY`, must carry `exp`, and are bound to the API key they were minted from: revoking or rotating the key invalidates its tokens. Refresh tokens are not accepted as access tokens. |
-| **OAuth** | Authorization code flow with mandatory S256 PKCE, single-use codes, refresh-token rotation with replay detection, and revocation. Users sign in with a `wazuh_` API key, so scopes, rate limits and audit entries are per user. |
+| **OAuth** | Authorization code flow with mandatory S256 PKCE, single-use codes, refresh-token rotation with replay detection, and revocation. Users sign in with a `wazuh_` API key or at an OpenID Connect provider (ID token signature, issuer, audience, expiry and nonce verified; tenant, domain and user allow-lists; group-to-scope mapping), so scopes, rate limits and audit entries are per user. |
 | **Action guardrails** | IP-blocking tools refuse loopback, the Manager's address (when `WAZUH_HOST` is an IP) and anything in `WAZUH_PROTECTED_IPS`. Isolate, kill, disable-user, quarantine and generic active-response calls against agent `000` (the Manager) are refused unless `WAZUH_ALLOW_MANAGER_AR=true`. `wazuh_block_ip` requires an `agent_id` or an explicit `all_agents=true`. With `WAZUH_REQUIRE_ACTION_CONFIRMATION=true`, write tools also require `confirm=true`. |
+| **Wazuh TLS** | The Manager and Indexer certificates are verified by default, against the system store or `WAZUH_CA_BUNDLE`. Disabling Manager verification (`WAZUH_ALLOW_SELF_SIGNED=true`) is logged at startup, as an error in production. |
 | **Audit log** | Every write-tool call is logged before and after execution (logger `wazuh_mcp_server.audit`) with the principal, session, arguments and outcome. |
 | **Redaction** | Credentials and tokens are redacted from tool output in every response format, and from server logs. |
 | **Input validation** | Typed validation of agent IDs, IPs, paths and command names; Indexer queries are built as Query DSL, not by string interpolation. |
