@@ -94,8 +94,9 @@ class TestToolsetEnforcement:
         listed = await _listed()
         assert "wazuh_isolate_host" not in listed and "search_external_context" not in listed
         for name in ("wazuh_isolate_host", "search_external_context"):
-            with pytest.raises(ValueError, match="disabled on this server"):
-                await handle_tools_call({"name": name, "arguments": {}}, _session())
+            result = await handle_tools_call({"name": name, "arguments": {}}, _session())
+            assert result["isError"] is True
+            assert "disabled on this server" in result["content"][0]["text"]
 
     @pytest.mark.asyncio
     async def test_scope_filter_still_applies_within_enabled_set(self, monkeypatch):

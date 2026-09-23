@@ -426,12 +426,13 @@ class TestActionConfirmationGate:
     @pytest.mark.asyncio
     async def test_write_tool_requires_confirm_when_enabled(self, monkeypatch, stub_cluster):
         monkeypatch.setenv("WAZUH_REQUIRE_ACTION_CONFIRMATION", "true")
-        # The gate raises before the tool body (like scope enforcement), caught upstream.
-        with pytest.raises(ValueError, match="confirm"):
-            await handle_tools_call(
-                {"name": "wazuh_block_ip", "arguments": {"ip_address": "8.8.8.8", "agent_id": "001"}},
-                _session(scopes=("wazuh:read", "wazuh:write")),
-            )
+        # Refused before the tool body, as a tool error the model sees (with the guidance)
+        result = await handle_tools_call(
+            {"name": "wazuh_block_ip", "arguments": {"ip_address": "8.8.8.8", "agent_id": "001"}},
+            _session(scopes=("wazuh:read", "wazuh:write")),
+        )
+        assert result["isError"] is True
+        assert "confirm=true" in result["content"][0]["text"]
 
 
 class TestServerInstructionsTrustBoundary:

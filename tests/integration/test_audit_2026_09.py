@@ -362,3 +362,50 @@ class TestWazuhApiSemantics:
         assert _retry_after_seconds("12") == 12
         assert _retry_after_seconds(future) in (0, 1)
         assert _retry_after_seconds("garbage") == 30
+
+
+class TestUnknownArguments:
+    @pytest.mark.asyncio
+    async def test_misspelled_filter_refused_not_ignored(self, monkeypatch):
+        calls = []
+
+        class Stub:
+            async def get_alerts(self, **kw):
+                calls.append(kw)
+                return {"data": {"affected_items": []}}
+
+        monkeypatch.setattr(mcp_server, "cluster_registry", ClusterRegistry({"default": Stub()}, "default", False))
+        result = await mcp_server.handle_tools_call(
+            {"name": "get_wazuh_alerts", "arguments": {"agentid": "001"}}, _session()
+        )
+        assert result["isError"] is True and "agentid" in result["content"][0]["text"]
+        assert not calls
+
+
+class TestOutputRedaction:
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("compact", [True, False])
+    async def test_credentials_redacted_in_every_mode(self, monkeypatch, compact):
+        class Stub:
+            async def get_alerts(self, **kw):
+                alert = {"rule": {"id": "1"}, "full_log": "login failed user=bob password=hunter2 token=abc123"}
+                return {"data": {"affected_items": [alert], "total_affected_items": 1}}
+
+        monkeypatch.setattr(mcp_server, "cluster_registry", ClusterRegistry({"default": Stub()}, "default", False))
+        result = await mcp_server.handle_tools_call(
+            {"name": "get_wazuh_alerts", "arguments": {"compact": compact}}, _session()
+        )
+        text = result["content"][0]["text"]
+        assert "hunter2" not in text and "abc123" not in text
+
+    @pytest.mark.asyncio
+    async def test_manager_logs_redacted(self, monkeypatch):
+        class Stub:
+            async def search_manager_logs(self, query, limit):
+                return {"data": {"affected_items": [{"description": "db password=hunter2 rejected"}]}}
+
+        monkeypatch.setattr(mcp_server, "cluster_registry", ClusterRegistry({"default": Stub()}, "default", False))
+        result = await mcp_server.handle_tools_call(
+            {"name": "search_wazuh_manager_logs", "arguments": {"query": "password"}}, _session()
+        )
+        assert "hunter2" not in result["content"][0]["text"]

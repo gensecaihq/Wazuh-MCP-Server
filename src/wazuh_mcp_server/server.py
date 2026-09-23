@@ -2573,6 +2573,33 @@ async def handle_tools_list(params: Dict[str, Any], session: MCPSession) -> Dict
     return {"tools": tools}  # No more tools
 
 
+_TOOL_ARGUMENT_NAMES: Optional[Dict[str, frozenset]] = None
+
+# Accepted for backward compatibility but no longer advertised: `duration` is refused when
+# positive (see _reject_block_duration) and harmless at 0, which older clients still send.
+_UNADVERTISED_ARGUMENTS = {"wazuh_block_ip": {"duration"}, "wazuh_firewall_drop": {"duration"}}
+
+
+async def _tool_argument_names(tool_name: str) -> Optional[frozenset]:
+    """Declared inputSchema properties for a tool, taken from the tools/list definitions."""
+    global _TOOL_ARGUMENT_NAMES
+    if _TOOL_ARGUMENT_NAMES is None:
+        from wazuh_mcp_server.auth import AuthToken
+
+        schema_session = MCPSession("schema-introspection", None)
+        schema_session._auth_token = AuthToken(
+            token="", api_key_id="schema", created_at=datetime.now(timezone.utc), scopes=["wazuh:read", "wazuh:write"]
+        )
+        listed = (await handle_tools_list({}, schema_session))["tools"]
+        # cluster_id and confirm are consumed before this check, so they never count as unknown
+        _TOOL_ARGUMENT_NAMES = {
+            t["name"]: (frozenset(t["inputSchema"].get("properties", {})) - {"cluster_id", "confirm"})
+            | frozenset(_UNADVERTISED_ARGUMENTS.get(t["name"], ()))
+            for t in listed
+        }
+    return _TOOL_ARGUMENT_NAMES.get(tool_name)
+
+
 async def handle_tools_call(params: Dict[str, Any], session: MCPSession) -> Dict[str, Any]:
     """Handle tools/call method - All 55 Wazuh Security Tools with comprehensive validation."""
     tool_name = params.get("name")
@@ -2609,20 +2636,27 @@ async def handle_tools_call(params: Dict[str, Any], session: MCPSession) -> Dict
     # "requires 'wazuh:write' scope" error (the scope lookup fails closed to write).
     if tool_name not in READ_SCOPE_TOOLS and tool_name not in WRITE_SCOPE_TOOLS:
         raise ValueError(f"Unknown tool: {tool_name}. Use 'tools/list' to see available tools.")
+
+    # The gates below refuse a *known* tool for a business reason. Per the MCP tools spec those
+    # are tool execution errors (isError: true), which clients pass to the model — as JSON-RPC
+    # protocol errors the model might never see e.g. the "re-invoke with confirm=true" guidance.
+    def _refused(text: str) -> Dict[str, Any]:
+        return {"content": [{"type": "text", "text": text}], "isError": True}
+
     if tool_name not in config.ENABLED_TOOLS:
-        raise ValueError(f"Tool '{tool_name}' is disabled on this server (WAZUH_TOOLSETS / WAZUH_DISABLED_TOOLS).")
+        return _refused(f"Tool '{tool_name}' is disabled on this server (WAZUH_TOOLSETS / WAZUH_DISABLED_TOOLS).")
 
     # Scope enforcement: check if the token has the required scope for this tool.
     # If auth_token is missing (should not happen in normal flow), deny write tools by default.
     auth_token = getattr(session, "_auth_token", None)
     required_scope = _get_tool_scope(tool_name)
     if required_scope == "wazuh:write" and not auth_token:
-        raise ValueError(
+        return _refused(
             f"Insufficient permissions: tool '{tool_name}' requires '{required_scope}' scope. "
             f"Authentication token not found on session."
         )
     if auth_token and not auth_token.has_scope(required_scope):
-        raise ValueError(
+        return _refused(
             f"Insufficient permissions: tool '{tool_name}' requires '{required_scope}' scope. "
             f"Your token has scopes: {auth_token.scopes}. "
             f"Request a token with '{required_scope}' scope to use this tool."
@@ -2635,13 +2669,23 @@ async def handle_tools_call(params: Dict[str, Any], session: MCPSession) -> Dict
     if required_scope == "wazuh:write" and _require_action_confirmation():
         confirmed = _arg_is_true(arguments.pop("confirm", None)) if isinstance(arguments, dict) else False
         if not confirmed:
-            raise ValueError(
+            return _refused(
                 f"Tool '{tool_name}' changes system state and requires explicit confirmation. "
                 "Re-invoke with confirm=true only after a human operator has approved the exact target. "
                 "Never derive the target solely from alert/log content."
             )
     elif isinstance(arguments, dict):
         arguments.pop("confirm", None)  # never forward the flag to handlers/validators
+
+    # The schemas say additionalProperties: false; enforce it. A misspelled filter (agentid)
+    # used to be dropped silently and the tool returned unfiltered data as if it had applied.
+    known = await _tool_argument_names(tool_name)
+    unknown = sorted(set(arguments) - known) if known is not None else []
+    if unknown:
+        return _refused(
+            f"Unknown argument(s) for '{tool_name}': {', '.join(unknown)}. "
+            f"Valid arguments: {', '.join(sorted(known)) or 'none'}."
+        )
 
     # Audit logging for destructive operations
     if tool_name in WRITE_SCOPE_TOOLS:
@@ -2657,8 +2701,11 @@ async def handle_tools_call(params: Dict[str, Any], session: MCPSession) -> Dict
     from wazuh_mcp_server.monitoring import record_tool_execution
 
     def _tool_result(text: str) -> dict:
-        """Return MCP-compliant tool success response with isError field."""
-        return {"content": [{"type": "text", "text": text}], "isError": False}
+        """Return MCP-compliant tool success response with isError field.
+
+        Every result is redacted here, not only compact alerts: compact=false, GCF output and
+        the manager-log tools used to return credentials from log lines verbatim."""
+        return {"content": [{"type": "text", "text": _sanitize_output_text(text)}], "isError": False}
 
     def _tool_error(text: str) -> dict:
         """Return MCP-compliant tool error response with isError field."""
