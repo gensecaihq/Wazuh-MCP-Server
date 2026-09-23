@@ -648,3 +648,73 @@ class TestInputEdgeCases:
         from wazuh_mcp_server.toolsets import ALL_TOOLS, resolve_enabled_tools
 
         assert resolve_enabled_tools("all,alerts", None) == ALL_TOOLS
+
+
+class TestJsonRpcEnvelope:
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        "body",
+        [
+            {"jsonrpc": "1.0", "id": 1, "method": "ping"},
+            {"id": 1, "method": "ping"},
+            {"jsonrpc": "2.0", "id": None, "method": "ping"},
+        ],
+    )
+    async def test_invalid_envelope_rejected(self, body):
+        async with _http() as client:
+            resp = await client.post("/mcp", json=body)
+        assert resp.status_code == 400 and resp.json()["error"]["code"] == -32600
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("batch", [[1, 2], [{"jsonrpc": "2.0", "id": 1}]])
+    async def test_invalid_batch_items_answered_not_dropped(self, batch):
+        async with _http() as client:
+            resp = await client.post("/", json=batch)
+        assert resp.status_code == 200
+        assert all(item["error"]["code"] == -32600 for item in resp.json())
+
+
+class TestParamTypes:
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        "method,params",
+        [
+            ("logging/setLevel", {"level": 5}),
+            ("prompts/get", {"name": "security_incident_analysis", "arguments": ["x"]}),
+            (
+                "completion/complete",
+                {"ref": {"type": "ref/prompt", "name": "x"}, "argument": {"name": "a", "value": 5}},
+            ),
+        ],
+    )
+    async def test_wrong_types_are_invalid_params(self, method, params):
+        request = mcp_server.MCPRequest(jsonrpc="2.0", id=1, method=method, params=params)
+        resp = await mcp_server.process_mcp_request(request, _session())
+        assert resp.error["code"] == -32602
+
+
+class TestInitializeHeader:
+    @pytest.mark.asyncio
+    async def test_header_matches_negotiated_version(self):
+        body = {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "initialize",
+            "params": {
+                "protocolVersion": "2025-11-25",
+                "capabilities": {},
+                "clientInfo": {"name": "t", "version": "1"},
+            },
+        }
+        async with _http() as client:
+            resp = await client.post("/mcp", json=body)
+        assert resp.headers["MCP-Protocol-Version"] == resp.json()["result"]["protocolVersion"] == "2025-11-25"
+
+
+class TestSseEventIds:
+    @pytest.mark.asyncio
+    async def test_streams_on_one_session_have_distinct_ids(self):
+        session = mcp_server.MCPSession("s", None)
+        first = [await mcp_server.generate_sse_events(session).__anext__() for _ in range(2)]
+        ids = [chunk.split("\n")[0] for chunk in first]
+        assert ids[0].startswith("id: ") and ids[0] != ids[1]

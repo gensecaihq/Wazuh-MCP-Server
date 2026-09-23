@@ -18,13 +18,13 @@ import uuid
 from collections import OrderedDict
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone
-from typing import Any, Dict, List, Optional, Tuple, Union
+from typing import Any, Dict, List, Literal, Optional, Tuple, Union
 from urllib.parse import urlparse
 
 from fastapi import FastAPI, Header, HTTPException, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, StreamingResponse
-from pydantic import BaseModel, Field, ValidationError
+from pydantic import BaseModel, Field, ValidationError, field_validator
 
 from wazuh_mcp_server import __version__
 from wazuh_mcp_server.api.wazuh_client import WazuhClient
@@ -200,12 +200,21 @@ async def _do_verify_authentication(authorization: Optional[str], config) -> Opt
 class MCPRequest(BaseModel):
     """MCP JSON-RPC 2.0 Request."""
 
-    jsonrpc: str = Field(default="2.0", description="JSON-RPC version")
+    jsonrpc: Literal["2.0"] = Field(description="JSON-RPC version (must be exactly 2.0)")
     # JSON-RPC 2.0 permits a Number id, including a non-integral one; float must be allowed
     # or a spec-valid `id: 1.5` fails validation and the error path itself 500s.
     id: Optional[Union[str, int, float]] = Field(default=None, description="Request ID")
     method: str = Field(description="Method name")
     params: Optional[Dict[str, Any]] = Field(default=None, description="Method parameters")
+
+    @field_validator("id")
+    @classmethod
+    def _id_not_null(cls, value):
+        # MCP basic protocol: "the ID MUST NOT be null" (requests without an id are
+        # notifications and never reach this model)
+        if value is None:
+            raise ValueError("request id must not be null")
+        return value
 
 
 class MCPResponse(BaseModel):
@@ -1203,6 +1212,8 @@ async def handle_logging_set_level(params: Dict[str, Any], session: MCPSession) 
     """
     global _current_log_level
     level = params.get("level", "info")
+    if not isinstance(level, str):
+        raise ValueError("level must be a string")
 
     valid_levels = ["debug", "info", "notice", "warning", "error", "critical", "alert", "emergency"]
     if level.lower() not in valid_levels:
@@ -1316,10 +1327,12 @@ async def handle_prompts_get(params: Dict[str, Any], session: MCPSession) -> Dic
     Returns prompt content with substituted arguments.
     """
     name = params.get("name")
-    arguments = params.get("arguments", {})
+    arguments = params.get("arguments") or {}
 
-    if not name:
+    if not name or not isinstance(name, str):
         raise ValueError("Prompt name is required")
+    if not isinstance(arguments, dict):
+        raise ValueError("arguments must be an object")
 
     # Prompt templates
     prompt_templates = {
@@ -1596,8 +1609,12 @@ async def handle_completion_complete(params: Dict[str, Any], session: MCPSession
     Handle completion/complete method per MCP specification.
     Returns argument completion suggestions.
     """
-    ref = params.get("ref", {})
-    argument = params.get("argument", {})
+    ref = params.get("ref") or {}
+    argument = params.get("argument") or {}
+    if not isinstance(ref, dict) or not isinstance(argument, dict):
+        raise ValueError("ref and argument must be objects")
+    if not isinstance(argument.get("value", ""), str) or not isinstance(argument.get("name", ""), str):
+        raise ValueError("argument name and value must be strings")
 
     ref_type = ref.get("type")
     # Prompt refs identify by `name`; resource refs identify by `uri` (per MCP spec).
@@ -3661,6 +3678,9 @@ async def generate_sse_events(session: MCPSession, event_id_counter: int = 0, tr
         event_id_counter: Starting event ID
         track_connection: If True, decrement ACTIVE_CONNECTIONS when stream ends
     """
+    # Event ids must be unique across every stream of a session (spec), so prefix them with a
+    # per-stream id instead of restarting at 1 on each GET.
+    stream_id = uuid.uuid4().hex[:12]
     event_id = event_id_counter
 
     try:
@@ -3668,32 +3688,13 @@ async def generate_sse_events(session: MCPSession, event_id_counter: int = 0, tr
         # consisting of an event ID and an empty data field in order to prime
         # the client to reconnect (using that event ID as Last-Event-ID)"
         event_id += 1
-        yield f"id: {event_id}\nretry: 3000\ndata: \n\n"
+        yield f"id: {stream_id}-{event_id}\nretry: 3000\ndata: \n\n"
 
-        # Send session info as a JSON-RPC notification
-        event_id += 1
-        session_notification = {"jsonrpc": "2.0", "method": "notifications/session", "params": session.to_dict()}
-        yield f"id: {event_id}\nevent: message\ndata: {json.dumps(session_notification)}\n\n"
-
-        # Send capabilities notification
-        event_id += 1
-        capabilities_notification = {
-            "jsonrpc": "2.0",
-            "method": "notifications/capabilities",
-            "params": {"tools": True, "resources": True, "prompts": True, "logging": True},
-        }
-        yield f"id: {event_id}\nevent: message\ndata: {json.dumps(capabilities_notification)}\n\n"
-
-        # Send periodic keepalive (ping) to maintain connection
+        # Keepalive as an SSE comment: clients ignore it by definition. The previous
+        # notifications/session|capabilities|ping messages aren't MCP methods.
         while True:
-            event_id += 1
-            ping_notification = {
-                "jsonrpc": "2.0",
-                "method": "notifications/ping",
-                "params": {"timestamp": datetime.now(timezone.utc).isoformat()},
-            }
-            yield f"id: {event_id}\nevent: message\ndata: {json.dumps(ping_notification)}\n\n"
             await asyncio.sleep(30)
+            yield ": keepalive\n\n"
     except (asyncio.CancelledError, GeneratorExit):
         logger.debug(f"SSE connection closed for session {session.session_id}")
     finally:
@@ -3850,7 +3851,12 @@ async def mcp_endpoint(
 
                 # Per MCP Streamable HTTP spec: If the input consists solely of
                 # notifications or responses, return HTTP 202 Accepted with no body
-                has_requests = any(is_json_rpc_request(item) if isinstance(item, dict) else False for item in body)
+                # Anything that isn't a well-formed notification/response is answered, not dropped:
+                # [1, 2] or [{"jsonrpc": "2.0", "id": 1}] must get Invalid Request errors (JSON-RPC 2.0)
+                has_requests = any(
+                    not (isinstance(item, dict) and (is_json_rpc_notification(item) or is_json_rpc_response(item)))
+                    for item in body
+                )
 
                 if not has_requests:
                     # Process all notifications before returning 202
@@ -4124,7 +4130,12 @@ async def mcp_streamable_http_endpoint(
                     )
 
                 # Check if batch contains any requests
-                has_requests = any(is_json_rpc_request(item) if isinstance(item, dict) else False for item in body)
+                # Anything that isn't a well-formed notification/response is answered, not dropped:
+                # [1, 2] or [{"jsonrpc": "2.0", "id": 1}] must get Invalid Request errors (JSON-RPC 2.0)
+                has_requests = any(
+                    not (isinstance(item, dict) and (is_json_rpc_notification(item) or is_json_rpc_response(item)))
+                    for item in body
+                )
 
                 if not has_requests:
                     # Process all notifications before returning 202
@@ -4193,6 +4204,13 @@ async def mcp_streamable_http_endpoint(
             # Process the request
             if mcp_request:
                 mcp_response = await process_mcp_request(mcp_request, session)
+                # The header must name the version initialize actually negotiated, not the
+                # request-header default (2025-03-26) it would otherwise echo
+                negotiated = (
+                    (mcp_response.result or {}).get("protocolVersion") if mcp_request.method == "initialize" else None
+                )
+                if negotiated:
+                    response_headers["MCP-Protocol-Version"] = negotiated
 
                 # Check if client accepts SSE for streaming response
                 # (For long-running operations, we could upgrade to SSE here)
