@@ -225,7 +225,7 @@ docker compose restart wazuh-main-server
 
 1. Deploy with HTTPS in front (reverse proxy).
 2. Claude Desktop → **Settings → Connectors → Add custom connector**.
-3. URL: `https://your-domain.com/mcp` (or `/sse` for legacy SSE).
+3. URL: `https://your-domain.com/mcp`.
 4. Configure auth in **Advanced settings** (Bearer token, or OAuth if `AUTH_MODE=oauth`).
 
 See [Claude Integration](CLAUDE_INTEGRATION.md) for details.

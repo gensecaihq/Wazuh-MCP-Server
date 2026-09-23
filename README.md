@@ -288,7 +288,6 @@ optional `cluster_id` argument plus a `list_wazuh_clusters` tool:
 | Endpoint | Method | Description |
 |----------|--------|-------------|
 | `/mcp` | POST/GET/DELETE | MCP Streamable HTTP (recommended) |
-| `/sse` | GET | Legacy Server-Sent Events |
 | `/health` | GET | Liveness probe — 200 while the process is up (no dependency checks; use for the container healthcheck) |
 | `/ready` | GET | Readiness probe — checks Wazuh Manager/Indexer reachability; 503 when a dependency is down |
 | `/metrics` | GET | Prometheus metrics |

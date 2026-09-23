@@ -4,19 +4,22 @@ Common issues and their solutions.
 
 ## MCP Endpoint Issues
 
-### Testing SSE Endpoint
+### Testing the MCP Endpoint
 
 ```bash
-# Test SSE endpoint authentication
-curl -I http://localhost:3000/sse
-# Expected: 401 Unauthorized (good - auth required)
+# Without a token
+curl -s -o /dev/null -w '%{http_code}\n' -X POST http://localhost:3000/mcp \
+     -H 'Content-Type: application/json' -d '{"jsonrpc":"2.0","id":1,"method":"ping"}'
+# Expected: 401 (auth required)
 
-# Test with valid token
-curl -H "Authorization: Bearer your-jwt-token" \
-     -H "Origin: http://localhost" \
-     -H "Accept: text/event-stream" \
-     http://localhost:3000/sse
-# Expected: 200 OK with SSE stream
+# With a token
+curl -s -X POST http://localhost:3000/mcp \
+     -H "Authorization: Bearer your-jwt-token" \
+     -H 'Content-Type: application/json' -H 'Accept: application/json, text/event-stream' \
+     -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-25","capabilities":{},"clientInfo":{"name":"curl","version":"1"}}}'
+# Expected: 200 with an InitializeResult
+
+# The legacy /sse transport answers 410 Gone — point clients at /mcp
 
 # Get new authentication token
 curl -X POST http://localhost:3000/auth/token \

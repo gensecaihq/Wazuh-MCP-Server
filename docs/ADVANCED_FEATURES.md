@@ -164,7 +164,7 @@ Dual-era compliance: MCP 2026-07-28 (modern, stateless) plus 2025-11-25 and earl
 | Dynamic Streaming | ✅ JSON or SSE based on Accept header |
 | Authentication | ✅ Bearer token (JWT) authentication |
 | Security | ✅ HTTPS, origin validation, rate limiting |
-| Legacy Support | ✅ Legacy `/sse` endpoint maintained |
+| Legacy Support | ✅ Pre-2026 clients via the `initialize` handshake on `/mcp` |
 | Session Management | ✅ `MCP-Session-Id` header, full lifecycle with DELETE |
 | Prompts | ✅ `prompts/list` and `prompts/get` with 5 security prompts |
 | Resources | ✅ `resources/list`, `resources/read`, `resources/templates/list` |

@@ -5,6 +5,7 @@ Implements MCP 2026-07-28 authentication specification for Claude Desktop integr
 """
 
 import hashlib
+import html
 import logging
 import os
 import secrets
@@ -15,7 +16,7 @@ from urllib.parse import urlencode, urlparse
 
 import jwt
 from fastapi import APIRouter, Form, Query, Request
-from fastapi.responses import JSONResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from jwt.exceptions import PyJWTError as JWTError
 
 logger = logging.getLogger(__name__)
@@ -76,6 +77,8 @@ class AuthorizationCode:
     expires_at: datetime
     code_challenge: Optional[str] = None
     code_challenge_method: Optional[str] = None
+    # Who approved it: the API key id the user logged in with on /oauth/authorize
+    subject: Optional[str] = None
 
     def is_expired(self) -> bool:
         return datetime.now(timezone.utc) > self.expires_at
@@ -91,9 +94,18 @@ class OAuthToken:
     scope: str
     created_at: datetime
     expires_at: datetime
+    subject: Optional[str] = None
+    # Grant family: every token minted from one authorization shares it, so a refresh
+    # replay revokes that grant only, not every user of a shared public client.
+    family: Optional[str] = None
 
     def is_expired(self) -> bool:
         return datetime.now(timezone.utc) > self.expires_at
+
+
+# DCR input the server supports; anything else is rejected rather than echoed back
+_DCR_GRANT_TYPES = {"authorization_code", "refresh_token"}
+_DCR_AUTH_METHODS = {"none", "client_secret_post", "client_secret_basic"}
 
 
 class OAuthManager:
@@ -229,15 +241,24 @@ class OAuthManager:
         client_id = f"client_{secrets.token_urlsafe(16)}"
         client_secret = secrets.token_urlsafe(32)
 
+        grant_types = request_data.get("grant_types", ["authorization_code", "refresh_token"])
+        if not isinstance(grant_types, list) or not set(grant_types) <= _DCR_GRANT_TYPES:
+            raise ValueError(f"grant_types must be a subset of {sorted(_DCR_GRANT_TYPES)}")
+        auth_method = request_data.get("token_endpoint_auth_method", "client_secret_post")
+        if auth_method not in _DCR_AUTH_METHODS:
+            raise ValueError(f"token_endpoint_auth_method must be one of {sorted(_DCR_AUTH_METHODS)}")
+
+        # A registered client's scope is only a ceiling: what a user actually gets is further
+        # capped by the scopes of the API key they log in with on /oauth/authorize.
         client = OAuthClient(
             client_id=client_id,
             client_secret=client_secret,
             client_name=client_name,
             redirect_uris=redirect_uris,
-            grant_types=request_data.get("grant_types", ["authorization_code", "refresh_token"]),
+            grant_types=grant_types,
             response_types=request_data.get("response_types", ["code"]),
             scope=request_data.get("scope", "wazuh:read wazuh:write"),
-            token_endpoint_auth_method=request_data.get("token_endpoint_auth_method", "client_secret_post"),
+            token_endpoint_auth_method=auth_method,
         )
 
         # Bound number of registered clients
@@ -295,6 +316,7 @@ class OAuthManager:
         scope: str,
         code_challenge: Optional[str] = None,
         code_challenge_method: Optional[str] = None,
+        subject: Optional[str] = None,
     ) -> str:
         """Create authorization code for OAuth flow. PKCE with S256 is mandatory."""
         if not code_challenge:
@@ -312,6 +334,7 @@ class OAuthManager:
             expires_at=datetime.now(timezone.utc) + timedelta(seconds=self.config.OAUTH_AUTHORIZATION_CODE_TTL),
             code_challenge=code_challenge,
             code_challenge_method=code_challenge_method,
+            subject=subject,
         )
 
         # Cleanup expired entries periodically to bound memory
@@ -352,8 +375,10 @@ class OAuthManager:
             raise ValueError("invalid_grant")
 
         # Generate tokens
-        access_token = self._create_jwt_token(client_id, auth_code.scope, "access")
-        refresh_token = self._create_jwt_token(client_id, auth_code.scope, "refresh")
+        family = secrets.token_urlsafe(12)
+        subject = auth_code.subject
+        access_token = self._create_jwt_token(client_id, auth_code.scope, "access", subject, family)
+        refresh_token = self._create_jwt_token(client_id, auth_code.scope, "refresh", subject, family)
 
         # Cleanup expired tokens periodically to bound memory
         if len(self.access_tokens) > 5000 or len(self.refresh_tokens) > 5000:
@@ -366,6 +391,8 @@ class OAuthManager:
             scope=auth_code.scope,
             created_at=datetime.now(timezone.utc),
             expires_at=datetime.now(timezone.utc) + timedelta(seconds=self.config.OAUTH_ACCESS_TOKEN_TTL),
+            subject=subject,
+            family=family,
         )
 
         self.refresh_tokens[refresh_token] = OAuthToken(
@@ -375,6 +402,8 @@ class OAuthManager:
             scope=auth_code.scope,
             created_at=datetime.now(timezone.utc),
             expires_at=datetime.now(timezone.utc) + timedelta(seconds=self.config.OAUTH_REFRESH_TOKEN_TTL),
+            subject=subject,
+            family=family,
         )
 
         # Authorization code was already consumed via pop() above (single-use).
@@ -395,12 +424,16 @@ class OAuthManager:
             # Replay: a syntactically-valid refresh token that's no longer in the store
             # (already rotated/revoked). Revoke the whole grant for safety, per OAuth BCP.
             # Match on jti so a re-spelled (padded) replay is still detected.
-            replay_jti = None
+            replay_jti = replay_family = None
             replay_payload = self._safe_decode(refresh_token)
             if replay_payload is not None:
                 replay_jti = replay_payload.get("jti")
-            if refresh_token in self.revoked_tokens or (replay_jti and replay_jti in self.revoked_jtis):
-                self._revoke_client_tokens(client_id)
+                replay_family = replay_payload.get("fam")
+            is_replay = refresh_token in self.revoked_tokens or (replay_jti and replay_jti in self.revoked_jtis)
+            if is_replay and replay_family:
+                # Only the grant the replayed token came from. Revoking by client_id logged out
+                # every user of the shared public client, so one replay was a global logout.
+                self._revoke_family(replay_family)
             raise ValueError("invalid_grant")
 
         # Validate the grant BEFORE recording the token as consumed/revoked. A mismatched
@@ -433,9 +466,10 @@ class OAuthManager:
                 for k in oldest_keys[: len(oldest_keys) - 2500]:
                     del self.access_tokens[k]
 
-        # Generate new access token AND a new refresh token (rotation).
-        access_token = self._create_jwt_token(client_id, token_obj.scope, "access")
-        new_refresh_token = self._create_jwt_token(client_id, token_obj.scope, "refresh")
+        # Generate new access token AND a new refresh token (rotation), same grant family.
+        subject, family = token_obj.subject, token_obj.family
+        access_token = self._create_jwt_token(client_id, token_obj.scope, "access", subject, family)
+        new_refresh_token = self._create_jwt_token(client_id, token_obj.scope, "refresh", subject, family)
 
         self.access_tokens[access_token] = OAuthToken(
             token=access_token,
@@ -444,6 +478,8 @@ class OAuthManager:
             scope=token_obj.scope,
             created_at=datetime.now(timezone.utc),
             expires_at=datetime.now(timezone.utc) + timedelta(seconds=self.config.OAUTH_ACCESS_TOKEN_TTL),
+            subject=subject,
+            family=family,
         )
         self.refresh_tokens[new_refresh_token] = OAuthToken(
             token=new_refresh_token,
@@ -452,6 +488,8 @@ class OAuthManager:
             scope=token_obj.scope,
             created_at=datetime.now(timezone.utc),
             expires_at=datetime.now(timezone.utc) + timedelta(seconds=self.config.OAUTH_REFRESH_TOKEN_TTL),
+            subject=subject,
+            family=family,
         )
 
         return {
@@ -505,6 +543,8 @@ class OAuthManager:
                 scope=payload.get("scope", ""),
                 created_at=datetime.fromtimestamp(payload.get("iat", 0), timezone.utc),
                 expires_at=datetime.fromtimestamp(payload.get("exp", 0), timezone.utc),
+                subject=payload.get("usr"),
+                family=payload.get("fam"),
             )
 
         return None
@@ -529,11 +569,11 @@ class OAuthManager:
             revoked = True
         return revoked
 
-    def _revoke_client_tokens(self, client_id: str) -> None:
-        """Revoke all access and refresh tokens for a client (refresh-replay response)."""
+    def _revoke_family(self, family: str) -> None:
+        """Revoke every live token of one grant (refresh-replay response, OAuth BCP)."""
         for store in (self.access_tokens, self.refresh_tokens):
             for tok, obj in list(store.items()):
-                if obj.client_id == client_id:
+                if obj.family == family:
                     self.revoked_tokens[tok] = obj.expires_at
                     payload = self._safe_decode(tok)
                     if payload is not None and payload.get("jti"):
@@ -553,12 +593,19 @@ class OAuthManager:
         logger.info(f"Deleted OAuth client: {client_id}")
         return True
 
-    def _create_jwt_token(self, client_id: str, scope: str, token_type: str) -> str:
+    def _create_jwt_token(
+        self,
+        client_id: str,
+        scope: str,
+        token_type: str,
+        subject: Optional[str] = None,
+        family: Optional[str] = None,
+    ) -> str:
         """Create JWT token."""
         ttl = self.config.OAUTH_ACCESS_TOKEN_TTL if token_type == "access" else self.config.OAUTH_REFRESH_TOKEN_TTL
 
         payload = {
-            "sub": client_id,
+            "sub": subject or client_id,
             "client_id": client_id,
             "scope": scope,
             "type": token_type,
@@ -566,6 +613,10 @@ class OAuthManager:
             "exp": (datetime.now(timezone.utc) + timedelta(seconds=ttl)).timestamp(),
             "jti": secrets.token_urlsafe(16),
         }
+        if subject:
+            payload["usr"] = subject
+        if family:
+            payload["fam"] = family
 
         return jwt.encode(payload, self.secret_key, algorithm="HS256")
 
@@ -584,6 +635,74 @@ def create_oauth_router(oauth_manager: OAuthManager) -> APIRouter:
     """Create FastAPI router for OAuth endpoints."""
     router = APIRouter(prefix="/oauth", tags=["OAuth"])
 
+    def _login_page(client, redirect_uri, scope, state, code_challenge, error: Optional[str] = None, status=200):
+        """Consent/login form. The user proves who they are with their wazuh_ API key; the
+        grant then carries that key's identity and is capped at that key's scopes."""
+        esc = html.escape
+        hidden = "".join(
+            f'<input type="hidden" name="{esc(k)}" value="{esc(v or "")}">'
+            for k, v in (
+                ("response_type", "code"),
+                ("client_id", client.client_id),
+                ("redirect_uri", redirect_uri),
+                ("scope", scope),
+                ("state", state),
+                ("code_challenge", code_challenge),
+                ("code_challenge_method", "S256"),
+            )
+        )
+        err = f'<p class="err">{esc(error)}</p>' if error else ""
+        body = f"""<!doctype html><html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1"><title>Authorize access to Wazuh</title>
+<style>body{{font:15px system-ui,sans-serif;max-width:26rem;margin:4rem auto;padding:0 1rem;color:#1a1a1a}}
+input[type=password]{{width:100%;padding:.55rem;font:inherit;box-sizing:border-box}}
+button{{margin-top:1rem;padding:.55rem 1.1rem;font:inherit}}.err{{color:#b00020}}code{{font-size:.9em}}</style>
+</head><body><h1>Authorize {esc(client.client_name)}</h1>
+<p><strong>{esc(client.client_name)}</strong> is requesting access to this Wazuh MCP server
+(<code>{esc(scope)}</code>). Access is limited to what your API key allows.</p>{err}
+<form method="post" action="authorize">{hidden}
+<label for="api_key">Your Wazuh MCP API key</label>
+<input id="api_key" name="api_key" type="password" autocomplete="current-password" required placeholder="wazuh_…">
+<button type="submit">Authorize</button></form></body></html>"""
+        return HTMLResponse(
+            body,
+            status_code=status,
+            headers={
+                "Cache-Control": "no-store",
+                "X-Frame-Options": "DENY",
+                "Content-Security-Policy": "default-src 'none'; style-src 'unsafe-inline'; form-action 'self'; "
+                "frame-ancestors 'none'",
+                "Referrer-Policy": "no-referrer",
+            },
+        )
+
+    def _check_request(client_id, redirect_uri, response_type, state, code_challenge, code_challenge_method):
+        """Validate an authorization request. Returns (client, error_response)."""
+        client = oauth_manager.validate_client(client_id)
+        if not client:
+            return None, JSONResponse(
+                {"error": "invalid_client", "error_description": "Unknown client"}, status_code=401
+            )
+        # Never redirect to an unregistered URI; report it directly instead
+        if redirect_uri not in client.redirect_uris:
+            return None, JSONResponse(
+                {"error": "invalid_request", "error_description": "Invalid redirect_uri"}, status_code=400
+            )
+        if response_type != "code":
+            params = urlencode({"error": "unsupported_response_type", "state": state or ""})
+            return None, RedirectResponse(f"{redirect_uri}?{params}")
+        # PKCE (S256) is mandatory
+        if not code_challenge or code_challenge_method != "S256":
+            params = urlencode(
+                {
+                    "error": "invalid_request",
+                    "error_description": "PKCE required: send code_challenge with code_challenge_method=S256",
+                    "state": state or "",
+                }
+            )
+            return None, RedirectResponse(f"{redirect_uri}?{params}")
+        return client, None
+
     @router.get("/authorize")
     async def authorize(
         request: Request,
@@ -595,43 +714,60 @@ def create_oauth_router(oauth_manager: OAuthManager) -> APIRouter:
         code_challenge: Optional[str] = Query(default=None),
         code_challenge_method: Optional[str] = Query(default=None),
     ):
-        """OAuth 2.0 Authorization Endpoint."""
-        # Validate client
-        client = oauth_manager.validate_client(client_id)
-        if not client:
-            return JSONResponse({"error": "invalid_client", "error_description": "Unknown client"}, status_code=401)
+        """OAuth 2.0 Authorization Endpoint: validate the request, then ask the user to log in.
 
-        # Validate redirect_uri
-        if redirect_uri not in client.redirect_uris:
-            return JSONResponse(
-                {"error": "invalid_request", "error_description": "Invalid redirect_uri"}, status_code=400
+        This used to auto-approve every request, which handed a read+write token to anyone who
+        could reach the server."""
+        client, error = _check_request(
+            client_id, redirect_uri, response_type, state, code_challenge, code_challenge_method
+        )
+        if error:
+            return error
+        return _login_page(client, redirect_uri, scope, state, code_challenge)
+
+    @router.post("/authorize")
+    async def authorize_submit(
+        request: Request,
+        response_type: str = Form(...),
+        client_id: str = Form(...),
+        redirect_uri: str = Form(...),
+        api_key: str = Form(...),
+        scope: str = Form(default="wazuh:read wazuh:write"),
+        state: Optional[str] = Form(default=None),
+        code_challenge: Optional[str] = Form(default=None),
+        code_challenge_method: Optional[str] = Form(default=None),
+    ):
+        """Login form submission: authenticate the API key and issue the authorization code."""
+        client, error = _check_request(
+            client_id, redirect_uri, response_type, state, code_challenge, code_challenge_method
+        )
+        if error:
+            return error
+
+        from wazuh_mcp_server.auth import auth_manager
+
+        key = auth_manager.validate_api_key(api_key.strip())
+        if key is None:
+            logger.warning(f"OAuth login failed for client {client_id}: invalid API key")
+            return _login_page(
+                client, redirect_uri, scope, state, code_challenge, error="That API key isn't valid.", status=401
             )
 
-        # Validate response_type
-        if response_type != "code":
-            params = urlencode({"error": "unsupported_response_type", "state": state or ""})
-            return RedirectResponse(f"{redirect_uri}?{params}")
-
-        # PKCE (S256) is mandatory — reject via a spec-compliant error redirect rather
-        # than 500ing on the ValueError from create_authorization_code.
-        if not code_challenge or code_challenge_method != "S256":
-            params = urlencode(
-                {
-                    "error": "invalid_request",
-                    "error_description": "PKCE required: send code_challenge with code_challenge_method=S256",
-                    "state": state or "",
-                }
+        # Requested ∩ what the client is registered for ∩ what this user's key allows
+        client_scope = set(oauth_manager.bound_scope(scope, client).split())
+        granted = client_scope & set(key.scopes or ["wazuh:read"])
+        if not granted:
+            return _login_page(
+                client,
+                redirect_uri,
+                scope,
+                state,
+                code_challenge,
+                error="Your API key has none of the requested scopes.",
+                status=403,
             )
-            return RedirectResponse(f"{redirect_uri}?{params}")
+        granted_scope = " ".join(sc for sc in ("wazuh:read", "wazuh:write") if sc in granted)
 
-        # For MCP servers, we auto-approve (the user already chose to connect)
-        # In production, you might show a consent screen here
-
-        # Down-scope the request to what the client is registered for (a read-only
-        # client must not be able to self-grant write).
-        granted_scope = oauth_manager.bound_scope(scope, client)
-
-        # Generate authorization code
         try:
             code = oauth_manager.create_authorization_code(
                 client_id=client_id,
@@ -639,19 +775,19 @@ def create_oauth_router(oauth_manager: OAuthManager) -> APIRouter:
                 scope=granted_scope,
                 code_challenge=code_challenge,
                 code_challenge_method=code_challenge_method,
+                subject=key.id,
             )
         except ValueError as e:
             params = urlencode({"error": "invalid_request", "error_description": str(e), "state": state or ""})
-            return RedirectResponse(f"{redirect_uri}?{params}")
+            return RedirectResponse(f"{redirect_uri}?{params}", status_code=303)
 
+        logger.info(f"OAuth grant approved: client={client_id} key={key.id} scope={granted_scope}")
         # Redirect back with code and the issuer identifier (RFC 9207) so the client can
-        # defend against authorization-server mix-up attacks.
+        # defend against authorization-server mix-up attacks. 303: the browser must GET it.
         params = {"code": code, "iss": oauth_manager.get_issuer_url(request)}
         if state:
             params["state"] = state
-
-        redirect_url = f"{redirect_uri}?{urlencode(params)}"
-        return RedirectResponse(redirect_url)
+        return RedirectResponse(f"{redirect_uri}?{urlencode(params)}", status_code=303)
 
     @router.post("/token")
     async def token(

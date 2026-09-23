@@ -171,10 +171,12 @@ async def _do_verify_authentication(authorization: Optional[str], config) -> Opt
                 # Return AuthToken with OAuth scopes (fail closed to read-only)
                 scope_str = getattr(token_obj, "scope", "") or ""
                 scopes = scope_str.split() if scope_str else ["wazuh:read"]
-                # Stable per-principal id for rate-limit bucketing: prefer the OAuth
-                # client_id, else the token subject, so distinct clients get distinct
-                # buckets instead of collapsing into one shared "oauth" bucket.
-                oauth_principal = getattr(token_obj, "client_id", None) or getattr(token_obj, "sub", None)
+                # Per-user principal for RBAC audit, rate limiting and session bounds: the API
+                # key the user logged in with on /oauth/authorize. Tokens minted before that
+                # login existed carry only the (shared) client id.
+                subject = getattr(token_obj, "subject", None)
+                client = getattr(token_obj, "client_id", None)
+                oauth_principal = f"{client}:{subject}" if subject and client else (subject or client)
                 return AuthToken(
                     token=token,
                     api_key_id=f"oauth:{oauth_principal}" if oauth_principal else "oauth",
@@ -3832,68 +3834,18 @@ async def mcp_endpoint(
             ACTIVE_CONNECTIONS.dec()
 
 
-# Official MCP Remote Server SSE endpoint - as per Anthropic standards
-@app.get("/sse")
-async def mcp_sse_endpoint(
-    request: Request,
-    authorization: str = Header(None),
-    origin: Optional[str] = Header(None),
-    mcp_session_id: Optional[str] = Header(None, alias="MCP-Session-Id"),
-    last_event_id: Optional[str] = Header(None, alias="Last-Event-ID"),
-):
-    """
-    Official MCP SSE endpoint following Anthropic standards.
-    URL format: https://<server_address>/sse
-    This is the standard endpoint that Claude Desktop connects to.
-
-    Supports authentication modes: bearer (default), oauth, none (authless)
-    """
-    # Verify authentication based on configured mode
-    auth_token = await verify_authentication(authorization, config)
-
-    # Origin validation per MCP 2025-11-25 spec
-    validate_origin_header(origin, config.ALLOWED_ORIGINS)
-
-    # Rate limiting — key on the authenticated principal + trusted-proxy IP
-    allowed, retry_after = rate_limiter.is_allowed(_rate_limit_key(request, auth_token))
-    if not allowed:
-        raise _rate_limited_response(retry_after)
-
-    # Session validation: if client provides session ID but session doesn't exist, return 404
-    # Done BEFORE incrementing ACTIVE_CONNECTIONS to avoid counter leak on early errors.
-    if mcp_session_id:
-        existing_session = await sessions.get(mcp_session_id)
-        if not existing_session:
-            raise HTTPException(status_code=404, detail="Session not found")
-        session = existing_session
-        session.update_activity()
-        await sessions.set(mcp_session_id, session)
-    else:
-        session = await get_or_create_session(None, origin)
-    session.authenticated = True  # Mark as authenticated via bearer token
-    session._auth_token = auth_token  # Store token for scope checks in tool handlers
-
-    # Track active connections — only after validation passes.
-    # The SSE generator will decrement when the stream closes (track_connection=True).
-    ACTIVE_CONNECTIONS.inc()
-
-    try:
-        response = StreamingResponse(
-            generate_sse_events(session, track_connection=True),
-            media_type="text/event-stream",
-            headers={
-                "Cache-Control": "no-cache",
-                "Connection": "keep-alive",
-                "MCP-Session-Id": session.session_id,
-                "Access-Control-Expose-Headers": "MCP-Session-Id",
-            },
-        )
-        return response
-
-    except Exception as e:
-        ACTIVE_CONNECTIONS.dec()
-        logger.error(f"SSE endpoint error: {e}")
-        raise HTTPException(status_code=500, detail="SSE stream error")
+# The legacy HTTP+SSE transport (2024-11-05) was never functional here: it sent no
+# `endpoint` event and had no POST message route, so every client that connected hung.
+# Answer with a clear pointer instead of an endless stream.
+@app.api_route("/sse", methods=["GET", "POST"])
+async def mcp_sse_removed():
+    return JSONResponse(
+        status_code=410,
+        content={
+            "error": "The legacy /sse transport is not supported. Use the Streamable HTTP endpoint /mcp.",
+            "endpoint": "/mcp",
+        },
+    )
 
 
 # Standard MCP Endpoint - Streamable HTTP Transport (2025-11-25 Specification)
@@ -3916,7 +3868,7 @@ async def mcp_streamable_http_endpoint(
     - GET: SSE stream initiation (requires Accept: text/event-stream)
     - DELETE: Session termination (see separate endpoint)
 
-    This is the RECOMMENDED endpoint for MCP clients. Legacy /sse remains for backwards compatibility.
+    This is the MCP endpoint for all clients (the legacy /sse transport answers 410).
     Supports authentication modes: bearer (default), oauth, none (authless)
     """
     # Validate protocol version header. Unknown versions get a JSON-RPC
@@ -4289,10 +4241,7 @@ async def _evaluate_readiness() -> JSONResponse:
                 "mcp_protocol_version": MODERN_PROTOCOL_VERSIONS[0],
                 "legacy_handshake_protocol_version": MCP_PROTOCOL_VERSION,
                 "supported_protocol_versions": SUPPORTED_PROTOCOL_VERSIONS,
-                "transport": {
-                    "streamable_http": "enabled",
-                    "legacy_sse": "enabled",
-                },
+                "transport": {"streamable_http": "enabled"},
                 "clusters": {
                     "multi_cluster": cluster_registry.multi_cluster,
                     "default": cluster_registry.default_id,
@@ -4316,7 +4265,6 @@ async def _evaluate_readiness() -> JSONResponse:
                 "metrics": {"active_sessions": active_sessions, "total_sessions": len(all_sessions)},
                 "endpoints": {
                     "recommended": "/mcp (Streamable HTTP - 2026-07-28 + legacy)",
-                    "legacy": "/sse (SSE only)",
                     "authentication": (
                         "/auth/token" if config.is_bearer else ("/oauth/token" if config.is_oauth else None)
                     ),

@@ -182,7 +182,6 @@ docker compose up -d
 | Endpoint | Method | Description |
 |----------|--------|-------------|
 | `/mcp` | GET/POST/DELETE | **Recommended** - Streamable HTTP (MCP 2026-07-28 + legacy) |
-| `/sse` | GET | Legacy SSE endpoint |
 | `/` | GET/POST | JSON-RPC 2.0 endpoint (authenticated) |
 | `/health` | GET | Liveness probe — 200 while the process is up (no dependency checks; use this for the container/orchestrator healthcheck) |
 | `/ready` | GET | Readiness probe — verifies Wazuh Manager/Indexer reachability; 503 when a dependency is down |
