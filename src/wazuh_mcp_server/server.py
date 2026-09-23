@@ -63,6 +63,7 @@ from wazuh_mcp_server.security import (
     validate_username,
 )
 from wazuh_mcp_server.session_store import SessionStore, create_session_store
+from wazuh_mcp_server.toolsets import tool_annotations
 
 # MCP Protocol Version Support
 # This is a "dual-era" server per the 2026-07-28 spec: requests carrying modern
@@ -2509,10 +2510,27 @@ async def handle_tools_list(params: Dict[str, Any], session: MCPSession) -> Dict
             }
         )
 
+    # Operator-selected exposure (WAZUH_TOOLSETS / WAZUH_DISABLED_TOOLS)
+    tools = [t for t in tools if t["name"] in config.ENABLED_TOOLS]
+
     # Filter tools by session scopes: hide write tools from read-only or unknown tokens
     auth_token = getattr(session, "_auth_token", None)
     if not auth_token or not auth_token.has_scope("wazuh:write"):
         tools = [t for t in tools if t["name"] not in WRITE_SCOPE_TOOLS]
+
+    require_confirm = _require_action_confirmation()
+    for t in tools:
+        schema = t["inputSchema"]
+        if require_confirm and t["name"] in WRITE_SCOPE_TOOLS:
+            # The gate in handle_tools_call reads `confirm`; with a closed schema it must be declared
+            schema.setdefault("properties", {}).setdefault(
+                "confirm",
+                {"type": "boolean", "description": "Set true only after a human operator approved this exact action"},
+            )
+        # Closed argument schemas: lets strict function calling (vLLM --tool-strict-level,
+        # OpenAI strict mode) constrain decoding and makes clients reject invented params.
+        schema["additionalProperties"] = False
+        t["annotations"] = tool_annotations(t["name"], WRITE_SCOPE_TOOLS)
 
     # Pagination support per MCP spec
     return {"tools": tools}  # No more tools
@@ -2554,6 +2572,8 @@ async def handle_tools_call(params: Dict[str, Any], session: MCPSession) -> Dict
     # "requires 'wazuh:write' scope" error (the scope lookup fails closed to write).
     if tool_name not in READ_SCOPE_TOOLS and tool_name not in WRITE_SCOPE_TOOLS:
         raise ValueError(f"Unknown tool: {tool_name}. Use 'tools/list' to see available tools.")
+    if tool_name not in config.ENABLED_TOOLS:
+        raise ValueError(f"Tool '{tool_name}' is disabled on this server (WAZUH_TOOLSETS / WAZUH_DISABLED_TOOLS).")
 
     # Scope enforcement: check if the token has the required scope for this tool.
     # If auth_token is missing (should not happen in normal flow), deny write tools by default.

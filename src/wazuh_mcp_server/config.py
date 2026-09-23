@@ -2,7 +2,9 @@
 
 import os
 from dataclasses import dataclass
-from typing import Optional
+from typing import FrozenSet, Optional
+
+from wazuh_mcp_server.toolsets import ALL_TOOLS, resolve_enabled_tools
 
 
 class ConfigurationError(Exception):
@@ -227,6 +229,9 @@ class ServerConfig:
     MAX_CONNECTIONS: int = 10
     MAX_ALERTS_PER_QUERY: int = 1000
 
+    # Tool exposure (see toolsets.py): which tools tools/list advertises and tools/call accepts
+    ENABLED_TOOLS: FrozenSet[str] = ALL_TOOLS
+
     # Logging
     LOG_LEVEL: str = "INFO"
 
@@ -290,6 +295,11 @@ class ServerConfig:
         else:
             indexer_ssl = not indexer_host_raw.strip().lower().startswith("http://")
 
+        try:
+            enabled_tools = resolve_enabled_tools(os.getenv("WAZUH_TOOLSETS"), os.getenv("WAZUH_DISABLED_TOOLS"))
+        except ValueError as e:
+            raise ConfigurationError(str(e)) from e
+
         return cls(
             MCP_HOST=os.getenv("MCP_HOST", "0.0.0.0"),
             MCP_PORT=validate_port(os.getenv("MCP_PORT", "3000"), "MCP_PORT"),
@@ -330,6 +340,7 @@ class ServerConfig:
             MAX_ALERTS_PER_QUERY=validate_positive_int(
                 os.getenv("MAX_ALERTS_PER_QUERY", "1000"), "MAX_ALERTS_PER_QUERY", max_val=10000
             ),
+            ENABLED_TOOLS=enabled_tools,
             LOG_LEVEL=log_level,
             ENVIRONMENT=environment,
         )
