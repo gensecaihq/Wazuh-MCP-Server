@@ -52,17 +52,21 @@ def _stub_cluster(monkeypatch):
 class TestReadTokenDeniedWriteTools:
     @pytest.mark.asyncio
     @pytest.mark.parametrize("tool", sorted(WRITE_SCOPE_TOOLS))
-    async def test_every_write_tool_denied_to_read_token(self, tool):
+    async def test_every_write_tool_denied_to_read_token(self, tool, _stub_cluster):
         session = _session(["wazuh:read"])
-        with pytest.raises(ValueError, match="Insufficient permissions"):
-            await handle_tools_call({"name": tool, "arguments": {}}, session)
+        result = await handle_tools_call({"name": tool, "arguments": {}}, session)
+        # A tool execution error (visible to the model), and nothing reached Wazuh
+        assert result["isError"] is True
+        assert "Insufficient permissions" in result["content"][0]["text"]
+        assert _stub_cluster.calls == []
 
     @pytest.mark.asyncio
     async def test_write_tool_denied_when_no_token(self):
         session = MCPSession("s", None)
         session._auth_token = None
-        with pytest.raises(ValueError, match="Insufficient permissions"):
-            await handle_tools_call({"name": "wazuh_block_ip", "arguments": {"ip_address": "1.2.3.4"}}, session)
+        result = await handle_tools_call({"name": "wazuh_block_ip", "arguments": {"ip_address": "1.2.3.4"}}, session)
+        assert result["isError"] is True
+        assert "Insufficient permissions" in result["content"][0]["text"]
 
     @pytest.mark.asyncio
     async def test_read_tool_allowed_for_read_token(self):

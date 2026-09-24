@@ -64,7 +64,9 @@ class TestActiveResponseFleetGuard:
 
         client._request = fake_request
         await client.execute_active_response({"command": "!host-isolation", "agent_list": ["all"]})
-        assert sent["params"]["agents_list"] == "all"
+        # PUT /active-response's agents_list only accepts numeric ids ("all" is a 400); an
+        # absent agents_list is the spec's "all agents"
+        assert "agents_list" not in sent["params"]
 
 
 class TestStringBooleanCoercion:

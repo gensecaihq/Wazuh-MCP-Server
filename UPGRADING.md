@@ -1,5 +1,52 @@
 # Upgrading
 
+## Upgrading to the next release (after 4.3.0)
+
+These changes are on `main` and listed under "Unreleased" in [CHANGELOG.md](CHANGELOG.md). Most are fixes; the ones below need action or change what clients see.
+
+### 1. The Manager certificate is verified by default
+
+`WAZUH_ALLOW_SELF_SIGNED` now defaults to `false`. Earlier versions connected to the Manager without verifying its certificate, even with `WAZUH_VERIFY_SSL=true`. A stock Wazuh Manager API certificate is self-signed for `CN=wazuh.com` with no subjectAltName and cannot be verified, so a stock deployment stops connecting with `TLS certificate verification failed` until you choose one of:
+
+- **Verify (recommended):** reissue the Manager API certificate with a subjectAltName matching `WAZUH_HOST`, mount its CA and set `WAZUH_CA_BUNDLE` (compose: uncomment the `./certs` volume). The bundle replaces the system store for the Manager and Indexer, so include the Indexer's CA too if it differs.
+- **Keep the previous behaviour:** set `WAZUH_ALLOW_SELF_SIGNED=true`. The API password is then sent over an unverified connection; the server logs this at startup.
+
+Clusters in `clusters.json` use `verify_ssl` / `ca_bundle` per cluster. See [Manager TLS](docs/configuration.md#manager-tls).
+
+### 2. OAuth users sign in with an API key
+
+`/oauth/authorize` now shows a sign-in page instead of approving every request. Each user pastes a `wazuh_` API key once; their token gets that key's scopes. Configure keys before upgrading an OAuth deployment, or nobody can sign in:
+
+```env
+MCP_API_KEY=wazuh_...                 # or API_KEYS=[...] for one key per user
+MCP_API_KEY_SCOPES=wazuh:read         # add wazuh:write for users who may run active response
+```
+
+### 3. Re-mint bearer tokens once
+
+Bearer JWTs are now bound to the API key they came from, and `MCP_API_KEY` got a stable id. Tokens minted before the upgrade reference the old id and are refused: exchange the key at `POST /auth/token` again. From then on tokens survive restarts and work across replicas.
+
+### 4. Point legacy clients at `/mcp`
+
+`/sse` returns `410 Gone`. It never completed a session (no `endpoint` event, no message route), so any client configured with it wasn't working anyway.
+
+### 5. Startup is stricter
+
+Values that used to be misread now stop the server with a message: `ENVIRONMENT` other than `development`/`dev`/`production`/`prod`, an unknown `AUTH_MODE`, non-positive `RATE_LIMIT_REQUESTS`/`RATE_LIMIT_WINDOW`/`SESSION_TTL_SECONDS`, `MAX_MEMORY_MB` below 64, and invalid `clusters.json` fields (booleans must be true/false, ports 1-65535). With `REDIS_URL` set, a bad TTL no longer falls back to the in-memory store.
+
+### 6. Tool calls
+
+- `duration` on `wazuh_block_ip` / `wazuh_firewall_drop` is refused when positive: Wazuh can't expire an API-triggered block. Blocks are permanent until removed.
+- Arguments a tool doesn't declare are refused instead of ignored.
+- Scope, confirmation and disabled-tool refusals are `isError` tool results (not JSON-RPC errors), so the model sees them.
+- Active-response results include `execution_status: "dispatched"`; confirm effects with the `wazuh_check_*` tools.
+- Manager log tools accept `limit` up to 500 (Wazuh's own maximum).
+- Vulnerability results drop the always-null `status` and add `cvss_score` and `under_evaluation`.
+
+### 7. Legacy sessions
+
+A request without `Mcp-Session-Id` that isn't `initialize` is served without creating a session and gets no session header. Clients that skipped `initialize` and reused that header must initialize first (as the MCP spec requires).
+
 ## Upgrading to 4.3.0
 
 4.3.0 is backward compatible at the protocol and API level, but three behaviors
@@ -32,8 +79,9 @@ AUTH_SECRET_KEY=<32+ char secret>
 
 ### 3. Alerts come from the Indexer, not the Manager
 
-The Manager REST API removed `/alerts` in Wazuh 4.8. Alert, aggregation,
-vulnerability, and alert-backed compliance tools require the Wazuh Indexer:
+The Wazuh Manager REST API has no alerts endpoint, and from Wazuh 4.8 vulnerability data is
+only in the Indexer. Alert, aggregation, vulnerability, and alert-backed compliance tools
+require the Wazuh Indexer (see [WAZUH_COMPATIBILITY.md](WAZUH_COMPATIBILITY.md)):
 
 ```env
 WAZUH_INDEXER_HOST=<indexer-host>
@@ -50,8 +98,9 @@ silently empty results.
 address. Stock Wazuh cannot remove a firewall-drop / hosts.deny block through the
 API, so these tools now require an operator-deployed undo script named via
 `WAZUH_AR_FIREWALL_UNDO_COMMAND` / `WAZUH_AR_HOSTDENY_UNDO_COMMAND`, or they refuse
-with an actionable error. Alternatively, configure `<active-response><timeout>` in
-the manager so blocks expire automatically.
+with an actionable error. (The 4.3.0 notes also suggested an `<active-response><timeout>`
+in the manager so blocks expire; that does not work for API-dispatched commands, see
+"Tool calls" above.)
 
 ### MCP protocol
 

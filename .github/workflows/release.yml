@@ -21,7 +21,7 @@ jobs:
         ref: ${{ github.ref }}
     
     - name: Set up Python
-      uses: actions/setup-python@v6
+      uses: actions/setup-python@v7
       with:
         python-version: '3.13'
     
@@ -76,7 +76,7 @@ jobs:
     - uses: actions/checkout@v7
     
     - name: Download artifacts
-      uses: actions/download-artifact@v4
+      uses: actions/download-artifact@v8
       with:
         name: python-packages
         path: dist/
@@ -89,6 +89,7 @@ jobs:
       id: notes
       run: |
         VERSION="${{ steps.version.outputs.VERSION }}"
+        IMAGE_NAME="${REPO,,}"
         {
           echo "# Wazuh MCP Server ${VERSION}"
           echo
@@ -104,10 +105,15 @@ jobs:
           echo
           echo "## Installation"
           echo '```bash'
-          echo "docker pull ghcr.io/${{ github.repository }}:${VERSION}"
+          # OCI references must be lowercase; github.repository is mixed-case
+          # (gensecaihq/Wazuh-MCP-Server), so a raw interpolation here produced a
+          # pull command that Docker rejects outright.
+          echo "docker pull ghcr.io/${IMAGE_NAME}:${VERSION}"
           echo '```'
           echo "Or build from source — see the [README](https://github.com/${{ github.repository }}#quick-start)."
         } > RELEASE_NOTES.md
+      env:
+        REPO: ${{ github.repository }}
 
     - name: Create Release
       uses: softprops/action-gh-release@v3
@@ -131,7 +137,7 @@ jobs:
 
     steps:
     - name: Download artifacts
-      uses: actions/download-artifact@v4
+      uses: actions/download-artifact@v8
       with:
         name: python-packages
         path: dist/

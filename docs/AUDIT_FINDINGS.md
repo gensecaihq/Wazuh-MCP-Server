@@ -1,5 +1,11 @@
 # Production-Readiness Audit — Findings & Remediation
 
+> **Historical record.** This document describes the production-readiness audit carried out
+> for the v4.3.0 release (August 2026) and the code as it was then. Counts, file references and
+> behavior below may have changed since. Later fixes, including the September 2026 audit, are
+> listed in [CHANGELOG.md](../CHANGELOG.md); current security behavior is documented in
+> [docs/security/README.md](security/README.md).
+
 A block-by-block audit of the server (MCP protocol/dispatch, Wazuh API clients, auth/OAuth,
 security middleware, resilience, config, and the deploy surface). Findings were verified
 against the code by tracing each path; the fixes below are covered by regression tests in
@@ -54,7 +60,9 @@ rotation, and the dual-era MCP protocol negotiation.
   `WAZUH_INDEXER_SSL=1` sent credentials over plain HTTP). A shared strict `env_bool` now accepts
   `1/true/yes/on` and raises on garbage.
 - **`WAZUH_ALLOW_SELF_SIGNED` was a no-op.** Documented but never plumbed into the client. Now
-  wired: effective verify = `WAZUH_VERIFY_SSL and not WAZUH_ALLOW_SELF_SIGNED`.
+  wired: effective verify = `WAZUH_VERIFY_SSL and not WAZUH_ALLOW_SELF_SIGNED`. Its default was
+  later changed to `false` (it silently disabled verification for every default deployment);
+  `WAZUH_CA_BUNDLE` is the supported way to trust stock self-signed certificates.
 
 ### Correctness (Wazuh clients)
 - **Alert totals capped at 10,000.** Document searches lacked `track_total_hits`, so summary/KPI

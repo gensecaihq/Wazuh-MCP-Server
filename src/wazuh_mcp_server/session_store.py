@@ -15,6 +15,11 @@ from typing import Any, Dict, Optional
 logger = logging.getLogger(__name__)
 
 
+class SessionStoreUnavailable(RuntimeError):
+    """The session backend (Redis) could not be reached. Surfaced as HTTP 503 — reporting it
+    as "session not found" would tell every client to re-initialize during an outage."""
+
+
 class SessionStore(ABC):
     """Abstract base class for session storage backends."""
 
@@ -191,7 +196,7 @@ class RedisSessionStore(SessionStore):
             raise ImportError("redis package required for RedisSessionStore")
         except Exception as e:
             logger.error(f"Failed to connect to Redis: {e}")
-            raise ConnectionError(f"Redis connection failed: {e}")
+            raise SessionStoreUnavailable(f"Redis connection failed: {e}") from e
 
     def _session_key(self, session_id: str) -> str:
         """Generate Redis key for session."""
@@ -208,7 +213,7 @@ class RedisSessionStore(SessionStore):
             return None
         except Exception as e:
             logger.error(f"Failed to get session {session_id} from Redis: {e}")
-            return None
+            raise SessionStoreUnavailable(str(e)) from e
 
     async def set(self, session_id: str, session_data: Dict[str, Any]) -> bool:
         """Store session data with TTL."""
@@ -221,7 +226,7 @@ class RedisSessionStore(SessionStore):
             return True
         except Exception as e:
             logger.error(f"Failed to store session {session_id} in Redis: {e}")
-            return False
+            raise SessionStoreUnavailable(str(e)) from e
 
     async def delete(self, session_id: str) -> bool:
         """Delete session by ID."""
@@ -232,7 +237,7 @@ class RedisSessionStore(SessionStore):
             return result > 0
         except Exception as e:
             logger.error(f"Failed to delete session {session_id} from Redis: {e}")
-            return False
+            raise SessionStoreUnavailable(str(e)) from e
 
     async def exists(self, session_id: str) -> bool:
         """Check if session exists."""
@@ -243,7 +248,7 @@ class RedisSessionStore(SessionStore):
             return result > 0
         except Exception as e:
             logger.error(f"Failed to check session {session_id} existence in Redis: {e}")
-            return False
+            raise SessionStoreUnavailable(str(e)) from e
 
     async def _scan_keys(self, pattern: str) -> list:
         """Use SCAN instead of KEYS to avoid O(N) blocking on large Redis databases."""
@@ -274,7 +279,7 @@ class RedisSessionStore(SessionStore):
             return sessions
         except Exception as e:
             logger.error(f"Failed to get all sessions from Redis: {e}")
-            return {}
+            raise SessionStoreUnavailable(str(e)) from e
 
     async def clear(self) -> bool:
         """Clear all sessions."""
@@ -332,13 +337,13 @@ def create_session_store() -> SessionStore:
     redis_url = os.getenv("REDIS_URL")
 
     if redis_url:
-        try:
-            ttl_seconds = int(os.getenv("SESSION_TTL_SECONDS", "1800"))
-            logger.info("Creating RedisSessionStore (Redis URL configured)")
-            return RedisSessionStore(redis_url, ttl_seconds)
-        except Exception as e:
-            logger.warning(f"Failed to create RedisSessionStore: {e}. Falling back to InMemorySessionStore")
-            return InMemorySessionStore()
+        # No silent fallback: with REDIS_URL set the operator expects sessions shared across
+        # replicas, and a per-process store would 404 every request routed to another node.
+        from wazuh_mcp_server.config import validate_positive_int
+
+        ttl_seconds = validate_positive_int(os.getenv("SESSION_TTL_SECONDS", "1800"), "SESSION_TTL_SECONDS")
+        logger.info("Creating RedisSessionStore (Redis URL configured)")
+        return RedisSessionStore(redis_url, ttl_seconds)
     else:
         logger.info("REDIS_URL not configured. Using InMemorySessionStore (not serverless-ready)")
         return InMemorySessionStore()

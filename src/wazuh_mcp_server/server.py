@@ -11,25 +11,26 @@ import logging
 import math
 import os
 import re as _re
+import sys
 import threading
 import time
 import uuid
 from collections import OrderedDict
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Dict, List, Literal, Optional, Tuple, Union
 from urllib.parse import urlparse
 
 from fastapi import FastAPI, Header, HTTPException, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, StreamingResponse
-from pydantic import BaseModel, Field, ValidationError
+from pydantic import BaseModel, Field, ValidationError, field_validator
 
 from wazuh_mcp_server import __version__
 from wazuh_mcp_server.api.wazuh_client import WazuhClient
 from wazuh_mcp_server.api.wazuh_indexer import IndexerNotConfiguredError
 from wazuh_mcp_server.auth import create_access_token
-from wazuh_mcp_server.config import WazuhConfig, get_config
+from wazuh_mcp_server.config import WazuhConfig, get_config, validate_positive_int
 from wazuh_mcp_server.gcf_format import render_result
 from wazuh_mcp_server.monitoring import ACTIVE_CONNECTIONS, setup_monitoring_middleware
 from wazuh_mcp_server.resilience import GracefulShutdown
@@ -37,6 +38,7 @@ from wazuh_mcp_server.security import (
     MAX_JSON_DEPTH,
     RateLimiter,
     ToolValidationError,
+    memory_manager,
     parse_json_body_safe,
     security_manager,
     security_middleware,
@@ -62,7 +64,13 @@ from wazuh_mcp_server.security import (
     validate_timestamp,
     validate_username,
 )
-from wazuh_mcp_server.session_store import SessionStore, create_session_store
+from wazuh_mcp_server.session_store import (
+    RedisSessionStore,
+    SessionStore,
+    SessionStoreUnavailable,
+    create_session_store,
+)
+from wazuh_mcp_server.toolsets import tool_annotations
 
 # MCP Protocol Version Support
 # This is a "dual-era" server per the 2026-07-28 spec: requests carrying modern
@@ -164,14 +172,25 @@ async def _do_verify_authentication(authorization: Optional[str], config) -> Opt
         if _oauth_manager:
             token = authorization.replace("Bearer ", "") if authorization.startswith("Bearer ") else authorization
             token_obj = _oauth_manager.validate_access_token(token)
+            subject = getattr(token_obj, "subject", None) if token_obj else None
+            if subject and getattr(token_obj, "subject_kind", None) == "api_key":
+                # Same binding as bearer JWTs: removing or deactivating the API key the user
+                # signed in with ends their OAuth tokens too, not just at TTL expiry.
+                from wazuh_mcp_server.auth import auth_manager
+
+                key_obj = auth_manager.api_keys.get(subject)
+                if key_obj is None or not key_obj.active:
+                    token_obj = None
             if token_obj:
                 # Return AuthToken with OAuth scopes (fail closed to read-only)
                 scope_str = getattr(token_obj, "scope", "") or ""
                 scopes = scope_str.split() if scope_str else ["wazuh:read"]
-                # Stable per-principal id for rate-limit bucketing: prefer the OAuth
-                # client_id, else the token subject, so distinct clients get distinct
-                # buckets instead of collapsing into one shared "oauth" bucket.
-                oauth_principal = getattr(token_obj, "client_id", None) or getattr(token_obj, "sub", None)
+                # Per-user principal for RBAC audit, rate limiting and session bounds: the API key
+                # the user signed in with, or the person the IdP authenticated. Tokens minted
+                # before sign-in existed carry only the (shared) client id.
+                subject = getattr(token_obj, "subject", None)
+                client = getattr(token_obj, "client_id", None)
+                oauth_principal = f"{client}:{subject}" if subject and client else (subject or client)
                 return AuthToken(
                     token=token,
                     api_key_id=f"oauth:{oauth_principal}" if oauth_principal else "oauth",
@@ -195,12 +214,21 @@ async def _do_verify_authentication(authorization: Optional[str], config) -> Opt
 class MCPRequest(BaseModel):
     """MCP JSON-RPC 2.0 Request."""
 
-    jsonrpc: str = Field(default="2.0", description="JSON-RPC version")
+    jsonrpc: Literal["2.0"] = Field(description="JSON-RPC version (must be exactly 2.0)")
     # JSON-RPC 2.0 permits a Number id, including a non-integral one; float must be allowed
     # or a spec-valid `id: 1.5` fails validation and the error path itself 500s.
     id: Optional[Union[str, int, float]] = Field(default=None, description="Request ID")
     method: str = Field(description="Method name")
     params: Optional[Dict[str, Any]] = Field(default=None, description="Method parameters")
+
+    @field_validator("id")
+    @classmethod
+    def _id_not_null(cls, value):
+        # MCP basic protocol: "the ID MUST NOT be null" (requests without an id are
+        # notifications and never reach this model)
+        if value is None:
+            raise ValueError("request id must not be null")
+        return value
 
 
 class MCPResponse(BaseModel):
@@ -465,6 +493,11 @@ async def _enforce_session_bounds(principal: Optional[str]) -> None:
     re-initialize). The per-principal cap applies to real principals only (see
     _SHARED_PRINCIPALS); "principal" is the API key / OAuth client, not a person.
     """
+    if isinstance(_session_store, RedisSessionStore):
+        # Redis expires sessions itself and holds them outside this process; counting them
+        # meant a keyspace SCAN plus one GET per session on every new session (~1000 round
+        # trips at MAX_SESSIONS). Metadata is still bounded when the session is created.
+        return
     total = await sessions.count()
     per_principal = bool(principal) and principal not in _SHARED_PRINCIPALS
     if total < MAX_SESSIONS and (not per_principal or total < MAX_SESSIONS_PER_PRINCIPAL):
@@ -493,11 +526,25 @@ async def _enforce_session_bounds(principal: Optional[str]) -> None:
         logger.warning(f"Session store at MAX_SESSIONS={MAX_SESSIONS}; evicted least recently active sessions")
 
 
+def _is_initialize(body: Any) -> bool:
+    """True if a JSON-RPC body (single or batch) contains an initialize request."""
+    items = body if isinstance(body, list) else [body]
+    return any(isinstance(item, dict) and item.get("method") == "initialize" for item in items)
+
+
 async def get_or_create_session(
-    session_id: Optional[str], origin: Optional[str], principal: Optional[str] = None
+    session_id: Optional[str], origin: Optional[str], persist: bool = True, principal: Optional[str] = None
 ) -> MCPSession:
-    """Get existing session or create new one."""
+    """Get existing session or create new one.
+
+    persist=False builds a throwaway session for a request that isn't an initialize: the
+    spec assigns session ids only on the InitializeResult, and storing one for every
+    session-less request grew the store by (rate limit x session TTL) per client. Stored
+    sessions are subject to the MAX_SESSIONS / MAX_SESSIONS_PER_PRINCIPAL bounds."""
     global _last_session_cleanup
+
+    if not session_id and not persist:
+        return MCPSession(str(uuid.uuid4()), origin)
 
     if session_id:
         existing_session = await sessions.get(session_id)
@@ -554,6 +601,23 @@ async def lifespan(app: FastAPI):
 
     install_log_sanitizer()
 
+    # Fail at startup, not on the first tool call: an empty WAZUH_HOST used to surface much
+    # later as "Request URL is missing an 'http://' or 'https://' protocol".
+    _startup_cfg = get_config()
+    _missing = [
+        name
+        for name, value in (
+            ("WAZUH_HOST", _startup_cfg.WAZUH_HOST),
+            ("WAZUH_USER", _startup_cfg.WAZUH_USER),
+            ("WAZUH_PASS", _startup_cfg.WAZUH_PASS),
+        )
+        if not value
+    ]
+    if _missing:
+        from wazuh_mcp_server.config import ConfigurationError
+
+        raise ConfigurationError(f"Required Wazuh Manager settings are not set: {', '.join(_missing)}")
+
     logger.info(f"Wazuh MCP Server v{__version__} starting up...")
     logger.info(f"📡 MCP Protocol: {MCP_PROTOCOL_VERSION}")
     logger.info(f"🔗 Wazuh Host: {get_config().WAZUH_HOST}")
@@ -592,12 +656,21 @@ async def lifespan(app: FastAPI):
             from wazuh_mcp_server.auth import auth_manager
 
             default_key = auth_manager.get_default_api_key()
-            if default_key:
-                logger.info("=" * 60)
-                logger.info("🔑 AUTO-GENERATED API KEY (save this for client auth):")
-                logger.info(f"   {default_key}")
-                logger.info("   Set MCP_API_KEY environment variable in production")
-                logger.info("=" * 60)
+            if default_key and cfg.ENVIRONMENT == "development":
+                # Printed outside logging on purpose: the log sanitizer (rightly) redacts
+                # wazuh_* keys, which left the banner showing "wazuh_[REDACTED]" and the
+                # generated key unusable. Development only.
+                print(
+                    f"\n🔑 Auto-generated API key for this process (dev only):\n   {default_key}\n"
+                    "   Exchange it at POST /auth/token. Set MCP_API_KEY for a stable key.\n",
+                    file=sys.stderr,
+                    flush=True,
+                )
+            elif default_key:
+                logger.warning(
+                    "No MCP_API_KEY set: a temporary read-only key was generated and is not shown in "
+                    "production. Set MCP_API_KEY (and MCP_API_KEY_SCOPES) to authenticate clients."
+                )
 
     # Start background session cleanup task (runs every 5 minutes regardless of traffic)
     async def _background_session_cleanup():
@@ -683,6 +756,10 @@ async def lifespan(app: FastAPI):
         auth_manager.tokens.clear()
         logger.info("Authentication tokens cleared")
 
+        # Release the identity-provider HTTP client (OAuth mode with OAUTH_IDP_ISSUER)
+        if _oauth_manager is not None and _oauth_manager.idp is not None:
+            await _oauth_manager.idp.aclose()
+
         # Do NOT clear the session store on shutdown. In-memory sessions vanish with the process
         # anyway, and a shared Redis store is the whole point of multi-instance deployments —
         # wiping it here would 404 every OTHER instance's live sessions on a single pod restart or
@@ -727,30 +804,50 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
+
+@app.exception_handler(SessionStoreUnavailable)
+async def _session_store_unavailable(request: Request, exc: SessionStoreUnavailable):
+    # A Redis outage is a server-side 503, not "session not found" (404 tells clients to re-init)
+    return JSONResponse(
+        status_code=503,
+        content={"error": "Session store unavailable; retry shortly"},
+        headers={"Retry-After": "5"},
+    )
+
+
 # Get configuration
 config = get_config()
 
 # Create Wazuh configuration from server config.
-# WAZUH_ALLOW_SELF_SIGNED is a documented control ("set false in production with a proper CA")
-# but was never plumbed into the client, making it a no-op. Wire it in: httpx has no
-# "verify-but-accept-self-signed" middle ground, so accepting self-signed == not verifying.
-# effective verify = WAZUH_VERIFY_SSL AND NOT WAZUH_ALLOW_SELF_SIGNED. With the shipped defaults
-# (verify=true, allow_self_signed=true) this yields verify=false, matching stock Wazuh's
-# self-signed certs out of the box; setting WAZUH_ALLOW_SELF_SIGNED=false enforces strict verify.
-_wazuh_verify_ssl = config.WAZUH_VERIFY_SSL and not config.WAZUH_ALLOW_SELF_SIGNED
+# Effective TLS verification is computed in ServerConfig (wazuh_tls_verify): httpx has no
+# "verify-but-accept-self-signed" middle ground, so WAZUH_ALLOW_SELF_SIGNED=true means
+# no verification at all. The supported way to trust a private CA or a self-signed
+# Manager certificate is WAZUH_CA_BUNDLE. The API password is sent with HTTP Basic on
+# every (re)authentication, so an unverified channel exposes it to any on-path attacker.
+if config.wazuh_tls_verification_disabled:
+    _tls_msg = (
+        "TLS certificate verification for the Wazuh Manager is DISABLED "
+        "(WAZUH_VERIFY_SSL=false or WAZUH_ALLOW_SELF_SIGNED=true). The API credentials travel "
+        "over an unauthenticated channel. Reissue the Manager API certificate with a subjectAltName "
+        "for WAZUH_HOST and set WAZUH_CA_BUNDLE (docs/configuration.md#manager-tls)."
+    )
+    if config.ENVIRONMENT == "production":
+        logger.error(_tls_msg)
+    else:
+        logger.warning(_tls_msg)
 wazuh_config = WazuhConfig(
     wazuh_host=config.WAZUH_HOST,
     wazuh_user=config.WAZUH_USER,
     wazuh_pass=config.WAZUH_PASS,
     wazuh_port=config.WAZUH_PORT,
-    verify_ssl=_wazuh_verify_ssl,
+    verify_ssl=config.wazuh_tls_verify,
     # Wazuh Indexer settings (required for vulnerability tools in Wazuh 4.8.0+)
     wazuh_indexer_host=config.WAZUH_INDEXER_HOST if config.WAZUH_INDEXER_HOST else None,
     wazuh_indexer_port=config.WAZUH_INDEXER_PORT,
     wazuh_indexer_user=config.WAZUH_INDEXER_USER if config.WAZUH_INDEXER_USER else None,
     wazuh_indexer_pass=config.WAZUH_INDEXER_PASS if config.WAZUH_INDEXER_PASS else None,
     wazuh_indexer_ssl=config.WAZUH_INDEXER_SSL,
-    wazuh_indexer_verify_ssl=config.WAZUH_INDEXER_VERIFY_SSL,
+    wazuh_indexer_verify_ssl=config.wazuh_indexer_tls_verify,
     request_timeout_seconds=config.REQUEST_TIMEOUT_SECONDS,
     max_connections=config.MAX_CONNECTIONS,
     max_alerts_per_query=config.MAX_ALERTS_PER_QUERY,
@@ -775,7 +872,16 @@ async def get_wazuh_client() -> WazuhClient:
 
 
 # Initialize rate limiter
-rate_limiter = RateLimiter(max_requests=RATE_LIMIT_REQUESTS, window_seconds=RATE_LIMIT_WINDOW_SECONDS)
+# Honour RATE_LIMIT_REQUESTS / RATE_LIMIT_WINDOW here too (validated at startup in security.py);
+# the MCP endpoints used hard-coded constants, so the documented knobs never reached them.
+rate_limiter = RateLimiter(
+    max_requests=validate_positive_int(
+        os.getenv("RATE_LIMIT_REQUESTS", str(RATE_LIMIT_REQUESTS)), "RATE_LIMIT_REQUESTS"
+    ),
+    window_seconds=validate_positive_int(
+        os.getenv("RATE_LIMIT_WINDOW", str(RATE_LIMIT_WINDOW_SECONDS)), "RATE_LIMIT_WINDOW", max_val=86400
+    ),
+)
 
 # Initialize graceful shutdown manager
 shutdown_manager = GracefulShutdown()
@@ -787,7 +893,7 @@ def validate_cors_origins(origins_config: str) -> List[str]:
     """Validate and parse CORS origins configuration."""
     if not origins_config or origins_config.strip() == "*":
         # Only allow wildcard in development
-        if os.getenv("ENVIRONMENT") == "development":
+        if get_config().ENVIRONMENT == "development":
             return ["*"]
         else:
             # In production, default to common Claude origins
@@ -846,7 +952,7 @@ def validate_origin_header(origin: Optional[str], allowed_origins_config: str) -
             # must not disable DNS-rebinding protection — the CORS layer already refuses
             # it there (validate_cors_origins), so keep the two layers consistent and
             # require an exact match instead of blanket-allowing every Origin.
-            if os.getenv("ENVIRONMENT", "development").lower() == "development":
+            if get_config().ENVIRONMENT == "development":
                 return
             continue
         if allowed == origin:
@@ -878,6 +984,8 @@ app.add_middleware(
         "X-Requested-With",
         "MCP-Protocol-Version",  # MCP protocol version header
         "MCP-Session-Id",  # Session ID header
+        "Mcp-Method",  # 2026-07-28: required on every request
+        "Mcp-Name",  # 2026-07-28: required on tools/call, prompts/get, resources/read
         "Last-Event-ID",  # SSE reconnection header
     ],  # Specific headers only, no wildcard
     expose_headers=["MCP-Session-Id", "MCP-Protocol-Version", "Content-Type"],
@@ -892,8 +1000,7 @@ MCP_ERRORS = {
     "INVALID_PARAMS": -32602,
     "INTERNAL_ERROR": -32603,
     "TIMEOUT": -32001,
-    "CANCELLED": -32002,
-    "RESOURCE_NOT_FOUND": -32003,
+    "RESOURCE_NOT_FOUND": -32002,  # MCP resources spec
     # 2026-07-28 spec-reserved range (-32020 to -32099)
     "HEADER_MISMATCH": -32020,
     "MISSING_CLIENT_CAPABILITY": -32021,
@@ -912,6 +1019,21 @@ def _rate_limit_key(request: Request, auth_token: Any = None) -> str:
     ip = security_manager.get_client_ip(request)
     api_key_id = getattr(auth_token, "api_key_id", None) or "anon"
     return f"{api_key_id}|{ip}"
+
+
+async def _authenticate(request: Request, authorization: Optional[str]) -> Any:
+    """verify_authentication, with failed attempts counted against a per-IP bucket.
+
+    The MCP endpoints rate-limit per principal *after* authenticating, so bad tokens were
+    never limited at all (250 x 401 in a row). A client that keeps failing now gets 429."""
+    try:
+        return await verify_authentication(authorization, config)
+    except HTTPException as exc:
+        if exc.status_code == 401:
+            allowed, retry_after = rate_limiter.is_allowed(f"authfail|{security_manager.get_client_ip(request)}")
+            if not allowed:
+                raise _rate_limited_response(retry_after)
+        raise
 
 
 def _rate_limited_response(retry_after: Optional[int]) -> HTTPException:
@@ -955,7 +1077,7 @@ def create_error_response(
     # Normalize the id defensively: legacy error paths pass the raw body id, which may be a
     # list/object/non-finite float. Coercing to a valid JSON-RPC id here means building the
     # error response can never itself raise and turn a client mistake into an HTTP 500.
-    return MCPResponse(id=_normalize_jsonrpc_id(request_id), error=error.dict())
+    return MCPResponse(id=_normalize_jsonrpc_id(request_id), error=error.model_dump())
 
 
 def create_success_response(request_id: Optional[Union[str, int]], result: Any) -> MCPResponse:
@@ -1240,6 +1362,8 @@ async def handle_logging_set_level(params: Dict[str, Any], session: MCPSession) 
     """
     global _current_log_level
     level = params.get("level", "info")
+    if not isinstance(level, str):
+        raise ValueError("level must be a string")
 
     valid_levels = ["debug", "info", "notice", "warning", "error", "critical", "alert", "emergency"]
     if level.lower() not in valid_levels:
@@ -1353,10 +1477,12 @@ async def handle_prompts_get(params: Dict[str, Any], session: MCPSession) -> Dic
     Returns prompt content with substituted arguments.
     """
     name = params.get("name")
-    arguments = params.get("arguments", {})
+    arguments = params.get("arguments") or {}
 
-    if not name:
+    if not name or not isinstance(name, str):
         raise ValueError("Prompt name is required")
+    if not isinstance(arguments, dict):
+        raise ValueError("arguments must be an object")
 
     # Prompt templates
     prompt_templates = {
@@ -1538,6 +1664,13 @@ async def handle_resources_list(params: Dict[str, Any], session: MCPSession) -> 
     return {"resources": resources}
 
 
+class ResourceNotFound(ValueError):
+    """resources/read for a URI this server doesn't serve (-32002 per the MCP spec)."""
+
+
+_AGENT_RESOURCE = _re.compile(r"^agents/([0-9]{1,5})/(info|alerts|vulnerabilities)$")
+
+
 async def handle_resources_read(params: Dict[str, Any], session: MCPSession) -> Dict[str, Any]:
     """
     Handle resources/read method per MCP specification.
@@ -1545,17 +1678,28 @@ async def handle_resources_read(params: Dict[str, Any], session: MCPSession) -> 
     """
     uri = params.get("uri")
 
-    if not uri:
+    if not uri or not isinstance(uri, str):
         raise ValueError("Resource URI is required")
 
     # Parse Wazuh resource URI
     if not uri.startswith("wazuh://"):
-        raise ValueError(f"Invalid resource URI scheme: {uri}. Expected wazuh://")
+        raise ResourceNotFound(f"Resource not found: {uri} (expected a wazuh:// URI)")
 
     resource_path = uri[8:]  # Remove "wazuh://"
+    agent_match = _AGENT_RESOURCE.match(resource_path)
 
     try:
-        if resource_path == "manager/info":
+        if agent_match:
+            # The three templates advertised by resources/templates/list
+            agent_id = validate_agent_id(agent_match.group(1), required=True)
+            kind = agent_match.group(2)
+            if kind == "info":
+                data = await wazuh_client.get_agents(agent_id=agent_id)
+            elif kind == "alerts":
+                data = await wazuh_client.get_alerts(limit=50, agent_id=agent_id)
+            else:
+                data = await wazuh_client.get_vulnerabilities(agent_id=agent_id, limit=100)
+        elif resource_path == "manager/info":
             data = await wazuh_client.get_manager_info()
         elif resource_path == "agents/summary":
             data = await wazuh_client.get_running_agents()
@@ -1568,15 +1712,17 @@ async def handle_resources_read(params: Dict[str, Any], session: MCPSession) -> 
         elif resource_path == "vulnerabilities/critical":
             data = await wazuh_client.get_critical_vulnerabilities(limit=50)
         else:
-            raise ValueError(f"Resource not found: {uri}")
-
-        return {
-            "contents": [{"uri": uri, "mimeType": "application/json", "text": json.dumps(data, indent=2, default=str)}]
-        }
-
+            raise ResourceNotFound(f"Resource not found: {uri}")
+    except ResourceNotFound:
+        raise
     except Exception as e:
+        # A backend failure is an internal error, not bad params — and its text can carry
+        # internal hosts/usernames, so it goes to the log, not the client.
         logger.error(f"Error reading resource {uri}: {e}")
-        raise ValueError(f"Failed to read resource: {str(e)}")
+        raise RuntimeError("Failed to read resource") from e
+
+    text = _sanitize_output_text(json.dumps(data, indent=2, default=str))
+    return {"contents": [{"uri": uri, "mimeType": "application/json", "text": text}]}
 
 
 async def handle_resources_templates_list(params: Dict[str, Any], session: MCPSession) -> Dict[str, Any]:
@@ -1613,8 +1759,12 @@ async def handle_completion_complete(params: Dict[str, Any], session: MCPSession
     Handle completion/complete method per MCP specification.
     Returns argument completion suggestions.
     """
-    ref = params.get("ref", {})
-    argument = params.get("argument", {})
+    ref = params.get("ref") or {}
+    argument = params.get("argument") or {}
+    if not isinstance(ref, dict) or not isinstance(argument, dict):
+        raise ValueError("ref and argument must be objects")
+    if not isinstance(argument.get("value", ""), str) or not isinstance(argument.get("name", ""), str):
+        raise ValueError("argument name and value must be strings")
 
     ref_type = ref.get("type")
     # Prompt refs identify by `name`; resource refs identify by `uri` (per MCP spec).
@@ -1779,6 +1929,22 @@ def _arg_is_true(value: Any) -> bool:
     return False
 
 
+def _reject_block_duration(arguments: Dict[str, Any]) -> None:
+    """Per-call block durations can't work: the Wazuh agent sets the timeout to 0 for every
+    API-dispatched '!script' command (os_execd GetCommandbyName), so a "1 hour" block was
+    silently permanent. Refuse a positive duration instead of implying it will expire."""
+    duration = arguments.get("duration")
+    if duration is None:
+        return
+    if validate_limit(duration, min_val=0, max_val=86400, param_name="duration") > 0:
+        raise ToolValidationError(
+            "duration",
+            "per-call block durations are not supported: Wazuh ignores the timeout for API-triggered "
+            "active response, so the block would be permanent",
+            "Omit duration; remove the block later with wazuh_firewall_allow",
+        )
+
+
 def _require_action_confirmation() -> bool:
     """Whether state-changing tools require an explicit confirm=true (env-gated, default off)."""
     return os.getenv("WAZUH_REQUIRE_ACTION_CONFIRMATION", "false").strip().lower() in ("true", "1", "yes")
@@ -1812,9 +1978,12 @@ async def handle_tools_list(params: Dict[str, Any], session: MCPSession) -> Dict
             "inputSchema": {
                 "type": "object",
                 "properties": {
-                    "limit": {"type": "integer", "minimum": 1, "maximum": 1000, "default": 100},
+                    "limit": {"type": "integer", "minimum": 1, "maximum": config.MAX_ALERTS_PER_QUERY, "default": 100},
                     "rule_id": {"type": "string", "description": "Filter by specific rule ID"},
-                    "level": {"type": "string", "description": "Filter by alert level (e.g., '12', '10+')"},
+                    "level": {
+                        "type": "string",
+                        "description": "Minimum alert level: '10' (or '10+') returns level 10 and above",
+                    },
                     "agent_id": {"type": "string", "description": "Filter by agent ID"},
                     "rule_groups": {
                         "type": "array",
@@ -1850,7 +2019,11 @@ async def handle_tools_list(params: Dict[str, Any], session: MCPSession) -> Dict
                         "enum": ["1h", "6h", "12h", "1d", "24h", "7d", "30d"],
                         "default": "24h",
                     },
-                    "group_by": {"type": "string", "default": "rule.level"},
+                    "group_by": {
+                        "type": "string",
+                        "enum": ["rule.level", "rule.id", "rule.groups", "agent.id", "agent.name"],
+                        "default": "rule.level",
+                    },
                 },
                 "required": [],
             },
@@ -1866,7 +2039,7 @@ async def handle_tools_list(params: Dict[str, Any], session: MCPSession) -> Dict
                         "enum": ["1h", "6h", "12h", "1d", "24h", "7d", "30d"],
                         "default": "24h",
                     },
-                    "min_frequency": {"type": "integer", "minimum": 1, "default": 5},
+                    "min_frequency": {"type": "integer", "minimum": 1, "maximum": 1000, "default": 5},
                 },
                 "required": [],
             },
@@ -1920,7 +2093,7 @@ async def handle_tools_list(params: Dict[str, Any], session: MCPSession) -> Dict
                         "enum": ["1h", "6h", "12h", "1d", "24h", "7d", "30d"],
                         "default": "24h",
                     },
-                    "limit": {"type": "integer", "minimum": 1, "maximum": 1000, "default": 100},
+                    "limit": {"type": "integer", "minimum": 1, "maximum": config.MAX_ALERTS_PER_QUERY, "default": 100},
                     "rule_id": {"type": "string", "description": "Filter by Wazuh rule ID (e.g., '5710', '100002')"},
                     "agent_id": {"type": "string", "description": "Filter by Wazuh agent ID (e.g., '001', '1234')"},
                     "level": {
@@ -2044,10 +2217,17 @@ async def handle_tools_list(params: Dict[str, Any], session: MCPSession) -> Dict
         },
         {
             "name": "get_wazuh_vulnerability_summary",
-            "description": "Get vulnerability summary statistics from Wazuh Indexer (requires WAZUH_INDEXER_HOST configuration)",
+            "description": "Get vulnerability counts by severity from Wazuh Indexer (requires WAZUH_INDEXER_HOST configuration). Covers all currently open vulnerabilities unless time_range is given",
             "inputSchema": {
                 "type": "object",
-                "properties": {"time_range": {"type": "string", "enum": ["1d", "7d", "30d"], "default": "7d"}},
+                "properties": {
+                    "time_range": {
+                        "type": "string",
+                        "enum": ["1d", "7d", "30d"],
+                        "description": "Only count vulnerabilities first detected within this window",
+                    },
+                    "agent_id": {"type": "string", "description": "Only count vulnerabilities on this agent"},
+                },
                 "required": [],
             },
         },
@@ -2313,7 +2493,7 @@ async def handle_tools_list(params: Dict[str, Any], session: MCPSession) -> Dict
                 "type": "object",
                 "properties": {
                     "query": {"type": "string", "description": "Search query/pattern"},
-                    "limit": {"type": "integer", "minimum": 1, "maximum": 1000, "default": 100},
+                    "limit": {"type": "integer", "minimum": 1, "maximum": 500, "default": 100},
                 },
                 "required": ["query"],
             },
@@ -2323,7 +2503,7 @@ async def handle_tools_list(params: Dict[str, Any], session: MCPSession) -> Dict
             "description": "Get recent error logs from Wazuh manager",
             "inputSchema": {
                 "type": "object",
-                "properties": {"limit": {"type": "integer", "minimum": 1, "maximum": 1000, "default": 100}},
+                "properties": {"limit": {"type": "integer", "minimum": 1, "maximum": 500, "default": 100}},
                 "required": [],
             },
         },
@@ -2335,17 +2515,11 @@ async def handle_tools_list(params: Dict[str, Any], session: MCPSession) -> Dict
         # Active Response / Action Tools (9 tools)
         {
             "name": "wazuh_block_ip",
-            "description": "[ACTION] Block an IP address via Wazuh active response firewall-drop. Risk: LOW, Reversible.",
+            "description": "[ACTION] Block an IP address via Wazuh active response firewall-drop. The block is permanent until removed; wazuh_firewall_allow needs an operator-deployed undo script (WAZUH_AR_FIREWALL_UNDO_COMMAND).",
             "inputSchema": {
                 "type": "object",
                 "properties": {
                     "ip_address": {"type": "string", "description": "IP address to block"},
-                    "duration": {
-                        "type": "integer",
-                        "minimum": 0,
-                        "default": 0,
-                        "description": "Block duration in seconds (0 = permanent). Advisory only: actual expiry is governed by the manager's active-response <timeout> configuration, not per-call.",
-                    },
                     "agent_id": {
                         "type": "string",
                         "description": "Target agent ID. Required unless all_agents=true is set.",
@@ -2376,7 +2550,12 @@ async def handle_tools_list(params: Dict[str, Any], session: MCPSession) -> Dict
                 "type": "object",
                 "properties": {
                     "agent_id": {"type": "string", "description": "ID of the agent"},
-                    "process_id": {"type": "integer", "description": "PID of the process to kill"},
+                    "process_id": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 999999,
+                        "description": "PID of the process to kill",
+                    },
                 },
                 "required": ["agent_id", "process_id"],
             },
@@ -2426,12 +2605,6 @@ async def handle_tools_list(params: Dict[str, Any], session: MCPSession) -> Dict
                 "properties": {
                     "agent_id": {"type": "string", "description": "ID of the agent"},
                     "src_ip": {"type": "string", "description": "Source IP address to drop"},
-                    "duration": {
-                        "type": "integer",
-                        "minimum": 0,
-                        "default": 0,
-                        "description": "Duration in seconds (0 = permanent)",
-                    },
                 },
                 "required": ["agent_id", "src_ip"],
             },
@@ -2491,7 +2664,7 @@ async def handle_tools_list(params: Dict[str, Any], session: MCPSession) -> Dict
                 "type": "object",
                 "properties": {
                     "agent_id": {"type": "string", "description": "ID of the agent"},
-                    "process_id": {"type": "integer", "description": "PID to check"},
+                    "process_id": {"type": "integer", "minimum": 1, "maximum": 999999, "description": "PID to check"},
                 },
                 "required": ["agent_id", "process_id"],
             },
@@ -2600,13 +2773,62 @@ async def handle_tools_list(params: Dict[str, Any], session: MCPSession) -> Dict
             }
         )
 
+    # Operator-selected exposure (WAZUH_TOOLSETS / WAZUH_DISABLED_TOOLS)
+    tools = [t for t in tools if t["name"] in config.ENABLED_TOOLS]
+
     # Filter tools by session scopes: hide write tools from read-only or unknown tokens
     auth_token = getattr(session, "_auth_token", None)
     if not auth_token or not auth_token.has_scope("wazuh:write"):
         tools = [t for t in tools if t["name"] not in WRITE_SCOPE_TOOLS]
 
+    require_confirm = _require_action_confirmation()
+    for t in tools:
+        schema = t["inputSchema"]
+        if require_confirm and t["name"] in WRITE_SCOPE_TOOLS:
+            # The gate in handle_tools_call reads `confirm`; with a closed schema it must be declared
+            schema.setdefault("properties", {}).setdefault(
+                "confirm",
+                {"type": "boolean", "description": "Set true only after a human operator approved this exact action"},
+            )
+        # Closed argument schemas: lets strict function calling (vLLM --tool-strict-level,
+        # OpenAI strict mode) constrain decoding and makes clients reject invented params.
+        schema["additionalProperties"] = False
+        t["annotations"] = tool_annotations(t["name"], WRITE_SCOPE_TOOLS)
+
     # Pagination support per MCP spec
     return {"tools": tools}  # No more tools
+
+
+_TOOL_ARGUMENT_NAMES: Optional[Dict[str, frozenset]] = None
+
+# Upper bound on one tool result's text (~1 MB). Compact queries stay well under it.
+MAX_TOOL_RESPONSE_CHARS = validate_positive_int(
+    os.getenv("MAX_TOOL_RESPONSE_CHARS", "1000000"), "MAX_TOOL_RESPONSE_CHARS"
+)
+
+# Accepted for backward compatibility but no longer advertised: `duration` is refused when
+# positive (see _reject_block_duration) and harmless at 0, which older clients still send.
+_UNADVERTISED_ARGUMENTS = {"wazuh_block_ip": {"duration"}, "wazuh_firewall_drop": {"duration"}}
+
+
+async def _tool_argument_names(tool_name: str) -> Optional[frozenset]:
+    """Declared inputSchema properties for a tool, taken from the tools/list definitions."""
+    global _TOOL_ARGUMENT_NAMES
+    if _TOOL_ARGUMENT_NAMES is None:
+        from wazuh_mcp_server.auth import AuthToken
+
+        schema_session = MCPSession("schema-introspection", None)
+        schema_session._auth_token = AuthToken(
+            token="", api_key_id="schema", created_at=datetime.now(timezone.utc), scopes=["wazuh:read", "wazuh:write"]
+        )
+        listed = (await handle_tools_list({}, schema_session))["tools"]
+        # cluster_id and confirm are consumed before this check, so they never count as unknown
+        _TOOL_ARGUMENT_NAMES = {
+            t["name"]: (frozenset(t["inputSchema"].get("properties", {})) - {"cluster_id", "confirm"})
+            | frozenset(_UNADVERTISED_ARGUMENTS.get(t["name"], ()))
+            for t in listed
+        }
+    return _TOOL_ARGUMENT_NAMES.get(tool_name)
 
 
 async def handle_tools_call(params: Dict[str, Any], session: MCPSession) -> Dict[str, Any]:
@@ -2646,17 +2868,26 @@ async def handle_tools_call(params: Dict[str, Any], session: MCPSession) -> Dict
     if tool_name not in READ_SCOPE_TOOLS and tool_name not in WRITE_SCOPE_TOOLS:
         raise ValueError(f"Unknown tool: {tool_name}. Use 'tools/list' to see available tools.")
 
+    # The gates below refuse a *known* tool for a business reason. Per the MCP tools spec those
+    # are tool execution errors (isError: true), which clients pass to the model — as JSON-RPC
+    # protocol errors the model might never see e.g. the "re-invoke with confirm=true" guidance.
+    def _refused(text: str) -> Dict[str, Any]:
+        return {"content": [{"type": "text", "text": text}], "isError": True}
+
+    if tool_name not in config.ENABLED_TOOLS:
+        return _refused(f"Tool '{tool_name}' is disabled on this server (WAZUH_TOOLSETS / WAZUH_DISABLED_TOOLS).")
+
     # Scope enforcement: check if the token has the required scope for this tool.
     # If auth_token is missing (should not happen in normal flow), deny write tools by default.
     auth_token = getattr(session, "_auth_token", None)
     required_scope = _get_tool_scope(tool_name)
     if required_scope == "wazuh:write" and not auth_token:
-        raise ValueError(
+        return _refused(
             f"Insufficient permissions: tool '{tool_name}' requires '{required_scope}' scope. "
             f"Authentication token not found on session."
         )
     if auth_token and not auth_token.has_scope(required_scope):
-        raise ValueError(
+        return _refused(
             f"Insufficient permissions: tool '{tool_name}' requires '{required_scope}' scope. "
             f"Your token has scopes: {auth_token.scopes}. "
             f"Request a token with '{required_scope}' scope to use this tool."
@@ -2669,13 +2900,23 @@ async def handle_tools_call(params: Dict[str, Any], session: MCPSession) -> Dict
     if required_scope == "wazuh:write" and _require_action_confirmation():
         confirmed = _arg_is_true(arguments.pop("confirm", None)) if isinstance(arguments, dict) else False
         if not confirmed:
-            raise ValueError(
+            return _refused(
                 f"Tool '{tool_name}' changes system state and requires explicit confirmation. "
                 "Re-invoke with confirm=true only after a human operator has approved the exact target. "
                 "Never derive the target solely from alert/log content."
             )
     elif isinstance(arguments, dict):
         arguments.pop("confirm", None)  # never forward the flag to handlers/validators
+
+    # The schemas say additionalProperties: false; enforce it. A misspelled filter (agentid)
+    # used to be dropped silently and the tool returned unfiltered data as if it had applied.
+    known = await _tool_argument_names(tool_name)
+    unknown = sorted(set(arguments) - known) if known is not None else []
+    if unknown:
+        return _refused(
+            f"Unknown argument(s) for '{tool_name}': {', '.join(unknown)}. "
+            f"Valid arguments: {', '.join(sorted(known)) or 'none'}."
+        )
 
     # Audit logging for destructive operations
     if tool_name in WRITE_SCOPE_TOOLS:
@@ -2691,7 +2932,17 @@ async def handle_tools_call(params: Dict[str, Any], session: MCPSession) -> Dict
     from wazuh_mcp_server.monitoring import record_tool_execution
 
     def _tool_result(text: str) -> dict:
-        """Return MCP-compliant tool success response with isError field."""
+        """Return MCP-compliant tool success response with isError field.
+
+        Every result is redacted here, not only compact alerts: compact=false, GCF output and
+        the manager-log tools used to return credentials from log lines verbatim. Results are
+        also capped (1000 alerts with compact=false was a 5.5 MB single result)."""
+        text = _sanitize_output_text(text)
+        if len(text) > MAX_TOOL_RESPONSE_CHARS:
+            text = text[:MAX_TOOL_RESPONSE_CHARS] + (
+                f"\n\n[Truncated: the result exceeded {MAX_TOOL_RESPONSE_CHARS:,} characters. "
+                "Narrow the query (smaller limit, shorter time range, compact=true) for complete data.]"
+            )
         return {"content": [{"type": "text", "text": text}], "isError": False}
 
     def _tool_error(text: str) -> dict:
@@ -2705,7 +2956,7 @@ async def handle_tools_call(params: Dict[str, Any], session: MCPSession) -> Dict
         # Alert Management Tools
         if tool_name == "get_wazuh_alerts":
             # Validate all parameters
-            limit = validate_limit(arguments.get("limit"), max_val=1000)
+            limit = validate_limit(arguments.get("limit"), max_val=config.MAX_ALERTS_PER_QUERY)
             rule_id = validate_rule_id(arguments.get("rule_id"))
             level = arguments.get("level")
             # Validate level format: must be a number optionally followed by "+"
@@ -2745,7 +2996,7 @@ async def handle_tools_call(params: Dict[str, Any], session: MCPSession) -> Dict
             group_by = arguments.get("group_by", "rule.level")
             # Validate group_by to prevent injection (only allow safe dotted field paths)
             VALID_GROUP_BY = {"rule.level", "rule.id", "rule.groups", "agent.id", "agent.name"}
-            if group_by not in VALID_GROUP_BY:
+            if not isinstance(group_by, str) or group_by not in VALID_GROUP_BY:
                 raise ToolValidationError(
                     "group_by",
                     f"invalid value '{group_by}'",
@@ -2787,7 +3038,7 @@ async def handle_tools_call(params: Dict[str, Any], session: MCPSession) -> Dict
         elif tool_name == "search_security_events":
             query = validate_query(arguments.get("query"), required=True)
             time_range = validate_time_range(arguments.get("time_range"))
-            limit = validate_limit(arguments.get("limit"), max_val=1000)
+            limit = validate_limit(arguments.get("limit"), max_val=config.MAX_ALERTS_PER_QUERY)
             compact = validate_boolean(arguments.get("compact"), default=True, param_name="compact")
             rule_id = validate_rule_id(arguments.get("rule_id"))
             agent_id = validate_agent_id(arguments.get("agent_id"))
@@ -2889,8 +3140,15 @@ async def handle_tools_call(params: Dict[str, Any], session: MCPSession) -> Dict
             return _tool_result(render_result("Critical Vulnerabilities", result, compact=compact))
 
         elif tool_name == "get_wazuh_vulnerability_summary":
-            time_range = validate_time_range(arguments.get("time_range"))
-            result = await wazuh_client.get_vulnerability_summary(time_range)
+            # No time_range = every currently open vulnerability; with one, only those first
+            # detected inside the window.
+            time_range = arguments.get("time_range")
+            if time_range is not None:
+                time_range = validate_time_range(time_range)
+                if time_range not in ("1d", "7d", "30d"):
+                    raise ToolValidationError("time_range", f"invalid value '{time_range}'", "Use one of: 1d, 7d, 30d")
+            agent_id = validate_agent_id(arguments.get("agent_id"))
+            result = await wazuh_client.get_vulnerability_summary(time_range, agent_id=agent_id)
             _success = True
             return _tool_result(f"Vulnerability Summary:\n{json.dumps(result, indent=2, default=str)}")
 
@@ -3025,14 +3283,14 @@ async def handle_tools_call(params: Dict[str, Any], session: MCPSession) -> Dict
 
         elif tool_name == "search_wazuh_manager_logs":
             query = validate_query(arguments.get("query"), required=True)
-            limit = validate_limit(arguments.get("limit"), max_val=1000)
+            limit = validate_limit(arguments.get("limit"), max_val=500)  # /manager/logs caps limit at 500
 
             result = await wazuh_client.search_manager_logs(query, limit)
             _success = True
             return _tool_result(f"Manager Logs:\n{json.dumps(result, indent=2, default=str)}")
 
         elif tool_name == "get_wazuh_manager_error_logs":
-            limit = validate_limit(arguments.get("limit"), max_val=1000)
+            limit = validate_limit(arguments.get("limit"), max_val=500)  # /manager/logs caps limit at 500
             result = await wazuh_client.get_manager_error_logs(limit)
             _success = True
             return _tool_result(f"Manager Error Logs:\n{json.dumps(result, indent=2, default=str)}")
@@ -3045,17 +3303,13 @@ async def handle_tools_call(params: Dict[str, Any], session: MCPSession) -> Dict
         # Active Response / Action Tools
         elif tool_name == "wazuh_block_ip":
             ip_address = validate_ip_address(arguments.get("ip_address"), required=True)
-            duration = (
-                validate_limit(arguments.get("duration"), min_val=0, max_val=86400, param_name="duration")
-                if arguments.get("duration") is not None
-                else 0
-            )
+            _reject_block_duration(arguments)
             agent_id = validate_agent_id(arguments.get("agent_id"))
             # Strict boolean: raw bool("false") is True, which would turn an explicit
             # all_agents="false" (LLMs routinely send stringly-typed booleans) into a
             # fleet-wide block. validate_boolean maps "false"/"0"/"no"/"off" → False.
             all_agents = validate_boolean(arguments.get("all_agents"), default=False, param_name="all_agents")
-            result = await wazuh_client.block_ip(ip_address, duration, agent_id, all_agents=all_agents)
+            result = await wazuh_client.block_ip(ip_address, agent_id=agent_id, all_agents=all_agents)
             _success = True
             return _tool_result(f"Block IP Result:\n{json.dumps(result, indent=2, default=str)}")
 
@@ -3098,6 +3352,10 @@ async def handle_tools_call(params: Dict[str, Any], session: MCPSession) -> Dict
             _guard_manager_agent(agent_id, tool_name)
             command = validate_active_response_command(arguments.get("command"), required=True)
             parameters = arguments.get("parameters")
+            if parameters is not None and not isinstance(parameters, dict):
+                raise ToolValidationError(
+                    "parameters", f"must be an object, got {type(parameters).__name__}", 'e.g. {"srcip": "1.2.3.4"}'
+                )
             result = await wazuh_client.run_active_response(agent_id, command, parameters)
             _success = True
             return _tool_result(f"Active Response Result:\n{json.dumps(result, indent=2, default=str)}")
@@ -3105,12 +3363,8 @@ async def handle_tools_call(params: Dict[str, Any], session: MCPSession) -> Dict
         elif tool_name == "wazuh_firewall_drop":
             agent_id = validate_agent_id(arguments.get("agent_id"), required=True)
             src_ip = validate_ip_address(arguments.get("src_ip"), required=True, param_name="src_ip")
-            duration = (
-                validate_limit(arguments.get("duration"), min_val=0, max_val=86400, param_name="duration")
-                if arguments.get("duration") is not None
-                else 0
-            )
-            result = await wazuh_client.firewall_drop(agent_id, src_ip, duration)
+            _reject_block_duration(arguments)
+            result = await wazuh_client.firewall_drop(agent_id, src_ip)
             _success = True
             return _tool_result(f"Firewall Drop Result:\n{json.dumps(result, indent=2, default=str)}")
 
@@ -3341,6 +3595,8 @@ async def process_mcp_request(request: MCPRequest, session: MCPSession) -> MCPRe
 
         return create_success_response(request.id, result)
 
+    except ResourceNotFound as e:
+        return create_error_response(request.id, MCP_ERRORS["RESOURCE_NOT_FOUND"], str(e))
     except ValueError as e:
         return create_error_response(request.id, MCP_ERRORS["INVALID_PARAMS"], str(e))
     except Exception as e:
@@ -3572,6 +3828,9 @@ async def generate_sse_events(session: MCPSession, event_id_counter: int = 0, tr
         event_id_counter: Starting event ID
         track_connection: If True, decrement ACTIVE_CONNECTIONS when stream ends
     """
+    # Event ids must be unique across every stream of a session (spec), so prefix them with a
+    # per-stream id instead of restarting at 1 on each GET.
+    stream_id = uuid.uuid4().hex[:12]
     event_id = event_id_counter
 
     try:
@@ -3579,32 +3838,13 @@ async def generate_sse_events(session: MCPSession, event_id_counter: int = 0, tr
         # consisting of an event ID and an empty data field in order to prime
         # the client to reconnect (using that event ID as Last-Event-ID)"
         event_id += 1
-        yield f"id: {event_id}\nretry: 3000\ndata: \n\n"
+        yield f"id: {stream_id}-{event_id}\nretry: 3000\ndata: \n\n"
 
-        # Send session info as a JSON-RPC notification
-        event_id += 1
-        session_notification = {"jsonrpc": "2.0", "method": "notifications/session", "params": session.to_dict()}
-        yield f"id: {event_id}\nevent: message\ndata: {json.dumps(session_notification)}\n\n"
-
-        # Send capabilities notification
-        event_id += 1
-        capabilities_notification = {
-            "jsonrpc": "2.0",
-            "method": "notifications/capabilities",
-            "params": {"tools": True, "resources": True, "prompts": True, "logging": True},
-        }
-        yield f"id: {event_id}\nevent: message\ndata: {json.dumps(capabilities_notification)}\n\n"
-
-        # Send periodic keepalive (ping) to maintain connection
+        # Keepalive as an SSE comment: clients ignore it by definition. The previous
+        # notifications/session|capabilities|ping messages aren't MCP methods.
         while True:
-            event_id += 1
-            ping_notification = {
-                "jsonrpc": "2.0",
-                "method": "notifications/ping",
-                "params": {"timestamp": datetime.now(timezone.utc).isoformat()},
-            }
-            yield f"id: {event_id}\nevent: message\ndata: {json.dumps(ping_notification)}\n\n"
             await asyncio.sleep(30)
+            yield ": keepalive\n\n"
     except (asyncio.CancelledError, GeneratorExit):
         logger.debug(f"SSE connection closed for session {session.session_id}")
     finally:
@@ -3636,14 +3876,24 @@ async def mcp_endpoint(
     accept: Optional[str] = Header(None),
     mcp_session_id: Optional[str] = Header(None, alias="MCP-Session-Id"),
     last_event_id: Optional[str] = Header(None, alias="Last-Event-ID"),
+    mcp_protocol_version: Optional[str] = Header(None, alias="MCP-Protocol-Version"),
 ):
     """
     Main MCP protocol endpoint supporting both GET and POST.
     GET: Returns SSE stream for real-time communication
     POST: Handles JSON-RPC requests
     """
+    # Same version gate as /mcp (spec: an unsupported MCP-Protocol-Version gets 400)
+    if mcp_protocol_version and mcp_protocol_version not in SUPPORTED_PROTOCOL_VERSIONS:
+        return _modern_error_response(
+            None,
+            MCP_ERRORS["UNSUPPORTED_PROTOCOL_VERSION"],
+            "Unsupported protocol version",
+            data={"supported": SUPPORTED_PROTOCOL_VERSIONS, "requested": mcp_protocol_version},
+        )
+
     # Verify authentication based on configured mode
-    auth_token = await verify_authentication(authorization, config)
+    auth_token = await _authenticate(request, authorization)
 
     # Track active connections (request counting handled by monitoring middleware)
     ACTIVE_CONNECTIONS.inc()
@@ -3694,7 +3944,13 @@ async def mcp_endpoint(
             session.update_activity()
             await sessions.set(mcp_session_id, session)
         else:
-            session = await get_or_create_session(None, origin, principal=_principal_of(auth_token))
+            # Only an initialize (or a GET stream) starts a stored session
+            session = await get_or_create_session(
+                None,
+                origin,
+                persist=request.method == "GET" or _is_initialize(body),
+                principal=_principal_of(auth_token),
+            )
 
         session._auth_token = auth_token  # Store token for scope checks in tool handlers
 
@@ -3750,7 +4006,12 @@ async def mcp_endpoint(
 
                 # Per MCP Streamable HTTP spec: If the input consists solely of
                 # notifications or responses, return HTTP 202 Accepted with no body
-                has_requests = any(is_json_rpc_request(item) if isinstance(item, dict) else False for item in body)
+                # Anything that isn't a well-formed notification/response is answered, not dropped:
+                # [1, 2] or [{"jsonrpc": "2.0", "id": 1}] must get Invalid Request errors (JSON-RPC 2.0)
+                has_requests = any(
+                    not (isinstance(item, dict) and (is_json_rpc_notification(item) or is_json_rpc_response(item)))
+                    for item in body
+                )
 
                 if not has_requests:
                     # Process all notifications before returning 202
@@ -3865,68 +4126,18 @@ async def mcp_endpoint(
             ACTIVE_CONNECTIONS.dec()
 
 
-# Official MCP Remote Server SSE endpoint - as per Anthropic standards
-@app.get("/sse")
-async def mcp_sse_endpoint(
-    request: Request,
-    authorization: str = Header(None),
-    origin: Optional[str] = Header(None),
-    mcp_session_id: Optional[str] = Header(None, alias="MCP-Session-Id"),
-    last_event_id: Optional[str] = Header(None, alias="Last-Event-ID"),
-):
-    """
-    Official MCP SSE endpoint following Anthropic standards.
-    URL format: https://<server_address>/sse
-    This is the standard endpoint that Claude Desktop connects to.
-
-    Supports authentication modes: bearer (default), oauth, none (authless)
-    """
-    # Verify authentication based on configured mode
-    auth_token = await verify_authentication(authorization, config)
-
-    # Origin validation per MCP 2025-11-25 spec
-    validate_origin_header(origin, config.ALLOWED_ORIGINS)
-
-    # Rate limiting — key on the authenticated principal + trusted-proxy IP
-    allowed, retry_after = rate_limiter.is_allowed(_rate_limit_key(request, auth_token))
-    if not allowed:
-        raise _rate_limited_response(retry_after)
-
-    # Session validation: if client provides session ID but session doesn't exist, return 404
-    # Done BEFORE incrementing ACTIVE_CONNECTIONS to avoid counter leak on early errors.
-    if mcp_session_id:
-        existing_session = await sessions.get(mcp_session_id)
-        if not existing_session:
-            raise HTTPException(status_code=404, detail="Session not found")
-        session = existing_session
-        session.update_activity()
-        await sessions.set(mcp_session_id, session)
-    else:
-        session = await get_or_create_session(None, origin, principal=_principal_of(auth_token))
-    session.authenticated = True  # Mark as authenticated via bearer token
-    session._auth_token = auth_token  # Store token for scope checks in tool handlers
-
-    # Track active connections — only after validation passes.
-    # The SSE generator will decrement when the stream closes (track_connection=True).
-    ACTIVE_CONNECTIONS.inc()
-
-    try:
-        response = StreamingResponse(
-            generate_sse_events(session, track_connection=True),
-            media_type="text/event-stream",
-            headers={
-                "Cache-Control": "no-cache",
-                "Connection": "keep-alive",
-                "MCP-Session-Id": session.session_id,
-                "Access-Control-Expose-Headers": "MCP-Session-Id",
-            },
-        )
-        return response
-
-    except Exception as e:
-        ACTIVE_CONNECTIONS.dec()
-        logger.error(f"SSE endpoint error: {e}")
-        raise HTTPException(status_code=500, detail="SSE stream error")
+# The legacy HTTP+SSE transport (2024-11-05) was never functional here: it sent no
+# `endpoint` event and had no POST message route, so every client that connected hung.
+# Answer with a clear pointer instead of an endless stream.
+@app.api_route("/sse", methods=["GET", "POST"])
+async def mcp_sse_removed():
+    return JSONResponse(
+        status_code=410,
+        content={
+            "error": "The legacy /sse transport is not supported. Use the Streamable HTTP endpoint /mcp.",
+            "endpoint": "/mcp",
+        },
+    )
 
 
 # Standard MCP Endpoint - Streamable HTTP Transport (2025-11-25 Specification)
@@ -3949,7 +4160,7 @@ async def mcp_streamable_http_endpoint(
     - GET: SSE stream initiation (requires Accept: text/event-stream)
     - DELETE: Session termination (see separate endpoint)
 
-    This is the RECOMMENDED endpoint for MCP clients. Legacy /sse remains for backwards compatibility.
+    This is the MCP endpoint for all clients (the legacy /sse transport answers 410).
     Supports authentication modes: bearer (default), oauth, none (authless)
     """
     # Validate protocol version header. Unknown versions get a JSON-RPC
@@ -3965,7 +4176,7 @@ async def mcp_streamable_http_endpoint(
     protocol_version = validate_protocol_version(mcp_protocol_version)
 
     # Verify authentication based on configured mode
-    auth_token = await verify_authentication(authorization, config)
+    auth_token = await _authenticate(request, authorization)
 
     # Origin validation per 2025-11-25 spec
     # Only validate if Origin is present; if present and invalid, return 403
@@ -4019,18 +4230,20 @@ async def mcp_streamable_http_endpoint(
             session.update_activity()
             await sessions.set(mcp_session_id, session)
         else:
-            # Create new session only if no session ID provided
-            session = await get_or_create_session(None, origin, principal=_principal_of(auth_token))
+            # Only an initialize (or a GET stream) starts a stored session
+            persist = request.method == "GET" or _is_initialize(body)
+            session = await get_or_create_session(None, origin, persist=persist, principal=_principal_of(auth_token))
 
         session.authenticated = True  # Mark as authenticated
         session._auth_token = auth_token  # Store token for scope checks in tool handlers
 
         # Common response headers
         response_headers = {
-            "MCP-Session-Id": session.session_id,
             "MCP-Protocol-Version": protocol_version,
             "Access-Control-Expose-Headers": "MCP-Session-Id, MCP-Protocol-Version",
         }
+        if mcp_session_id or persist:
+            response_headers["MCP-Session-Id"] = session.session_id
 
         # Handle GET request per MCP Streamable HTTP spec
         if request.method == "GET":
@@ -4072,7 +4285,12 @@ async def mcp_streamable_http_endpoint(
                     )
 
                 # Check if batch contains any requests
-                has_requests = any(is_json_rpc_request(item) if isinstance(item, dict) else False for item in body)
+                # Anything that isn't a well-formed notification/response is answered, not dropped:
+                # [1, 2] or [{"jsonrpc": "2.0", "id": 1}] must get Invalid Request errors (JSON-RPC 2.0)
+                has_requests = any(
+                    not (isinstance(item, dict) and (is_json_rpc_notification(item) or is_json_rpc_response(item)))
+                    for item in body
+                )
 
                 if not has_requests:
                     # Process all notifications before returning 202
@@ -4141,6 +4359,13 @@ async def mcp_streamable_http_endpoint(
             # Process the request
             if mcp_request:
                 mcp_response = await process_mcp_request(mcp_request, session)
+                # The header must name the version initialize actually negotiated, not the
+                # request-header default (2025-03-26) it would otherwise echo
+                negotiated = (
+                    (mcp_response.result or {}).get("protocolVersion") if mcp_request.method == "initialize" else None
+                )
+                if negotiated:
+                    response_headers["MCP-Protocol-Version"] = negotiated
 
                 # Check if client accepts SSE for streaming response
                 # (For long-running operations, we could upgrade to SSE here)
@@ -4164,6 +4389,9 @@ async def mcp_streamable_http_endpoint(
     except HTTPException as exc:
         _status_code = exc.status_code
         raise
+    except SessionStoreUnavailable:
+        _status_code = 503
+        raise  # -> 503 via the app exception handler
     except Exception as e:
         _status_code = 500
         logger.error(f"MCP endpoint error: {e}")
@@ -4178,14 +4406,23 @@ async def mcp_streamable_http_endpoint(
 
 @app.delete("/mcp")
 async def close_mcp_session(
-    mcp_session_id: str = Header(..., alias="MCP-Session-Id"), authorization: str = Header(None)
+    request: Request,
+    mcp_session_id: str = Header(..., alias="MCP-Session-Id"),
+    authorization: str = Header(None),
+    origin: Optional[str] = Header(None),
 ):
     """
     Close MCP session explicitly (2025-11-25 spec).
     Allows clients to cleanly terminate sessions.
     """
     # Use the same auth logic as other endpoints (respects authless mode)
-    await verify_authentication(authorization, config)
+    auth_token = await _authenticate(request, authorization)
+    # Same Origin (DNS-rebinding) and rate-limit checks as POST/GET: a hostile page could
+    # otherwise end sessions cross-origin
+    validate_origin_header(origin, config.ALLOWED_ORIGINS)
+    allowed, retry_after = rate_limiter.is_allowed(_rate_limit_key(request, auth_token))
+    if not allowed:
+        raise _rate_limited_response(retry_after)
 
     # Remove session
     existing = await sessions.get(mcp_session_id)
@@ -4220,14 +4457,34 @@ async def health_check():
     )
 
 
+# /ready is unauthenticated and exempt from rate limiting (probes must always answer), but each
+# evaluation calls the Wazuh Manager — using the client's shared request budget — and walks the
+# session store. Serve a briefly cached result and let only one probe run at a time, so a flood
+# of /ready can't starve real tool calls.
+READY_CACHE_SECONDS = 5.0
+_ready_cache: Optional[Tuple[float, JSONResponse]] = None
+_ready_lock = asyncio.Lock()
+
+
 @app.get("/ready")
 async def readiness_check():
     """Readiness probe with detailed component status.
 
-    Verifies Wazuh Manager (and Indexer, if configured) reachability and returns
-    503 when a dependency is unhealthy. Intended for load-balancer / orchestrator
-    readiness gating, not for liveness (see /health).
+    Verifies Wazuh Manager (and Indexer, if configured) reachability and memory headroom,
+    and returns 503 when any is unhealthy. Intended for load-balancer / orchestrator
+    readiness gating, not for liveness (see /health). Results are cached for
+    READY_CACHE_SECONDS.
     """
+    global _ready_cache
+    async with _ready_lock:
+        now = time.monotonic()
+        if _ready_cache is None or now - _ready_cache[0] >= READY_CACHE_SECONDS:
+            _ready_cache = (now, await _evaluate_readiness())
+        response = _ready_cache[1]
+    return JSONResponse(content=json.loads(response.body), status_code=response.status_code)
+
+
+async def _evaluate_readiness() -> JSONResponse:
     try:
         # Test Wazuh connectivity with an UNCACHED probe so a fresh Manager outage
         # isn't masked by the 5-minute cache on get_manager_info().
@@ -4276,9 +4533,15 @@ async def readiness_check():
         # alert/vuln tool, so when it is configured any non-healthy state (unhealthy,
         # degraded/red, unknown) must degrade readiness — otherwise the orchestrator
         # keeps routing traffic to a node whose core tools all fail.
+        # Over MAX_MEMORY_MB the security middleware 503s every non-probe request; report it
+        # here too so the orchestrator stops routing to (and can recycle) this node.
+        memory_status = "healthy" if memory_manager.check_memory_usage() else "over_limit"
+
         if wazuh_status != "healthy":
             overall_status = "degraded"
         elif indexer_status not in ("healthy", "not_configured"):
+            overall_status = "degraded"
+        elif memory_status != "healthy":
             overall_status = "degraded"
         else:
             overall_status = "healthy"
@@ -4293,17 +4556,19 @@ async def readiness_check():
                 "mcp_protocol_version": MODERN_PROTOCOL_VERSIONS[0],
                 "legacy_handshake_protocol_version": MCP_PROTOCOL_VERSION,
                 "supported_protocol_versions": SUPPORTED_PROTOCOL_VERSIONS,
-                "transport": {
-                    "streamable_http": "enabled",
-                    "legacy_sse": "enabled",
-                },
+                "transport": {"streamable_http": "enabled"},
                 "clusters": {
                     "multi_cluster": cluster_registry.multi_cluster,
                     "default": cluster_registry.default_id,
                     "configured": cluster_registry.cluster_ids,
                 },
                 "authentication": auth_info,
-                "services": {"wazuh_manager": wazuh_status, "wazuh_indexer": indexer_status, "mcp": "healthy"},
+                "services": {
+                    "wazuh_manager": wazuh_status,
+                    "wazuh_indexer": indexer_status,
+                    "memory": memory_status,
+                    "mcp": "healthy",
+                },
                 "vulnerability_tools": {
                     "available": wazuh_client._indexer_client is not None,
                     "note": (
@@ -4315,7 +4580,6 @@ async def readiness_check():
                 "metrics": {"active_sessions": active_sessions, "total_sessions": len(all_sessions)},
                 "endpoints": {
                     "recommended": "/mcp (Streamable HTTP - 2026-07-28 + legacy)",
-                    "legacy": "/sse (SSE only)",
                     "authentication": (
                         "/auth/token" if config.is_bearer else ("/oauth/token" if config.is_oauth else None)
                     ),

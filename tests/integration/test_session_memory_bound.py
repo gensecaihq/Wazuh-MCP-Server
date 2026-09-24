@@ -172,3 +172,23 @@ class TestSharedPrincipalsAndFastPath:
         monkeypatch.setenv("MAX_SESSIONS_PER_PRINCIPAL", "7")
         cfg = ServerConfig.from_env()
         assert (cfg.MAX_SESSIONS, cfg.MAX_SESSIONS_PER_PRINCIPAL) == (250, 7)
+
+
+class TestRedisSkipsScanBasedBounds:
+    """Redis expires sessions itself; bounding it cost a SCAN plus a GET per session."""
+
+    async def test_no_store_calls_with_redis(self, monkeypatch):
+        from wazuh_mcp_server import server as mcp_server
+        from wazuh_mcp_server.session_store import RedisSessionStore
+
+        calls = []
+
+        async def forbidden(*a, **k):
+            calls.append("store")
+            raise AssertionError("bounds must not scan a Redis store")
+
+        monkeypatch.setattr(mcp_server, "_session_store", RedisSessionStore("redis://127.0.0.1:6399/0", 60))
+        monkeypatch.setattr(mcp_server.sessions, "count", forbidden)
+        monkeypatch.setattr(mcp_server.sessions, "get_all", forbidden)
+        await mcp_server._enforce_session_bounds("jwt:k1")
+        assert calls == []

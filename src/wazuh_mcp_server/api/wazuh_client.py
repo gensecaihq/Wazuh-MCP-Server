@@ -15,7 +15,7 @@ from typing import Any, Dict, Optional, Tuple
 import httpx
 
 from wazuh_mcp_server.api.wazuh_indexer import IndexerNotConfiguredError, WazuhIndexerClient
-from wazuh_mcp_server.config import WazuhConfig
+from wazuh_mcp_server.config import TLS_FAILURE_HINT, WazuhConfig, env_bool, tls_verify
 from wazuh_mcp_server.resilience import CircuitBreaker, CircuitBreakerConfig, RetryConfig
 
 logger = logging.getLogger(__name__)
@@ -151,6 +151,27 @@ _ISO27001_CONTROL_MAP: Dict[str, Dict] = {
 }
 
 
+def _is_tls_failure(exc: Exception) -> bool:
+    text = str(exc).lower()
+    return "ssl" in text or "certificate" in text or "verify" in text
+
+
+def _retry_after_seconds(value: Optional[str], default: int = 30) -> int:
+    """Retry-After is either delta-seconds or an HTTP-date (RFC 9110); int() on a date crashed."""
+    if not value:
+        return default
+    try:
+        return max(0, int(value))
+    except ValueError:
+        pass
+    try:
+        from email.utils import parsedate_to_datetime
+
+        return max(0, int((parsedate_to_datetime(value) - datetime.now(timezone.utc)).total_seconds()))
+    except (TypeError, ValueError):
+        return default
+
+
 class WazuhClient:
     """Simplified Wazuh API client with rate limiting, circuit breaker, and retry logic."""
 
@@ -175,7 +196,8 @@ class WazuhClient:
         self._cache_max_size = 100
         self._youcom_api_key = os.getenv("YDC_API_KEY", "").strip() or None
         self._youcom_base_url = os.getenv("YDC_BASE_URL", YDC_DEFAULT_BASE_URL).rstrip("/")
-        self._youcom_verify_ssl = os.getenv("YDC_VERIFY_SSL", "true").strip().lower() == "true"
+        # env_bool: "1"/"yes"/"on" mean true; the old == "true" check turned them into verify=False
+        self._youcom_verify_ssl = env_bool("YDC_VERIFY_SSL", True)
 
         # Optional custom active-response commands for unblocking. Stock Wazuh cannot
         # remove a firewall-drop / host-deny block via the API (the API only ever
@@ -240,7 +262,7 @@ class WazuhClient:
             except Exception:
                 pass
         self.client = httpx.AsyncClient(
-            verify=self.config.verify_ssl,
+            verify=tls_verify(self.config.verify_ssl),
             timeout=self.config.request_timeout_seconds,
             limits=httpx.Limits(
                 max_connections=self.config.max_connections,
@@ -275,7 +297,13 @@ class WazuhClient:
             self.token = data["data"]["token"]
             logger.info(f"Authenticated with Wazuh server at {self.config.wazuh_host}")
 
-        except httpx.ConnectError:
+        except httpx.ConnectError as e:
+            # Authentication is the first request, so this is where a TLS failure shows up; a
+            # generic "Cannot connect" here hid the reason and the fix.
+            if _is_tls_failure(e):
+                raise ConnectionError(
+                    f"TLS certificate verification failed for {self.config.wazuh_host}. {TLS_FAILURE_HINT}"
+                ) from None
             raise ConnectionError(
                 f"Cannot connect to Wazuh server at {self.config.wazuh_host}:{self.config.wazuh_port}"
             )
@@ -429,10 +457,6 @@ class WazuhClient:
         cache_key = f"rules:{sorted(params.items()) if params else 'all'}"
         return await self._get_cached(cache_key, "/rules", params=params)
 
-    async def get_rule_info(self, rule_id: str) -> Dict[str, Any]:
-        """Get detailed information about a specific rule."""
-        return await self._request("GET", f"/rules/{rule_id}")
-
     async def get_decoders(self, **params) -> Dict[str, Any]:
         """Get Wazuh log decoders (cached for 5 minutes)."""
         # Use caching for decoders as they rarely change
@@ -448,13 +472,15 @@ class WazuhClient:
         # Wazuh 4.x API: agent_list must be passed as query param 'agents_list'
         agents_list = data.pop("agent_list", None)
         params = {}
+        fleet_wide = False
         if agents_list:
             agent_items = agents_list if isinstance(agents_list, list) else [agents_list]
             # Check if targeting all agents
             if any(str(a).lower() == "all" for a in agent_items):
-                # Wazuh 4.x API requires a valid agents_list; use "all" as a special keyword
-                # that the API accepts for targeting all agents
-                params["agents_list"] = "all"
+                # PUT /active-response's agents_list only accepts numeric IDs ("all" is a 400);
+                # an absent agents_list means every agent. Omit it — but only for an explicit
+                # "all" from the caller; every other missing target is refused below.
+                fleet_wide = True
             else:
                 # Filter to numeric agent IDs only
                 numeric_agents = [str(a) for a in agent_items if str(a).isdigit()]
@@ -470,7 +496,7 @@ class WazuhClient:
                         "refusing to dispatch to avoid a fleet-wide action."
                     )
                 params["agents_list"] = ",".join(numeric_agents)
-        if not params.get("agents_list"):
+        if not fleet_wide and not params.get("agents_list"):
             # Defense in depth: never send a targeting active-response PUT without an explicit
             # agents_list — an empty/absent list is interpreted as ALL agents by the manager.
             raise ValueError(
@@ -487,11 +513,10 @@ class WazuhClient:
         failed_items = resp_data.get("failed_items", [])
 
         if total_affected == 0:
-            # Zero agents affected is a FAILURE, not success. Wazuh returns HTTP 200 with
-            # total_affected_items == 0 both when a command failed on every agent AND when
-            # the AR command doesn't exist / isn't configured (e.g. the custom
-            # host-isolation / kill-process / quarantine scripts aren't deployed). Reporting
-            # that as success would be false containment during a live incident — so refuse.
+            # Zero agents affected is a FAILURE, not success: the command reached no agent
+            # (disconnected, unknown id, ...). A script missing ON the agent is NOT caught
+            # here — Wazuh skips validation for '!script' commands and still counts the agent
+            # as affected; see execution_note below.
             errors = []
             for item in failed_items:
                 err = item.get("error", {})
@@ -521,6 +546,16 @@ class WazuhClient:
                     f"code {err.get('code')} - {err.get('message')}"
                 )
 
+        # "Affected" means the manager queued the command to the agent. Wazuh does not validate
+        # '!script' commands, so a script that isn't deployed on the agent still counts as
+        # affected — this is delivery, not proof of execution.
+        if isinstance(resp_data, dict):
+            resp_data["execution_status"] = "dispatched"
+            resp_data["execution_note"] = (
+                f"Queued to {total_affected} agent(s). Wazuh confirms delivery, not execution: it "
+                "reports success even if the script is missing on the agent. Confirm with the "
+                "matching wazuh_check_* tool."
+            )
         return result
 
     async def get_active_response_commands(self, **params) -> Dict[str, Any]:
@@ -530,18 +565,6 @@ class WazuhClient:
     async def get_cdb_lists(self, **params) -> Dict[str, Any]:
         """Get CDB lists."""
         return await self._request("GET", "/lists", params=params)
-
-    async def get_cdb_list_content(self, filename: str) -> Dict[str, Any]:
-        """Get specific CDB list content."""
-        return await self._request("GET", f"/lists/{filename}")
-
-    async def get_fim_events(self, **params) -> Dict[str, Any]:
-        """Get File Integrity Monitoring events."""
-        return await self._request("GET", "/syscheck", params=params)
-
-    async def get_syscollector_info(self, agent_id: str, **params) -> Dict[str, Any]:
-        """Get system inventory information from agent."""
-        return await self._request("GET", f"/syscollector/{agent_id}", params=params)
 
     async def get_manager_stats(self, **params) -> Dict[str, Any]:
         """Get manager statistics."""
@@ -711,7 +734,7 @@ class WazuhClient:
                     raise
             elif e.response.status_code == 429:
                 # Wazuh-side rate limiting: wait per Retry-After and let retry logic handle it
-                retry_after = int(e.response.headers.get("Retry-After", "30"))
+                retry_after = _retry_after_seconds(e.response.headers.get("Retry-After"))
                 logger.warning(f"Wazuh API rate-limited on {endpoint}. Waiting {retry_after}s...")
                 await asyncio.sleep(min(retry_after, 60))  # Cap at 60s to prevent abuse
                 raise  # Let tenacity/circuit breaker handle the retry
@@ -731,12 +754,10 @@ class WazuhClient:
                 raise err
         except httpx.ConnectError as e:
             # Distinguish SSL errors from generic connection failures
-            err_str = str(e).lower()
-            if "ssl" in err_str or "certificate" in err_str or "verify" in err_str:
-                logger.error(f"SSL certificate validation failed for {self.config.wazuh_host}")
+            if _is_tls_failure(e):
+                logger.error(f"TLS certificate verification failed for {self.config.wazuh_host}")
                 raise ConnectionError(
-                    f"SSL certificate validation failed for {self.config.wazuh_host}. "
-                    "Set WAZUH_VERIFY_SSL=false for self-signed certificates."
+                    f"TLS certificate verification failed for {self.config.wazuh_host}. {TLS_FAILURE_HINT}"
                 )
             # Let other connection errors propagate for retry logic
             logger.error(f"Lost connection to Wazuh server at {self.config.wazuh_host}")
@@ -793,8 +814,12 @@ class WazuhClient:
             value: Any = alert
             for part in group_by.split("."):
                 value = value.get(part, {}) if isinstance(value, dict) else "unknown"
-            key = str(value) if not isinstance(value, dict) else "unknown"
-            groups[key] = groups.get(key, 0) + 1
+            # rule.groups is a list: count each group once per alert. Keying on str(list) made
+            # the counts depend on group order (['sshd','auth'] vs ['auth','sshd']).
+            keys = value if isinstance(value, list) else [value]
+            for item in keys or ["unknown"]:
+                key = str(item) if not isinstance(item, dict) else "unknown"
+                groups[key] = groups.get(key, 0) + 1
         return {
             "data": {
                 "time_range": time_range,
@@ -981,12 +1006,14 @@ class WazuhClient:
 
         return await self._indexer_client.get_critical_vulnerabilities(limit=limit)
 
-    async def get_vulnerability_summary(self, time_range: str) -> Dict[str, Any]:
+    async def get_vulnerability_summary(self, time_range: Optional[str] = None, agent_id: str = None) -> Dict[str, Any]:
         """
         Get vulnerability summary statistics from Wazuh Indexer (4.8.0+ required).
 
         Args:
-            time_range: Time range for the summary (currently not used, returns all current vulnerabilities)
+            time_range: Only count vulnerabilities first detected in this window ("1d", "7d", "30d");
+                None counts every currently open vulnerability
+            agent_id: Only count vulnerabilities on this agent
 
         Returns:
             Vulnerability summary with counts by severity
@@ -997,7 +1024,8 @@ class WazuhClient:
         if not self._indexer_client:
             raise IndexerNotConfiguredError()
 
-        return await self._indexer_client.get_vulnerability_summary()
+        detected_since = f"now-{time_range}" if time_range else None
+        return await self._indexer_client.get_vulnerability_summary(agent_id=agent_id, detected_since=detected_since)
 
     async def analyze_security_threat(self, indicator: str, indicator_type: str) -> Dict[str, Any]:
         """Analyze security threat by searching alerts for the indicator via Elasticsearch."""
@@ -1117,7 +1145,7 @@ class WazuhClient:
         vuln_data: Dict[str, Any] = {}
         if self._indexer_client:
             try:
-                vuln_summary = await self._indexer_client.get_vulnerability_summary()
+                vuln_summary = await self._indexer_client.get_vulnerability_summary(agent_id=agent_id)
                 vuln_data = vuln_summary.get("data", {})
                 critical = vuln_data.get("critical", 0)
                 high = vuln_data.get("high", 0)
@@ -1135,7 +1163,9 @@ class WazuhClient:
         if self._indexer_client:
             try:
                 start = self._time_range_to_start("24h")
-                result = await self._indexer_client.get_alerts(limit=500, timestamp_start=start, level="10")
+                result = await self._indexer_client.get_alerts(
+                    limit=500, timestamp_start=start, level="10", agent_id=agent_id
+                )
                 high_alerts, high_total, _ = self._alerts_and_total(result)
                 alert_summary["high_severity_alerts_24h"] = high_total
                 if high_total > 10:
@@ -1639,16 +1669,21 @@ class WazuhClient:
             except Exception:
                 return default
 
-        agents_coro = self._request(
-            "GET", "/agents", params={"status": "active", "limit": 500, "select": "id,name,os.name"}
-        )
+        # With agent_id every data source is scoped to that agent (whatever its status);
+        # without it, the dashboard covers active agents fleet-wide.
+        agent_params: Dict[str, Any] = {"limit": 500, "select": "id,name,os.name"}
+        if agent_id:
+            agent_params["agents_list"] = agent_id
+        else:
+            agent_params["status"] = "active"
+        agents_coro = self._request("GET", "/agents", params=agent_params)
         # Alerts live in the Indexer — the Manager API removed its /alerts endpoint.
         # Bound to a fixed reporting window so the dashboard reflects recent posture
         # (and matches the other ISO tools) rather than counting all alert history.
         _iso_window_start = (datetime.now(timezone.utc) - timedelta(days=_ISO27001_ALERT_WINDOW_DAYS)).strftime(
             "%Y-%m-%dT%H:%M:%SZ"
         )
-        alerts_coro = self.get_alerts(limit=500, timestamp_start=_iso_window_start)
+        alerts_coro = self.get_alerts(limit=500, timestamp_start=_iso_window_start, agent_id=agent_id)
         stats_coro = self._request("GET", "/manager/stats/analysisd")
 
         agents_res, alerts_res, stats_res = await asyncio.gather(
@@ -2298,8 +2333,20 @@ class WazuhClient:
             if current_time - cached_time < self._cache_ttl:
                 return cached_data
 
-        result = await self._request("GET", "/rules", params={"limit": 500})
-        rules = result.get("data", {}).get("affected_items", [])
+        # /rules pages at 500; a stock ruleset has several thousand rules. Reading one page
+        # reported "total_rules: 500" with level/group stats from that slice.
+        rules: list = []
+        total = None
+        while total is None or len(rules) < total:
+            page = await self._request(
+                "GET", "/rules", params={"limit": 500, "offset": len(rules), "select": "level,groups"}
+            )
+            data = page.get("data", {})
+            items = data.get("affected_items", [])
+            total = data.get("total_affected_items", len(rules) + len(items))
+            if not items:
+                break
+            rules.extend(items)
         level_counts: Dict[int, int] = {}
         group_counts: Dict[str, int] = {}
         for rule in rules:
@@ -2366,8 +2413,10 @@ class WazuhClient:
         value = value.strip()
         if not value:
             raise ValueError(f"{param_name} cannot be empty")
-        # Block shell metacharacters and control chars
-        if re.search(r'[;&|`$(){}\[\]<>!\\\'"\n\r\t]', value):
+        # Block shell metacharacters and control chars. Backslash is allowed only in file paths,
+        # where it is the Windows separator (C:\Users\x.exe); elsewhere it's an escape char.
+        forbidden = r'[;&|`$(){}\[\]<>!\'"\n\r\t]' if param_name == "file_path" else r'[;&|`$(){}\[\]<>!\\\'"\n\r\t]'
+        if re.search(forbidden, value):
             raise ValueError(f"{param_name} contains invalid characters")
         # Audit fix M6: Block flag injection for standalone values
         if not param_name.startswith("parameter:") and value.startswith("-"):
@@ -2376,19 +2425,27 @@ class WazuhClient:
 
     @staticmethod
     def _validate_ip(ip_address: str, param_name: str = "ip_address") -> str:
-        """Validate IPv4 or IPv6 address format."""
+        """Validate an IPv4/IPv6 address and return its canonical form.
+
+        Canonical output matters for the protected-target check: "127.000.000.001" or an
+        IPv4-mapped "::ffff:7f00:1" must compare equal to 127.0.0.1, not slip past it.
+        """
         import re
 
         ip_address = ip_address.strip()
-        # IPv4
-        if re.match(r"^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$", ip_address):
-            octets = ip_address.split(".")
-            if all(0 <= int(o) <= 255 for o in octets):
-                return ip_address
-        # IPv6 (simplified check)
-        if ":" in ip_address and re.match(r"^[0-9a-fA-F:]+$", ip_address):
-            return ip_address
-        raise ValueError(f"Invalid IP address format for {param_name}: {ip_address}")
+        candidate = ip_address
+        # ipaddress rejects leading zeros; read dotted-quad octets as decimal instead.
+        if re.fullmatch(r"\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}", ip_address):
+            candidate = ".".join(str(int(o)) for o in ip_address.split("."))
+        try:
+            if "%" in candidate:  # IPv6 zone ids are host-local and meaningless on an agent
+                raise ValueError
+            addr = ipaddress.ip_address(candidate)
+        except ValueError:
+            raise ValueError(f"Invalid IP address format for {param_name}: {ip_address}") from None
+        if isinstance(addr, ipaddress.IPv6Address) and addr.ipv4_mapped:
+            addr = addr.ipv4_mapped  # agents' firewall scripts expect the plain IPv4 form
+        return str(addr)
 
     def _build_protected_networks(self, extra: str) -> list:
         """Build the block_ip protected-target list from env + the manager host + loopback."""
@@ -2414,14 +2471,19 @@ class WazuhClient:
     def _is_protected_target(self, ip_address: str) -> bool:
         """True if ip_address falls inside a protected network (must never be blocked)."""
         try:
-            addr = ipaddress.ip_address(ip_address)
+            addr = ipaddress.ip_address(self._validate_ip(ip_address))
         except ValueError:
             return False
         return any(addr in net for net in self._protected_networks)
 
-    async def block_ip(
-        self, ip_address: str, duration: int = 0, agent_id: str = None, all_agents: bool = False
-    ) -> Dict[str, Any]:
+    def _refuse_protected_target(self, ip_address: str) -> None:
+        if self._is_protected_target(ip_address):
+            raise ValueError(
+                f"Refusing to block protected target {ip_address}: it is loopback, the Wazuh "
+                "manager, or on the WAZUH_PROTECTED_IPS denylist. Blocking it would be self-inflicted DoS."
+            )
+
+    async def block_ip(self, ip_address: str, agent_id: str = None, all_agents: bool = False) -> Dict[str, Any]:
         """Block IP via firewall-drop active response.
 
         Requires an explicit target: either a specific agent_id, or all_agents=True to
@@ -2429,11 +2491,7 @@ class WazuhClient:
         "block <ip>" in a log line must not weaponize the whole fleet by omission.
         """
         ip_address = self._validate_ip(ip_address)
-        if self._is_protected_target(ip_address):
-            raise ValueError(
-                f"Refusing to block protected target {ip_address}: it is loopback, the Wazuh "
-                "manager, or on the WAZUH_PROTECTED_IPS denylist. Blocking it would be self-inflicted DoS."
-            )
+        self._refuse_protected_target(ip_address)
         if not agent_id and not all_agents:
             raise ValueError(
                 "block_ip requires an explicit target: pass agent_id for a single agent, or "
@@ -2441,8 +2499,6 @@ class WazuhClient:
             )
         ip_address = self._sanitize_ar_argument(ip_address, "ip_address")
         arguments = [f"-srcip {ip_address}"]
-        if duration and duration > 0:
-            arguments.append(f"-timeout {int(duration)}")
         data = {
             "command": "!firewall-drop",
             "agent_list": [agent_id] if agent_id else ["all"],
@@ -2524,13 +2580,12 @@ class WazuhClient:
         data = {"command": command, "agent_list": [agent_id], "arguments": args}
         return await self.execute_active_response(data)
 
-    async def firewall_drop(self, agent_id: str, src_ip: str, duration: int = 0) -> Dict[str, Any]:
+    async def firewall_drop(self, agent_id: str, src_ip: str) -> Dict[str, Any]:
         """Add firewall drop rule via active response."""
         src_ip = self._validate_ip(src_ip, "src_ip")
+        self._refuse_protected_target(src_ip)
         src_ip = self._sanitize_ar_argument(src_ip, "src_ip")
         arguments = [f"-srcip {src_ip}"]
-        if duration and duration > 0:
-            arguments.append(f"-timeout {int(duration)}")
         data = {
             "command": "!firewall-drop",
             "agent_list": [agent_id],
@@ -2542,6 +2597,7 @@ class WazuhClient:
     async def host_deny(self, agent_id: str, src_ip: str) -> Dict[str, Any]:
         """Add hosts.deny entry via active response."""
         src_ip = self._validate_ip(src_ip, "src_ip")
+        self._refuse_protected_target(src_ip)
         src_ip = self._sanitize_ar_argument(src_ip, "src_ip")
         data = {
             "command": "!host-deny",
@@ -2693,21 +2749,44 @@ class WazuhClient:
         }
 
     async def check_file_quarantine(self, agent_id: str, file_path: str) -> Dict[str, Any]:
-        """Check if a file has been quarantined via FIM events."""
-        # FIM data is per-agent: GET /syscheck/{agent_id}. GET /syscheck (no id) is 405.
+        """Check whether a file was removed from its original path (the quarantine signal).
+
+        The FIM database can't answer this: GET /syscheck entries are typed file/registry and a
+        deleted file simply drops out, so the old `type == "deleted"` check could never be true.
+        The evidence is a FIM "deleted" alert (rule 553) for the exact path in the Indexer.
+        """
+        if self._indexer_client is not None:
+            event = await self._indexer_client.latest_fim_event(agent_id, file_path, "deleted")
+            return {
+                "data": {
+                    "agent_id": agent_id,
+                    "file_path": file_path,
+                    "quarantined": event is not None,
+                    "removed_at": event.get("timestamp") if event else None,
+                    "note": "Based on the latest FIM 'deleted' alert for this exact path; "
+                    "confirm the file is in the quarantine store on the host.",
+                }
+            }
+
+        # Without the Indexer, only presence in the FIM database is knowable. The path goes into
+        # Wazuh's q filter, where , ; ( ) are operators — refuse them rather than let a path
+        # widen the query to other files.
+        if any(c in file_path for c in ",;()"):
+            raise ValueError("file_path contains , ; ( or ) — checking it needs the Indexer (WAZUH_INDEXER_HOST)")
         result = await self._request("GET", f"/syscheck/{agent_id}", params={"q": f"file={file_path}"})
-        events = result.get("data", {}).get("affected_items", [])
-        # The FIM query is already scoped to this exact path, so a 'deleted' event for it is the
-        # quarantine signal (Wazuh's quarantine AR removes the file from its original location).
-        # The previous `"quarantine" in str(e)` matched any path whose stringified event merely
-        # contained the substring "quarantine" — a false positive on any file under such a path.
-        quarantined = any(e.get("type") == "deleted" for e in events)
+        present = bool(result.get("data", {}).get("affected_items", []))
         return {
             "data": {
                 "agent_id": agent_id,
                 "file_path": file_path,
-                "quarantined": quarantined,
-                "note": "Inferred from a FIM deletion of the exact path; verify the quarantine store on the host.",
+                "quarantined": False if present else None,
+                "present_in_fim_db": present,
+                "note": (
+                    "File is still tracked at this path."
+                    if present
+                    else "Not in the FIM database, which also happens when the path isn't monitored. "
+                    "Configure WAZUH_INDEXER_HOST to confirm removal from FIM alerts."
+                ),
             }
         }
 
@@ -2753,7 +2832,7 @@ class WazuhClient:
         would silently RE-BLOCK the address. So this requires an operator-deployed undo
         script; without one it raises rather than doing the wrong thing.
         """
-        self._validate_ip(src_ip)
+        src_ip = self._validate_ip(src_ip, "src_ip")
         src_ip = self._sanitize_ar_argument(src_ip, "src_ip")
         if not undo_command:
             env_var = "WAZUH_AR_FIREWALL_UNDO_COMMAND" if block_kind == "firewall" else "WAZUH_AR_HOSTDENY_UNDO_COMMAND"
@@ -2761,8 +2840,8 @@ class WazuhClient:
                 f"Cannot remove a {block_kind} block through the Wazuh API: stock active-response "
                 f"scripts only support the 'add' action via the API, so this would re-block "
                 f"{src_ip} instead of removing it. Configure an operator-deployed undo script "
-                f"and set {env_var} to its command name, or rely on the manager's "
-                f"<active-response><timeout> to expire the block automatically."
+                f"and set {env_var} to its command name, or remove the block on the agent host. "
+                f"(A manager <active-response><timeout> does not apply: API-dispatched blocks never expire.)"
             )
         data = {
             "command": undo_command,

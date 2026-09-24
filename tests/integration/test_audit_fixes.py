@@ -268,6 +268,17 @@ class TestPrincipalKey:
         # verify_bearer_token decodes with get_config().AUTH_SECRET_KEY (the shared
         # singleton, i.e. mcp_server.config); sign the tokens with the same key.
         monkeypatch.setattr(mcp_server.config, "AUTH_SECRET_KEY", secret)
+        from datetime import datetime, timezone
+
+        from wazuh_mcp_server.auth import APIKey, auth_manager
+
+        # Tokens are bound to live API keys, so the keys must exist
+        for kid in ("key-A", "key-B"):
+            monkeypatch.setitem(
+                auth_manager.api_keys,
+                kid,
+                APIKey(id=kid, name=kid, key_hash="x", created_at=datetime.now(timezone.utc), scopes=["wazuh:read"]),
+            )
         tok_a = create_access_token({"sub": "key-A", "scope": "wazuh:read"}, secret)
         tok_b = create_access_token({"sub": "key-B", "scope": "wazuh:read"}, secret)
 
@@ -426,12 +437,13 @@ class TestActionConfirmationGate:
     @pytest.mark.asyncio
     async def test_write_tool_requires_confirm_when_enabled(self, monkeypatch, stub_cluster):
         monkeypatch.setenv("WAZUH_REQUIRE_ACTION_CONFIRMATION", "true")
-        # The gate raises before the tool body (like scope enforcement), caught upstream.
-        with pytest.raises(ValueError, match="confirm"):
-            await handle_tools_call(
-                {"name": "wazuh_block_ip", "arguments": {"ip_address": "8.8.8.8", "agent_id": "001"}},
-                _session(scopes=("wazuh:read", "wazuh:write")),
-            )
+        # Refused before the tool body, as a tool error the model sees (with the guidance)
+        result = await handle_tools_call(
+            {"name": "wazuh_block_ip", "arguments": {"ip_address": "8.8.8.8", "agent_id": "001"}},
+            _session(scopes=("wazuh:read", "wazuh:write")),
+        )
+        assert result["isError"] is True
+        assert "confirm=true" in result["content"][0]["text"]
 
 
 class TestServerInstructionsTrustBoundary:
@@ -546,18 +558,26 @@ class TestCompletionRefResource:
         assert out["completion"]["values"] == ["001", "002", "003", "004", "005"]
 
 
+def _set_environment(monkeypatch, env):
+    import dataclasses
+
+    from wazuh_mcp_server import config as config_module
+
+    monkeypatch.setattr(config_module, "_config", dataclasses.replace(config_module.get_config(), ENVIRONMENT=env))
+
+
 class TestOriginWildcardProduction:
     def test_wildcard_rejected_in_production(self, monkeypatch):
         from wazuh_mcp_server.server import validate_origin_header
 
-        monkeypatch.setenv("ENVIRONMENT", "production")
+        _set_environment(monkeypatch, "production")
         with pytest.raises(Exception):  # HTTPException 403
             validate_origin_header("https://evil.example", "*")
 
     def test_wildcard_allowed_in_development(self, monkeypatch):
         from wazuh_mcp_server.server import validate_origin_header
 
-        monkeypatch.setenv("ENVIRONMENT", "development")
+        _set_environment(monkeypatch, "development")
         # No raise = allowed.
         validate_origin_header("https://anything.example", "*")
 

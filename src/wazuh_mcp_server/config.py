@@ -1,8 +1,12 @@
 """Configuration management for Wazuh MCP Server."""
 
+import logging
 import os
+import ssl
 from dataclasses import dataclass
-from typing import Optional
+from typing import FrozenSet, Optional, Union
+
+from wazuh_mcp_server.toolsets import ALL_TOOLS, resolve_enabled_tools
 
 
 class ConfigurationError(Exception):
@@ -13,6 +17,22 @@ class ConfigurationError(Exception):
 
 _TRUE_TOKENS = frozenset({"1", "true", "yes", "y", "on"})
 _FALSE_TOKENS = frozenset({"0", "false", "no", "n", "off", ""})
+
+
+def tls_verify(value: Union[bool, str]) -> Union[bool, ssl.SSLContext]:
+    """httpx `verify` for a config value: a CA-bundle path becomes an SSLContext (passing the
+    path string itself is deprecated in httpx 0.28); booleans pass through."""
+    if isinstance(value, str) and value:
+        return ssl.create_default_context(cafile=value)
+    return bool(value)
+
+
+TLS_FAILURE_HINT = (
+    "The stock Wazuh API certificate (<WAZUH_PATH>/api/configuration/ssl/server.crt) is self-signed "
+    "for CN=wazuh.com with no subjectAltName, so it cannot be verified for your host. Reissue it with "
+    "a subjectAltName matching WAZUH_HOST and set WAZUH_CA_BUNDLE to the CA that signed it, or set "
+    "WAZUH_ALLOW_SELF_SIGNED=true to connect without verification."
+)
 
 
 def env_bool(name: str, default: bool) -> bool:
@@ -58,6 +78,18 @@ def validate_positive_int(value: str, name: str, max_val: Optional[int] = None) 
         raise ConfigurationError(f"{name} must be a valid integer, got '{value}'")
 
 
+_ENVIRONMENTS = {"development": "development", "dev": "development", "production": "production", "prod": "production"}
+
+
+def normalize_environment(raw: Optional[str]) -> str:
+    """ENVIRONMENT -> "development" | "production". Unknown values fail rather than silently
+    running without the production-only safety checks (e.g. "prod" used to mean development)."""
+    value = (raw or "development").strip().lower()
+    if value not in _ENVIRONMENTS:
+        raise ConfigurationError(f"ENVIRONMENT must be 'development' or 'production', got '{raw}'")
+    return _ENVIRONMENTS[value]
+
+
 def normalize_host(host: str) -> str:
     """
     Normalize hostname by stripping protocol prefix if present.
@@ -90,7 +122,7 @@ class WazuhConfig:
 
     # Optional settings with sensible defaults
     wazuh_port: int = 55000
-    verify_ssl: bool = True
+    verify_ssl: Union[bool, str] = True  # httpx `verify`: bool or path to a CA bundle
 
     # Indexer settings (optional)
     wazuh_indexer_host: Optional[str] = None
@@ -98,7 +130,7 @@ class WazuhConfig:
     wazuh_indexer_user: Optional[str] = None
     wazuh_indexer_pass: Optional[str] = None
     wazuh_indexer_ssl: bool = True  # Use HTTPS for the indexer (set False for plain-HTTP OpenSearch nodes)
-    wazuh_indexer_verify_ssl: bool = True  # Verify the indexer's TLS certificate
+    wazuh_indexer_verify_ssl: Union[bool, str] = True  # Verify the indexer's TLS certificate (bool or CA path)
 
     # Transport settings
     mcp_transport: str = "http"  # Default to HTTP/SSE mode
@@ -203,6 +235,22 @@ class ServerConfig:
     OAUTH_REFRESH_TOKEN_TTL: int = 86400  # 24 hours
     OAUTH_AUTHORIZATION_CODE_TTL: int = 600  # 10 minutes
 
+    # External OpenID Connect identity provider for AUTH_MODE=oauth. When set, users
+    # authenticate at the IdP (Microsoft Entra ID, Google Workspace, Okta, ...) before an
+    # authorization code is issued; without it /oauth/authorize auto-approves.
+    OAUTH_IDP_ISSUER: str = ""  # e.g. https://login.microsoftonline.com/<tenant-id>/v2.0
+    OAUTH_IDP_CLIENT_ID: str = ""
+    OAUTH_IDP_CLIENT_SECRET: str = ""  # optional (public client + PKCE if empty)
+    OAUTH_IDP_SCOPES: str = "openid email profile"
+    OAUTH_IDP_ALLOWED_DOMAINS: str = ""  # comma-separated; Google `hd` or e-mail domain
+    OAUTH_IDP_ALLOWED_TENANTS: str = ""  # comma-separated Entra tenant IDs (`tid` claim)
+    OAUTH_IDP_ALLOWED_USERS: str = ""  # comma-separated subjects/e-mails (optional allow-list)
+    OAUTH_IDP_GROUP_CLAIM: str = "groups"  # `groups` (Entra/Okta), `roles` (Entra app roles), ...
+    OAUTH_IDP_GROUP_SCOPE_MAP: str = ""  # JSON: {"<group>": "wazuh:read wazuh:write", ...}
+    OAUTH_IDP_DEFAULT_SCOPE: str = "wazuh:read"  # for users in no mapped group; "" denies them
+    OAUTH_IDP_SUBJECT_CLAIM: str = "email"  # claim used as the audited identity
+    OAUTH_IDP_LOGIN_TTL: int = 600  # seconds a parked /authorize request waits for the IdP
+
     # CORS settings
     ALLOWED_ORIGINS: str = "https://claude.ai,http://localhost:3000"
 
@@ -212,7 +260,11 @@ class ServerConfig:
     WAZUH_PASS: str = ""
     WAZUH_PORT: int = 55000
     WAZUH_VERIFY_SSL: bool = True
-    WAZUH_ALLOW_SELF_SIGNED: bool = True
+    # Accepting a self-signed certificate == not verifying at all (httpx has no middle
+    # ground), so this is OFF by default. To trust a private CA or a self-signed
+    # certificate *safely*, point WAZUH_CA_BUNDLE at its PEM file instead.
+    WAZUH_ALLOW_SELF_SIGNED: bool = False
+    WAZUH_CA_BUNDLE: str = ""  # PEM file used to verify the Manager (and Indexer) certificate
 
     # Wazuh Indexer settings (Required for Wazuh 4.8.0+ vulnerability tools)
     WAZUH_INDEXER_HOST: str = ""
@@ -230,6 +282,8 @@ class ServerConfig:
     # Session store bounds (see server._enforce_session_bounds)
     MAX_SESSIONS: int = 1000
     MAX_SESSIONS_PER_PRINCIPAL: int = 100  # "principal" = API key / OAuth client, not a person
+    # Tool exposure (see toolsets.py): which tools tools/list advertises and tools/call accepts
+    ENABLED_TOOLS: FrozenSet[str] = ALL_TOOLS
 
     # Logging
     LOG_LEVEL: str = "INFO"
@@ -242,12 +296,13 @@ class ServerConfig:
         """Create configuration from environment variables with validation."""
         import secrets
 
-        environment = os.getenv("ENVIRONMENT", "development").lower()
+        environment = normalize_environment(os.getenv("ENVIRONMENT"))
 
         # Validate auth mode
-        auth_mode = os.getenv("AUTH_MODE", "bearer").lower()
+        auth_mode = os.getenv("AUTH_MODE", "bearer").strip().lower()
         if auth_mode not in ("bearer", "oauth", "none"):
-            auth_mode = "bearer"
+            # A typo used to fall back to bearer silently — the operator thinks OAuth is on
+            raise ConfigurationError(f"AUTH_MODE must be one of bearer, oauth, none; got '{auth_mode}'")
 
         # Signing secret. In production with auth enabled it MUST be provided — a random
         # per-process key invalidates all tokens on restart and breaks multi-instance
@@ -281,6 +336,18 @@ class ServerConfig:
                     "Generate one with: openssl rand -hex 32"
                 )
 
+        # Optional CA bundle for the Wazuh Manager / Indexer certificates. Fail fast on a
+        # bad path: silently falling back would either break every request or, worse,
+        # tempt operators into WAZUH_ALLOW_SELF_SIGNED=true.
+        ca_bundle = os.getenv("WAZUH_CA_BUNDLE", "").strip()
+        if ca_bundle and not os.path.isfile(ca_bundle):
+            raise ConfigurationError(f"WAZUH_CA_BUNDLE points to a file that does not exist: {ca_bundle}")
+        if ca_bundle and (not env_bool("WAZUH_VERIFY_SSL", True) or env_bool("WAZUH_ALLOW_SELF_SIGNED", False)):
+            logging.getLogger(__name__).warning(
+                "WAZUH_CA_BUNDLE is set but certificate verification is disabled "
+                "(WAZUH_VERIFY_SSL=false or WAZUH_ALLOW_SELF_SIGNED=true): the bundle is ignored."
+            )
+
         # Validate log level
         log_level = os.getenv("LOG_LEVEL", "INFO").upper()
         if log_level not in ("DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"):
@@ -294,7 +361,12 @@ class ServerConfig:
         else:
             indexer_ssl = not indexer_host_raw.strip().lower().startswith("http://")
 
-        return cls(
+        try:
+            enabled_tools = resolve_enabled_tools(os.getenv("WAZUH_TOOLSETS"), os.getenv("WAZUH_DISABLED_TOOLS"))
+        except ValueError as e:
+            raise ConfigurationError(str(e)) from e
+
+        config = cls(
             MCP_HOST=os.getenv("MCP_HOST", "0.0.0.0"),
             MCP_PORT=validate_port(os.getenv("MCP_PORT", "3000"), "MCP_PORT"),
             AUTH_SECRET_KEY=auth_secret,
@@ -313,13 +385,28 @@ class ServerConfig:
             OAUTH_AUTHORIZATION_CODE_TTL=validate_positive_int(
                 os.getenv("OAUTH_AUTHORIZATION_CODE_TTL", "600"), "OAUTH_AUTHORIZATION_CODE_TTL"
             ),
+            OAUTH_IDP_ISSUER=os.getenv("OAUTH_IDP_ISSUER", "").strip().rstrip("/"),
+            OAUTH_IDP_CLIENT_ID=os.getenv("OAUTH_IDP_CLIENT_ID", "").strip(),
+            OAUTH_IDP_CLIENT_SECRET=os.getenv("OAUTH_IDP_CLIENT_SECRET", ""),
+            OAUTH_IDP_SCOPES=os.getenv("OAUTH_IDP_SCOPES", "openid email profile"),
+            OAUTH_IDP_ALLOWED_DOMAINS=os.getenv("OAUTH_IDP_ALLOWED_DOMAINS", ""),
+            OAUTH_IDP_ALLOWED_TENANTS=os.getenv("OAUTH_IDP_ALLOWED_TENANTS", ""),
+            OAUTH_IDP_ALLOWED_USERS=os.getenv("OAUTH_IDP_ALLOWED_USERS", ""),
+            OAUTH_IDP_GROUP_CLAIM=os.getenv("OAUTH_IDP_GROUP_CLAIM", "groups").strip() or "groups",
+            OAUTH_IDP_GROUP_SCOPE_MAP=os.getenv("OAUTH_IDP_GROUP_SCOPE_MAP", ""),
+            OAUTH_IDP_DEFAULT_SCOPE=os.getenv("OAUTH_IDP_DEFAULT_SCOPE", "wazuh:read"),
+            OAUTH_IDP_SUBJECT_CLAIM=os.getenv("OAUTH_IDP_SUBJECT_CLAIM", "email").strip() or "email",
+            OAUTH_IDP_LOGIN_TTL=validate_positive_int(
+                os.getenv("OAUTH_IDP_LOGIN_TTL", "600"), "OAUTH_IDP_LOGIN_TTL", max_val=3600
+            ),
             ALLOWED_ORIGINS=os.getenv("ALLOWED_ORIGINS", "https://claude.ai,http://localhost:3000"),
             WAZUH_HOST=normalize_host(os.getenv("WAZUH_HOST", "")),
             WAZUH_USER=os.getenv("WAZUH_USER", ""),
             WAZUH_PASS=os.getenv("WAZUH_PASS", ""),
             WAZUH_PORT=validate_port(os.getenv("WAZUH_PORT", "55000"), "WAZUH_PORT"),
             WAZUH_VERIFY_SSL=env_bool("WAZUH_VERIFY_SSL", True),
-            WAZUH_ALLOW_SELF_SIGNED=env_bool("WAZUH_ALLOW_SELF_SIGNED", True),
+            WAZUH_ALLOW_SELF_SIGNED=env_bool("WAZUH_ALLOW_SELF_SIGNED", False),
+            WAZUH_CA_BUNDLE=ca_bundle,
             # Wazuh Indexer settings (for vulnerability tools in Wazuh 4.8.0+)
             WAZUH_INDEXER_HOST=normalize_host(indexer_host_raw),
             WAZUH_INDEXER_PORT=validate_port(os.getenv("WAZUH_INDEXER_PORT", "9200"), "WAZUH_INDEXER_PORT"),
@@ -338,9 +425,51 @@ class ServerConfig:
             MAX_SESSIONS_PER_PRINCIPAL=validate_positive_int(
                 os.getenv("MAX_SESSIONS_PER_PRINCIPAL", "100"), "MAX_SESSIONS_PER_PRINCIPAL", max_val=100000
             ),
+            ENABLED_TOOLS=enabled_tools,
             LOG_LEVEL=log_level,
             ENVIRONMENT=environment,
         )
+
+        # External identity provider (AUTH_MODE=oauth): fail fast on an unusable setup
+        # instead of serving 401s with the OAuth router never mounted.
+        if config.OAUTH_IDP_ISSUER:
+            from wazuh_mcp_server.oidc import validate_idp_settings
+
+            try:
+                validate_idp_settings(config)
+            except ValueError as exc:
+                raise ConfigurationError(str(exc)) from exc
+            if config.AUTH_MODE != "oauth":
+                logging.getLogger(__name__).warning(
+                    "OAUTH_IDP_* is configured but AUTH_MODE=%s; the identity provider is only used "
+                    "when AUTH_MODE=oauth",
+                    config.AUTH_MODE,
+                )
+        return config
+
+    @property
+    def wazuh_tls_verify(self) -> Union[bool, str]:
+        """Effective httpx ``verify`` value for the Wazuh Manager connection.
+
+        ``False`` disables certificate verification entirely (WAZUH_VERIFY_SSL=false or
+        WAZUH_ALLOW_SELF_SIGNED=true); a path means "verify against this CA bundle";
+        ``True`` means the system trust store.
+        """
+        if not self.WAZUH_VERIFY_SSL or self.WAZUH_ALLOW_SELF_SIGNED:
+            return False
+        return self.WAZUH_CA_BUNDLE or True
+
+    @property
+    def wazuh_indexer_tls_verify(self) -> Union[bool, str]:
+        """Effective httpx ``verify`` value for the Wazuh Indexer connection."""
+        if not self.WAZUH_INDEXER_VERIFY_SSL:
+            return False
+        return self.WAZUH_CA_BUNDLE or True
+
+    @property
+    def wazuh_tls_verification_disabled(self) -> bool:
+        """True when certificate verification is off for the Manager."""
+        return self.wazuh_tls_verify is False
 
     @property
     def is_authless(self) -> bool:
