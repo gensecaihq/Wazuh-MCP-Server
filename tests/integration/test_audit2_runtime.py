@@ -332,3 +332,22 @@ class TestEntryPoint:
         monkeypatch.setattr(sys, "argv", ["wazuh_mcp_server", "--help"])
         entry.main()
         assert "usage" in capsys.readouterr().out
+
+
+class TestReadyWithRedis:
+    @pytest.mark.asyncio
+    async def test_ready_does_not_fail_on_the_redis_branch(self, monkeypatch):
+        from wazuh_mcp_server.session_store import RedisSessionStore
+
+        class FakeRedisStore(RedisSessionStore):
+            def __init__(self):
+                self.ttl_seconds = 1800
+
+            async def count(self):
+                return 3
+
+        monkeypatch.setattr(mcp_server, "_session_store", FakeRedisStore())
+        monkeypatch.setattr(mcp_server, "_ready_cache", None)
+        async with _http() as client:
+            body = (await client.get("/ready")).json()
+        assert body.get("metrics", {}).get("total_sessions") == 3, body

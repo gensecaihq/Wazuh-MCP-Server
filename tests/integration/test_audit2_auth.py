@@ -249,3 +249,12 @@ class TestRegistrationTableCannotFillUp:
         for _ in range(1001):
             m.register_client({"redirect_uris": ["https://app.example/cb"]})
         assert first.client_id in m.clients
+
+
+class TestKeysWithoutScopesStayReadOnly:
+    @pytest.mark.asyncio
+    async def test_oauth_token_keeps_read(self, monkeypatch, keys, mgr):
+        key = keys.validate_api_key(keys.create_api_key("k", scopes=[]))
+        tokens = _grant(mgr, key.id, "api_key", scope="wazuh:read")
+        assert (await _principal(monkeypatch, mgr, tokens["access_token"])).scopes == ["wazuh:read"]
+        assert mgr.refresh_access_token(tokens["refresh_token"], "claude-desktop")["scope"] == "wazuh:read"

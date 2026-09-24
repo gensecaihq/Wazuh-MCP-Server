@@ -335,7 +335,8 @@ def current_key_scopes(granted: List[str], key_obj: APIKey) -> List[str]:
     Tokens survive restarts (key ids are deterministic), so narrowing a key's scopes has to
     narrow the tokens already issued from it, not only new ones.
     """
-    return [s for s in granted if s in (key_obj.scopes or [])]
+    # A key without a scopes list is read-only everywhere else (sign-in, token minting)
+    return [s for s in granted if s in (key_obj.scopes or ["wazuh:read"])]
 
 
 async def verify_bearer_token(authorization: str) -> AuthToken:

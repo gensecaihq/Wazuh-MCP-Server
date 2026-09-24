@@ -4382,9 +4382,10 @@ async def _evaluate_readiness() -> JSONResponse:
         # Check session count. Redis expires keys itself, and fetching every session there
         # (SCAN + one GET per key) made /ready take seconds with many sessions.
         if isinstance(_session_store, RedisSessionStore):
-            active_sessions = await _session_store.count()
+            total_sessions = active_sessions = await _session_store.count()
         else:
             all_sessions = await sessions.get_all()
+            total_sessions = len(all_sessions)
             active_sessions = len([s for s in all_sessions.values() if not s.is_expired()])
 
         # Build auth info
@@ -4447,7 +4448,7 @@ async def _evaluate_readiness() -> JSONResponse:
                         else "Wazuh Indexer configured"
                     ),
                 },
-                "metrics": {"active_sessions": active_sessions, "total_sessions": len(all_sessions)},
+                "metrics": {"active_sessions": active_sessions, "total_sessions": total_sessions},
                 "endpoints": {
                     "recommended": "/mcp (Streamable HTTP - 2026-07-28 + legacy)",
                     "authentication": (
