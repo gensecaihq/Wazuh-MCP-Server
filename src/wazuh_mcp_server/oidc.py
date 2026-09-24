@@ -341,6 +341,10 @@ class OIDCProvider:
             if claim == "email" and not email_vouched:
                 continue  # fall back to preferred_username / sub
             value = claims.get(claim)
+            if claim != self.subject_claim and claim == "preferred_username" and "@" in str(value or ""):
+                # A fallback username is often user-editable; an e-mail-shaped one would be
+                # audited as (and could collide with) a real, vouched e-mail identity.
+                continue
             if isinstance(value, str) and value.strip():
                 subject, claim_used = value.strip(), claim
                 break
@@ -353,12 +357,17 @@ class OIDCProvider:
         if claim_used != self.subject_claim:
             logger.debug(f"subject claim {self.subject_claim!r} absent; using {claim_used!r}")
 
+        # The allow-list matches identities the provider controls: the configured subject claim,
+        # `sub`, or a vouched e-mail. A fallback `preferred_username` never admits anyone.
         vouched_email = email if email_vouched else ""
-        if (
-            self.allowed_users
-            and subject.lower() not in self.allowed_users
-            and (not vouched_email or vouched_email not in self.allowed_users)
-        ):
+        sub_claim = claims.get("sub")
+        candidates = {vouched_email}
+        if isinstance(sub_claim, str):
+            candidates.add(sub_claim.strip().lower())
+        if claim_used in (self.subject_claim, "sub"):
+            candidates.add(subject.lower())
+        candidates.discard("")
+        if self.allowed_users and not (candidates & set(self.allowed_users)):
             raise IdentityDenied("user not allowed")
 
         groups_raw = claims.get(self.group_claim, [])
@@ -392,6 +401,14 @@ def validate_idp_settings(config) -> None:
         raise ValueError("OAUTH_IDP_ISSUER must be an https:// URL")
     if not getattr(config, "OAUTH_IDP_CLIENT_ID", ""):
         raise ValueError("OAUTH_IDP_CLIENT_ID is required when OAUTH_IDP_ISSUER is set")
+    # IdP sign-in has no consent screen: a user with a live IdP session is redirected straight
+    # back to the client. With open registration, anyone could register a client whose
+    # redirect_uri they control and collect other users' authorization codes.
+    if getattr(config, "OAUTH_ENABLE_DCR", False):
+        raise ValueError(
+            "OAUTH_ENABLE_DCR cannot be combined with OAUTH_IDP_ISSUER (IdP sign-in has no consent "
+            "step, so a self-registered client could receive other users' authorization codes)"
+        )
     if any(m in issuer.lower() for m in MULTI_TENANT_ISSUER_MARKERS) and not _csv(
         getattr(config, "OAUTH_IDP_ALLOWED_TENANTS", "")
     ):

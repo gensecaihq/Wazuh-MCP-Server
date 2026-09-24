@@ -27,13 +27,28 @@ from wazuh_mcp_server.security import install_log_sanitizer  # noqa: E402
 install_log_sanitizer()
 
 
+USAGE = """usage: python -m wazuh_mcp_server
+
+Starts the Wazuh MCP Server (Streamable HTTP on MCP_HOST:MCP_PORT, default 127.0.0.1:3000).
+All settings come from environment variables; see .env.example and docs/configuration.md.
+From a checkout: set -a; . ./.env; set +a; python -m wazuh_mcp_server
+"""
+
+
 def main() -> None:
     """Main entry point for the Wazuh MCP Server."""
+    if any(arg in ("-h", "--help") for arg in sys.argv[1:]):
+        print(USAGE, end="")
+        return
+    if len(sys.argv) > 1:
+        print(f"unknown argument(s): {' '.join(sys.argv[1:])}\n\n{USAGE}", end="", file=sys.stderr)
+        sys.exit(2)
     try:
         from wazuh_mcp_server.server import app
 
         # Get configuration from environment
-        host = os.getenv("MCP_HOST", "0.0.0.0")
+        # Loopback unless configured: the server speaks plain HTTP. The image sets 0.0.0.0.
+        host = os.getenv("MCP_HOST", "127.0.0.1")
         port = int(os.getenv("MCP_PORT", "3000"))
         # Normalize LOG_LEVEL to a value uvicorn accepts. LOG_LEVEL=WARN (valid for the stdlib
         # logging module and accepted elsewhere in the app) is NOT a valid uvicorn level and would
@@ -67,6 +82,9 @@ def main() -> None:
             server_header=False,
             date_header=False,
             timeout_graceful_shutdown=20,
+            # Explicit, or uvicorn reads WEB_CONCURRENCY (set by Heroku and other PaaS) itself
+            # and refuses to start with an app object. State is per-process; see the startup warning.
+            workers=1,
         )
 
     except ImportError as e:

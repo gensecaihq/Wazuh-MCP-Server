@@ -40,8 +40,8 @@ class TestGenericActiveResponse:
             return {"data": {"total_affected_items": 1, "total_failed_items": 0, "failed_items": []}}
 
         client.execute_active_response = fake_exec
-        await client.run_active_response("001", "!kill-process")
-        assert sent["command"] == "!kill-process"
+        await client.run_active_response("001", "!host-isolation")
+        assert sent["command"] == "!host-isolation"
 
     @pytest.mark.asyncio
     async def test_unknown_command_still_rejected(self):

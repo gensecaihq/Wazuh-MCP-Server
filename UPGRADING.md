@@ -36,7 +36,7 @@ Bearer JWTs are now bound to the API key they came from, and `MCP_API_KEY` got a
 - **Fleet-wide blocks** (`all_agents=true` on `wazuh_block_ip`) need `WAZUH_ALLOW_FLEET_AR=true`.
 - **The Manager as a target.** Active response against agent `000` and `wazuh_restart` with `target=manager` need `WAZUH_ALLOW_MANAGER_AR=true`.
 - **Quarantine paths.** `wazuh_quarantine_file` refuses system and agent directories. `WAZUH_QUARANTINE_DENY_PREFIXES` adds to that list; `WAZUH_QUARANTINE_ALLOW_PREFIXES` restricts quarantine to the listed directories.
-- **IP blocks go through the dedicated tools.** `wazuh_active_response` refuses `!firewall-drop` and `!host-deny`; use `wazuh_firewall_drop` or `wazuh_host_deny`. Those tools, like `wazuh_block_ip`, now refuse loopback, the Manager's address and `WAZUH_PROTECTED_IPS`.
+- **Targeted actions go through the dedicated tools.** `wazuh_active_response` refuses `!firewall-drop`, `!host-deny`, `!quarantine`, `!kill-process` and `!disable-account`; use `wazuh_firewall_drop`, `wazuh_host_deny`, `wazuh_quarantine_file`, `wazuh_kill_process` or `wazuh_disable_user`, which validate the target. Those tools, like `wazuh_block_ip`, now refuse loopback, the Manager's address and `WAZUH_PROTECTED_IPS`.
 
 Invalid values for `WAZUH_REQUIRE_ACTION_CONFIRMATION`, `WAZUH_ALLOW_FLEET_AR` and `WAZUH_ALLOW_MANAGER_AR` stop the server at startup.
 
@@ -57,16 +57,21 @@ Settings that used to be misread or only failed on the first tool call now stop 
 - missing `WAZUH_HOST`, `WAZUH_USER` or `WAZUH_PASS`;
 - `ENVIRONMENT` other than `development`/`dev`/`production`/`prod`, or an unknown `AUTH_MODE`;
 - non-positive `RATE_LIMIT_REQUESTS`/`RATE_LIMIT_WINDOW`/`SESSION_TTL_SECONDS`, or `MAX_MEMORY_MB` below 64;
-- a `WAZUH_CA_BUNDLE` or per-cluster `ca_bundle` that does not exist;
-- an incomplete OpenID Connect configuration (for example `OAUTH_IDP_ISSUER` without `OAUTH_IDP_CLIENT_ID`);
+- a `WAZUH_CA_BUNDLE` or per-cluster `ca_bundle` that does not exist or cannot be loaded;
+- an incomplete OpenID Connect configuration (for example `OAUTH_IDP_ISSUER` without `OAUTH_IDP_CLIENT_ID`), or `OAUTH_ENABLE_DCR=true` together with `OAUTH_IDP_ISSUER`;
+- a host setting that includes a port or path (`WAZUH_HOST=https://wazuh:55000/`; use `WAZUH_PORT`), or a CA bundle that is not PEM;
 - invalid `clusters.json` fields (booleans must be true/false, ports 1-65535).
 
 With `REDIS_URL` set, a bad TTL no longer falls back to the in-memory store.
+
+When running from source without `MCP_HOST`, the server now binds `127.0.0.1` instead of `0.0.0.0`. The Docker image and Compose still listen on `0.0.0.0` inside the container.
 
 ### 7. Sessions and rate limits
 
 - A request without `Mcp-Session-Id` that isn't `initialize` is served without creating a session and gets no session header. Clients that skipped `initialize` and reused that header must initialize first, as the MCP specification requires.
 - The in-memory session store is capped at `MAX_SESSIONS` (default 1000) and `MAX_SESSIONS_PER_PRINCIPAL` (default 100). When a cap is reached, the least recently active sessions are evicted; a client whose session was evicted gets `404` and must initialize again. The caps do not apply to the Redis store, which expires sessions itself. Stored client metadata is truncated in both stores.
+- `/` is an alias of `/mcp`. A `GET /` without `Accept: text/event-stream` now gets `405` like `/mcp`, instead of a JSON server description and a new session.
+- With Redis, sessions last `SESSION_TTL_SECONDS` (previously capped at 30 minutes by the server).
 - `RATE_LIMIT_REQUESTS` and `RATE_LIMIT_WINDOW` now apply to `/mcp` and `/`, which previously used the built-in 100 requests per 60 s regardless of the settings.
 
 ### 8. Point legacy clients at `/mcp`

@@ -6,9 +6,9 @@ Every environment variable the server reads, with its default, validation and ef
 
 - The server reads its settings from **process environment variables** only. It does not load a `.env` file on its own.
 - **Docker Compose** passes `.env` to the container through `env_file`. `compose.yml` then overrides three values: `MCP_HOST=0.0.0.0`, `MCP_PORT=3000` and `ENVIRONMENT=production`. `compose.dev.yml` sets `ENVIRONMENT=development` and `LOG_LEVEL=DEBUG` instead.
-- **The Docker image** defaults to `ENVIRONMENT=production`, `MCP_HOST=0.0.0.0`, `MCP_PORT=3000` and `LOG_LEVEL=INFO`. This also applies to `docker run`.
+- **The Docker image** defaults to `ENVIRONMENT=production`, `MCP_HOST=0.0.0.0`, `MCP_PORT=3000` and `LOG_LEVEL=INFO`. With `docker run --env-file .env`, values in `.env` replace these defaults, so pass `-e MCP_HOST=0.0.0.0 -e ENVIRONMENT=production` as the README shows.
 - **Running from source** (`python -m wazuh_mcp_server`): export the variables yourself, for example `set -a; . ./.env; set +a`.
-- In `.env`, quote values that contain spaces or JSON (`MCP_API_KEY_SCOPES="wazuh:read wazuh:write"`, `API_KEYS='[...]'`) so that both Compose and the shell read them intact, and do not put a trailing comment after an empty value (`VAR=  # note` sets `VAR` to the comment text under Compose).
+- In `.env`, quote values that contain spaces or JSON (`MCP_API_KEY_SCOPES="wazuh:read wazuh:write"`, `API_KEYS='[...]'`) so that both Compose and the shell read them intact. `docker run --env-file` keeps the quotes; the server strips one pair of matching surrounding quotes from `MCP_API_KEY_SCOPES`, `API_KEYS` and the `OAUTH_IDP_*` list, scope and map values. Do not put a trailing comment after an empty value (`VAR=  # note` sets `VAR` to the comment text under Compose).
 - Settings are read once, at startup. After changing `.env`, recreate the container with `docker compose up -d`. `docker compose restart` keeps the environment the container was created with.
 
 ### Startup validation
@@ -75,7 +75,7 @@ The Indexer is required for alert search, alert aggregation, vulnerability tools
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `ENVIRONMENT` | `development` (image: `production`) | `development`/`dev` or `production`/`prod`. Any other value fails startup. See [Production requirements](#production-requirements) |
-| `MCP_HOST` | `0.0.0.0` | Bind address. Pinned to `0.0.0.0` inside the Compose container |
+| `MCP_HOST` | `127.0.0.1` (`0.0.0.0` in the Docker image) | Bind address. Pinned to `0.0.0.0` inside the Compose container |
 | `MCP_PORT` | `3000` | Listen port (1–65535). Plain HTTP only; terminate TLS at a reverse proxy. Pinned to `3000` inside the Compose container |
 | `LOG_LEVEL` | `INFO` | `DEBUG`, `INFO`, `WARNING`, `ERROR` or `CRITICAL`. `WARN` is accepted as `WARNING`. Unrecognised values fall back to `INFO` |
 | `LOG_FORMAT` | `text` | `json` writes one JSON object per line, including the request correlation ID and any structured fields. Any other value selects text |
@@ -129,7 +129,7 @@ Because the hash depends on `AUTH_SECRET_KEY`, changing the secret invalidates e
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `OAUTH_ISSUER_URL` | derived from the request | Public base URL of the server, for example `https://mcp.example.com`. When unset, the issuer is built from the request. `X-Forwarded-Proto`/`X-Forwarded-Host` are honoured only from loopback or a `TRUSTED_PROXIES` address. The server logs a warning when this is unset in production |
-| `OAUTH_ENABLE_DCR` | `false` | *Strict.* Enables Dynamic Client Registration at `POST /oauth/register`. The endpoint is unauthenticated. When disabled it returns `400` |
+| `OAUTH_ENABLE_DCR` | `false` | *Strict.* Enables Dynamic Client Registration at `POST /oauth/register`. The endpoint is unauthenticated. When disabled it returns `400`. Refused at startup together with `OAUTH_IDP_ISSUER`: identity-provider sign-in has no consent step, so a self-registered client could receive other users' authorization codes. When 1000 clients are registered, clients without a live code or token are dropped, oldest first |
 | `OAUTH_ACCESS_TOKEN_TTL` | `3600` | Access-token lifetime in seconds (positive integer) |
 | `OAUTH_REFRESH_TOKEN_TTL` | `86400` | Refresh-token lifetime in seconds (positive integer) |
 | `OAUTH_AUTHORIZATION_CODE_TTL` | `600` | Authorization-code lifetime in seconds (positive integer) |
@@ -152,16 +152,16 @@ Set `OAUTH_IDP_ISSUER` to have users authenticate at Entra ID, Google Workspace,
 | `OAUTH_IDP_SCOPES` | `openid email profile` | Scopes requested from the provider |
 | `OAUTH_IDP_ALLOWED_TENANTS` | *(none)* | Comma-separated Entra tenant IDs (`tid` claim) |
 | `OAUTH_IDP_ALLOWED_DOMAINS` | *(none)* | Comma-separated domains, matched against Google's `hd` or the e-mail domain. The e-mail must be vouched for (`email_verified: true`, matching `hd`, or an allow-listed tenant) |
-| `OAUTH_IDP_ALLOWED_USERS` | *(none)* | Comma-separated subjects or vouched e-mail addresses |
+| `OAUTH_IDP_ALLOWED_USERS` | *(none)* | Comma-separated `sub` values, values of `OAUTH_IDP_SUBJECT_CLAIM`, or vouched e-mail addresses. A fallback `preferred_username` never matches |
 | `OAUTH_IDP_GROUP_CLAIM` | `groups` | Claim holding group or role names (`roles` for Entra app roles) |
 | `OAUTH_IDP_GROUP_SCOPE_MAP` | *(none)* | JSON map of group to scopes, e.g. `{"soc-admins": "wazuh:read wazuh:write", "soc-analysts": "wazuh:read"}` |
 | `OAUTH_IDP_DEFAULT_SCOPE` | `wazuh:read` | Scope for users in no mapped group; empty denies them |
-| `OAUTH_IDP_SUBJECT_CLAIM` | `email` | Claim used as the audited identity. An unverified e-mail is never used; the server falls back to `preferred_username`, then `sub` |
+| `OAUTH_IDP_SUBJECT_CLAIM` | `email` | Claim used as the audited identity. An unverified e-mail is never used; the server falls back to `preferred_username` (unless it looks like an e-mail address), then `sub` |
 | `OAUTH_IDP_LOGIN_TTL` | `600` | Seconds a parked authorization request waits for the user to return from the provider (1–3600) |
 
 The granted scope is the user's mapped scope intersected with the client's registered scope. With an IdP configured, the API-key sign-in form is disabled. Parked logins live in process memory, so run one instance or route `/oauth/authorize` and `/oauth/callback` to the same one.
 
-The `OAUTH_IDP_*` settings are validated at startup whenever `OAUTH_IDP_ISSUER` is set, even if `AUTH_MODE` is not `oauth` (a warning is then logged and the provider is not used). Startup fails when the issuer is not `https://`, `OAUTH_IDP_CLIENT_ID` is empty, a multi-tenant Entra issuer has no `OAUTH_IDP_ALLOWED_TENANTS`, a Google issuer has neither `OAUTH_IDP_ALLOWED_DOMAINS` nor `OAUTH_IDP_ALLOWED_USERS`, `OAUTH_IDP_GROUP_SCOPE_MAP` is not a JSON object of strings or maps a group to no known scope, or `OAUTH_IDP_DEFAULT_SCOPE` contains an unknown scope. The provider's discovery document is fetched on the first sign-in, not at startup; if it cannot be fetched, the client is redirected back with `error=temporarily_unavailable`.
+The `OAUTH_IDP_*` settings are validated at startup whenever `OAUTH_IDP_ISSUER` is set, even if `AUTH_MODE` is not `oauth` (a warning is then logged and the provider is not used). Startup fails when the issuer is not `https://`, `OAUTH_IDP_CLIENT_ID` is empty, a multi-tenant Entra issuer has no `OAUTH_IDP_ALLOWED_TENANTS`, a Google issuer has neither `OAUTH_IDP_ALLOWED_DOMAINS` nor `OAUTH_IDP_ALLOWED_USERS`, `OAUTH_IDP_GROUP_SCOPE_MAP` is not a JSON object of strings or maps a group to no known scope, `OAUTH_IDP_DEFAULT_SCOPE` contains an unknown scope, or `OAUTH_ENABLE_DCR=true`. The provider's discovery document is fetched on the first sign-in, not at startup; if it cannot be fetched, the client is redirected back with `error=temporarily_unavailable`.
 
 ## Network, CORS and rate limiting
 

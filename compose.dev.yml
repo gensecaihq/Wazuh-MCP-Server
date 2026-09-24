@@ -33,7 +33,7 @@ services:
       PYTHONUNBUFFERED: 1
 
     ports:
-      - "${MCP_PORT:-3000}:3000"
+      - "${MCP_BIND:-127.0.0.1}:${MCP_PORT:-3000}:3000"
 
     # Development volume mounts: source available in-container for quick edit-restart cycles
     volumes:

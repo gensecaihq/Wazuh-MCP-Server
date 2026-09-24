@@ -1,5 +1,6 @@
 """Configuration management for Wazuh MCP Server."""
 
+import ipaddress
 import logging
 import os
 import ssl
@@ -33,6 +34,19 @@ TLS_FAILURE_HINT = (
     "a subjectAltName matching WAZUH_HOST and set WAZUH_CA_BUNDLE to the CA that signed it, or set "
     "WAZUH_ALLOW_SELF_SIGNED=true to connect without verification."
 )
+
+
+def env_unquoted(name: str, default: str = "") -> str:
+    """A space- or JSON-bearing variable with one pair of matching surrounding quotes removed.
+
+    `.env` files need quotes around such values for Compose and the shell, but
+    `docker run --env-file` passes them through literally: MCP_API_KEY_SCOPES="wazuh:read
+    wazuh:write" then silently became read-only and a quoted JSON map failed to parse.
+    """
+    value = os.getenv(name, default).strip()
+    if len(value) >= 2 and value[0] == value[-1] and value[0] in ("'", '"'):
+        value = value[1:-1].strip()
+    return value
 
 
 def env_bool(name: str, default: bool) -> bool:
@@ -108,7 +122,23 @@ def normalize_host(host: str) -> str:
             host = host[len(prefix) :]
             break
     # Strip trailing slashes
-    return host.rstrip("/")
+    host = host.strip().rstrip("/")
+    # A port or path here used to pass startup and then fail every call
+    # ("Invalid port '47102:55000'"), so refuse it now. The port has its own setting.
+    if "/" in host:
+        raise ConfigurationError(f"Host '{host}' must be a host name or IP address, without a path")
+    try:
+        if ipaddress.ip_address(host).version == 6:
+            return f"[{host}]"  # a bare IPv6 address needs brackets in a URL
+    except ValueError:
+        pass
+    if host.startswith("[") and host.endswith("]"):
+        return host
+    if ":" in host:
+        raise ConfigurationError(
+            f"Host '{host}' includes a port; set it in WAZUH_PORT / WAZUH_INDEXER_PORT (or the cluster's port field)"
+        )
+    return host
 
 
 @dataclass
@@ -134,7 +164,7 @@ class WazuhConfig:
 
     # Transport settings
     mcp_transport: str = "http"  # Default to HTTP/SSE mode
-    mcp_host: str = "0.0.0.0"
+    mcp_host: str = "127.0.0.1"
     mcp_port: int = 3000
 
     # Advanced settings (rarely need to change)
@@ -198,7 +228,7 @@ class WazuhConfig:
             wazuh_indexer_user=os.getenv("WAZUH_INDEXER_USER"),
             wazuh_indexer_pass=os.getenv("WAZUH_INDEXER_PASS"),
             mcp_transport=os.getenv("MCP_TRANSPORT", "http"),  # Default to HTTP/SSE
-            mcp_host=os.getenv("MCP_HOST", "0.0.0.0"),
+            mcp_host=os.getenv("MCP_HOST", "127.0.0.1"),
             mcp_port=safe_int_env("MCP_PORT", "3000", min_val=1, max_val=65535),
             request_timeout_seconds=safe_int_env("REQUEST_TIMEOUT_SECONDS", "30", min_val=1, max_val=300),
             max_alerts_per_query=safe_int_env("MAX_ALERTS_PER_QUERY", "1000", min_val=1, max_val=10000),
@@ -218,7 +248,7 @@ class ServerConfig:
     """Server configuration for MCP Server."""
 
     # MCP Server settings
-    MCP_HOST: str = "0.0.0.0"
+    MCP_HOST: str = "127.0.0.1"
     MCP_PORT: int = 3000
 
     # Authentication settings
@@ -342,10 +372,17 @@ class ServerConfig:
         ca_bundle = os.getenv("WAZUH_CA_BUNDLE", "").strip()
         if ca_bundle and not os.path.isfile(ca_bundle):
             raise ConfigurationError(f"WAZUH_CA_BUNDLE points to a file that does not exist: {ca_bundle}")
+        if ca_bundle:
+            # Load it now: an unreadable or non-PEM file used to pass startup and then fail
+            # every call with "NO_CERTIFICATE_OR_CRL_FOUND"
+            try:
+                tls_verify(ca_bundle)
+            except (ssl.SSLError, OSError) as exc:
+                raise ConfigurationError(f"WAZUH_CA_BUNDLE could not be loaded as PEM certificates: {exc}") from exc
         if ca_bundle and (not env_bool("WAZUH_VERIFY_SSL", True) or env_bool("WAZUH_ALLOW_SELF_SIGNED", False)):
             logging.getLogger(__name__).warning(
-                "WAZUH_CA_BUNDLE is set but certificate verification is disabled "
-                "(WAZUH_VERIFY_SSL=false or WAZUH_ALLOW_SELF_SIGNED=true): the bundle is ignored."
+                "WAZUH_CA_BUNDLE is set but Manager certificate verification is disabled "
+                "(WAZUH_VERIFY_SSL=false or WAZUH_ALLOW_SELF_SIGNED=true): the bundle only applies to the Indexer."
             )
 
         # Validate log level
@@ -373,7 +410,7 @@ class ServerConfig:
             raise ConfigurationError(str(e)) from e
 
         config = cls(
-            MCP_HOST=os.getenv("MCP_HOST", "0.0.0.0"),
+            MCP_HOST=os.getenv("MCP_HOST", "127.0.0.1"),
             MCP_PORT=validate_port(os.getenv("MCP_PORT", "3000"), "MCP_PORT"),
             AUTH_SECRET_KEY=auth_secret,
             TOKEN_LIFETIME_HOURS=validate_positive_int(
@@ -394,13 +431,13 @@ class ServerConfig:
             OAUTH_IDP_ISSUER=os.getenv("OAUTH_IDP_ISSUER", "").strip().rstrip("/"),
             OAUTH_IDP_CLIENT_ID=os.getenv("OAUTH_IDP_CLIENT_ID", "").strip(),
             OAUTH_IDP_CLIENT_SECRET=os.getenv("OAUTH_IDP_CLIENT_SECRET", ""),
-            OAUTH_IDP_SCOPES=os.getenv("OAUTH_IDP_SCOPES", "openid email profile"),
-            OAUTH_IDP_ALLOWED_DOMAINS=os.getenv("OAUTH_IDP_ALLOWED_DOMAINS", ""),
-            OAUTH_IDP_ALLOWED_TENANTS=os.getenv("OAUTH_IDP_ALLOWED_TENANTS", ""),
-            OAUTH_IDP_ALLOWED_USERS=os.getenv("OAUTH_IDP_ALLOWED_USERS", ""),
+            OAUTH_IDP_SCOPES=env_unquoted("OAUTH_IDP_SCOPES", "openid email profile"),
+            OAUTH_IDP_ALLOWED_DOMAINS=env_unquoted("OAUTH_IDP_ALLOWED_DOMAINS", ""),
+            OAUTH_IDP_ALLOWED_TENANTS=env_unquoted("OAUTH_IDP_ALLOWED_TENANTS", ""),
+            OAUTH_IDP_ALLOWED_USERS=env_unquoted("OAUTH_IDP_ALLOWED_USERS", ""),
             OAUTH_IDP_GROUP_CLAIM=os.getenv("OAUTH_IDP_GROUP_CLAIM", "groups").strip() or "groups",
-            OAUTH_IDP_GROUP_SCOPE_MAP=os.getenv("OAUTH_IDP_GROUP_SCOPE_MAP", ""),
-            OAUTH_IDP_DEFAULT_SCOPE=os.getenv("OAUTH_IDP_DEFAULT_SCOPE", "wazuh:read"),
+            OAUTH_IDP_GROUP_SCOPE_MAP=env_unquoted("OAUTH_IDP_GROUP_SCOPE_MAP", ""),
+            OAUTH_IDP_DEFAULT_SCOPE=env_unquoted("OAUTH_IDP_DEFAULT_SCOPE", "wazuh:read"),
             OAUTH_IDP_SUBJECT_CLAIM=os.getenv("OAUTH_IDP_SUBJECT_CLAIM", "email").strip() or "email",
             OAUTH_IDP_LOGIN_TTL=validate_positive_int(
                 os.getenv("OAUTH_IDP_LOGIN_TTL", "600"), "OAUTH_IDP_LOGIN_TTL", max_val=3600

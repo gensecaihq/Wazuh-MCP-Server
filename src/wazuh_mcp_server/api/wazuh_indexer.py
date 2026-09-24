@@ -315,8 +315,8 @@ class WazuhIndexerClient:
 
         def _rule_row(bucket: Dict[str, Any]) -> Dict[str, Any]:
             hits = bucket.get("info", {}).get("hits", {}).get("hits", [])
-            source = hits[0].get("_source", {}) if hits else {}
-            rule = source.get("rule", {}) if isinstance(source, dict) else {}
+            source = (hits[0].get("_source") or {}) if hits else {}
+            rule = (source.get("rule") or {}) if isinstance(source, dict) else {}
             return {
                 "rule_id": bucket.get("key"),
                 "count": bucket.get("doc_count", 0),
@@ -440,7 +440,7 @@ class WazuhIndexerClient:
 
         # Transform to standard Wazuh format
         hits = result.get("hits", {})
-        alerts = [hit.get("_source", {}) for hit in hits.get("hits", [])]
+        alerts = [(hit.get("_source") or {}) for hit in hits.get("hits", [])]
 
         return {
             "data": {
@@ -464,7 +464,7 @@ class WazuhIndexerClient:
         }
         result = await self._search(ALERTS_INDEX, query, size=1, sort=[{"timestamp": {"order": "desc"}}])
         hits = result.get("hits", {}).get("hits", [])
-        return hits[0].get("_source", {}) if hits else None
+        return (hits[0].get("_source") or {}) if hits else None
 
     async def get_vulnerabilities(
         self,
@@ -514,7 +514,7 @@ class WazuhIndexerClient:
         vulnerabilities = []
 
         for hit in hits.get("hits", []):
-            source = hit.get("_source", {})
+            source = hit.get("_source") or {}
             vulnerabilities.append(
                 {
                     "id": source.get("vulnerability", {}).get("id"),
@@ -529,8 +529,8 @@ class WazuhIndexerClient:
                     "detected_at": source.get("vulnerability", {}).get("detected_at"),
                     "published_at": source.get("vulnerability", {}).get("published_at"),
                     "agent": {
-                        "id": source.get("agent", {}).get("id"),
-                        "name": source.get("agent", {}).get("name"),
+                        "id": (source.get("agent") or {}).get("id"),
+                        "name": (source.get("agent") or {}).get("name"),
                     },
                     "package": {
                         "name": source.get("package", {}).get("name"),

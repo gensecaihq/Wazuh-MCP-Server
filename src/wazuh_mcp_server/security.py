@@ -544,6 +544,14 @@ def _canonical_path(path: str) -> str:
     return p.rstrip("/").lower() or "/"
 
 
+_SHORT_NAME_SEGMENT = re.compile(r"~\d")
+
+
+def _strip_windows_segment_suffixes(path: str) -> str:
+    r"""Windows drops trailing dots and spaces from each path segment (C:\Windows.\ is C:\Windows\)."""
+    return "\\".join(seg.rstrip(". ") if seg not in (".", "..") else seg for seg in re.split(r"[\\/]", path))
+
+
 def _is_under(path: str, prefix: str) -> bool:
     """True when `path` is `prefix` or inside it (case-insensitive, / and \\ agnostic)."""
     norm = _canonical_path(path)
@@ -565,9 +573,22 @@ def validate_quarantine_path(value: Any, param_name: str = "file_path") -> str:
         raise ToolValidationError(param_name, "must be an absolute path", "Provide the full path of the file")
     if "\n" in file_path or "\r" in file_path:
         raise ToolValidationError(param_name, "contains a line break", "Provide a single-line path")
+    if is_windows_abs:
+        # Windows spellings the prefix check can't see through: an alternate data stream or
+        # `::$INDEX_ALLOCATION` suffix (C:\Windows::$INDEX_ALLOCATION\System32) and 8.3 short
+        # names (C:\PROGRA~1). Trailing dots and spaces are handled in _canonical_path.
+        if ":" in file_path[2:]:
+            raise ToolValidationError(
+                param_name, "contains ':' after the drive letter", "Alternate data streams are not accepted"
+            )
+        if any(_SHORT_NAME_SEGMENT.search(seg) for seg in re.split(r"[\\/]", file_path)):
+            raise ToolValidationError(param_name, "uses an 8.3 short name", "Provide the full long path")
+        file_path_for_check = _strip_windows_segment_suffixes(file_path)
+    else:
+        file_path_for_check = file_path
 
     allow = _path_prefixes("WAZUH_QUARANTINE_ALLOW_PREFIXES", ())
-    if allow and not any(_is_under(file_path, p) for p in allow):
+    if allow and not any(_is_under(file_path_for_check, p) for p in allow):
         raise ToolValidationError(
             param_name,
             "is outside WAZUH_QUARANTINE_ALLOW_PREFIXES",
@@ -577,7 +598,7 @@ def validate_quarantine_path(value: Any, param_name: str = "file_path") -> str:
     # silently re-allowed /etc/passwd
     deny = DEFAULT_QUARANTINE_DENY_PREFIXES + tuple(_path_prefixes("WAZUH_QUARANTINE_DENY_PREFIXES", ()))
     for prefix in deny:
-        if _is_under(file_path, prefix):
+        if _is_under(file_path_for_check, prefix):
             raise ToolValidationError(
                 param_name,
                 f"is inside protected location {prefix}",
@@ -1043,7 +1064,7 @@ RATE_LIMIT_SELF_LIMITED_PATHS = frozenset({"/", "/mcp", "/sse", "/messages"})
 # (validate_ip, validate_query's restricted simple_query_string, enum whitelists, etc.),
 # so the body scan adds only false positives here. Size limits and header/query-param
 # scanning still apply.
-JSONRPC_BODY_SCAN_EXEMPT_PATHS = frozenset({"/mcp", "/messages"})
+JSONRPC_BODY_SCAN_EXEMPT_PATHS = frozenset({"/", "/mcp", "/messages"})
 
 
 class SecurityManager:

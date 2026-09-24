@@ -523,7 +523,7 @@ show_deployment_summary() {
     echo -e "  • Status: docker compose ps"
     echo -e "  • Logs: docker compose logs -f"
     echo -e "  • Stop: docker compose down"
-    echo -e "  • Restart: docker compose restart"
+    echo -e "  • Apply .env changes: docker compose up -d"
     echo
     echo -e "${CYAN}📖 Next Steps:${NC}"
     echo -e "  1. Test the deployment: curl http://localhost:$port/health"

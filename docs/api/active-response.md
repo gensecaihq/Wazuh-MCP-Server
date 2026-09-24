@@ -73,9 +73,9 @@ Stock Wazuh scripts cannot remove a block through the API, so `wazuh_firewall_al
 |---------|------------|-----------|
 | `wazuh:write` scope | all action and rollback tools | Hidden from `tools/list` and refused for tokens without the scope |
 | Explicit target | all dispatching tools | A request is never sent without an explicit numeric agent ID. The one exception is `wazuh_block_ip` with `all_agents: true`, which is refused unless `WAZUH_ALLOW_FLEET_AR=true`. `wazuh_block_ip` with neither `agent_id` nor `all_agents` is refused |
-| Protected IPs | `wazuh_block_ip`, `wazuh_firewall_drop`, `wazuh_host_deny` | Refuses loopback (`127.0.0.0/8`, `::1`), the Manager's own address (when `WAZUH_HOST` is an IP), and any IP or CIDR in `WAZUH_PROTECTED_IPS`. IPs are canonicalized first, so leading-zero and IPv4-mapped IPv6 forms are caught. `wazuh_active_response` refuses `firewall-drop` and `host-deny`, so every IP block goes through this check |
+| Protected IPs | `wazuh_block_ip`, `wazuh_firewall_drop`, `wazuh_host_deny` | Refuses loopback (`127.0.0.0/8`, `::1`), the Manager's own address (when `WAZUH_HOST` is an IP), and any IP or CIDR in `WAZUH_PROTECTED_IPS`. IPs are canonicalized first, so leading-zero and IPv4-mapped IPv6 forms are caught. `wazuh_active_response` refuses `firewall-drop` and `host-deny`, so every IP block goes through this check. An IPv6 `WAZUH_HOST` is protected as that single address |
 | Agent `000` guard | `wazuh_isolate_host`, `wazuh_kill_process`, `wazuh_disable_user`, `wazuh_quarantine_file`, `wazuh_active_response`, `wazuh_firewall_drop`, `wazuh_host_deny`, `wazuh_block_ip` with an `agent_id`, and `wazuh_restart` with `target=manager` | Refuses the Manager itself unless `WAZUH_ALLOW_MANAGER_AR=true` |
-| Quarantine paths | `wazuh_quarantine_file` | Absolute paths only (POSIX, or Windows drive paths such as `C:\...`). Paths inside a protected directory are refused; see [`wazuh_quarantine_file`](#wazuh_quarantine_file) for the list and the `WAZUH_QUARANTINE_DENY_PREFIXES` / `WAZUH_QUARANTINE_ALLOW_PREFIXES` settings |
+| Quarantine paths | `wazuh_quarantine_file` | Absolute paths only (POSIX, or Windows drive paths such as `C:\...`). Paths inside a protected directory are refused, including Windows spellings that resolve there (trailing dots or spaces in a segment); Windows paths with `:` after the drive letter (alternate data streams) or 8.3 short names (`PROGRA~1`) are refused; see [`wazuh_quarantine_file`](#wazuh_quarantine_file) for the list and the `WAZUH_QUARANTINE_DENY_PREFIXES` / `WAZUH_QUARANTINE_ALLOW_PREFIXES` settings |
 | Argument sanitization | usernames, file paths, IPs, `parameters` | Rejects shell metacharacters (`; & \| \` $ ( ) { } [ ] < > ! ' "`, newline, carriage return, tab). Usernames, file paths and IPs may not start with `-`. Backslash is allowed only in file paths |
 | Confirmation gate | all action and rollback tools | Every write tool advertises an optional boolean `confirm` parameter. The gate is on by default when `ENVIRONMENT=production` and off otherwise; `WAZUH_REQUIRE_ACTION_CONFIRMATION=true`/`false` overrides the default. While it is on, a call without `confirm: true` is refused. While it is off, `confirm` is accepted and ignored |
 | Audit log | all action and rollback tools | `AUDIT:` line before the call and `AUDIT_OUTCOME:` line after it, with principal and target arguments. Calls refused by the scope, confirmation or unknown-argument checks are refused before this point and are not logged |
@@ -296,13 +296,13 @@ Dispatches one of an allowlisted set of active-response commands with optional p
 | Name | Type | Required | Default | Constraints |
 |------|------|----------|---------|-------------|
 | `agent_id` | string | yes | | Target agent. `000` is refused unless `WAZUH_ALLOW_MANAGER_AR=true` |
-| `command` | string | yes | | One of `host-isolation`, `kill-process`, `disable-account`, `enable-account`, `quarantine`, `restart-wazuh`, with or without a leading `!`. `firewall-drop` and `host-deny` are refused here; use `wazuh_firewall_drop` / `wazuh_host_deny`, which apply the protected-target guard |
+| `command` | string | yes | | One of `host-isolation`, `enable-account`, `restart-wazuh`, with or without a leading `!`. `firewall-drop`, `host-deny`, `quarantine`, `kill-process` and `disable-account` are refused here; use `wazuh_firewall_drop`, `wazuh_host_deny`, `wazuh_quarantine_file`, `wazuh_kill_process` or `wazuh_disable_user`, which validate the target |
 | `parameters` | object | no | none | Each key/value pair is sent as one argument `key=value`. Values are sanitized; backslashes are not allowed |
 | `confirm` | boolean | no | none | Set `true` only after a human operator has approved this exact target. Required when the [confirmation gate](#safety-controls) is on (the default in production) |
 
 #### Notes
 
-- Commands outside the allowlist are refused, including custom scripts. `firewall-drop` and `host-deny` are on the allowlist but refused by this tool, because free-form parameters cannot be checked reliably against the protected-IP list; use the dedicated tools. Prefer the dedicated tools for the other commands too, since they validate each argument.
+- Commands outside the allowlist are refused, including custom scripts. `firewall-drop`, `host-deny`, `quarantine`, `kill-process` and `disable-account` are on the allowlist but refused by this tool: free-form parameters would skip the protected-IP, protected-path, PID and username checks the dedicated tools apply.
 
 #### Example
 
@@ -322,6 +322,12 @@ An IP block through the generic tool (`firewall-drop` or `host-deny`, with or wi
 
 ```text
 Tool execution failed: Use wazuh_firewall_drop to run !firewall-drop; the generic tool does not dispatch IP blocks.
+```
+
+A command with a dedicated tool (`quarantine`, `kill-process`, `disable-account`):
+
+```text
+Tool execution failed: Use wazuh_quarantine_file to run !quarantine; its target is validated there.
 ```
 
 ---

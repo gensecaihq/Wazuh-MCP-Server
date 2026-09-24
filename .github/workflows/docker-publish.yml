@@ -23,8 +23,31 @@ env:
   IMAGE_NAME: ${{ github.repository }}
 
 jobs:
+  # Images (including `latest`) are only pushed from a commit whose tests pass
+  test:
+    name: Test
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: '3.13'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[gcf]"
+          pip install pytest pytest-asyncio
+
+      - name: Run tests
+        run: pytest tests/ -q
+
   build-and-push:
     name: Build and push image
+    needs: test
     runs-on: ubuntu-latest
     steps:
       - name: Checkout

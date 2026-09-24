@@ -174,18 +174,23 @@ async def _do_verify_authentication(authorization: Optional[str], config) -> Opt
             token = authorization.replace("Bearer ", "") if authorization.startswith("Bearer ") else authorization
             token_obj = _oauth_manager.validate_access_token(token)
             subject = getattr(token_obj, "subject", None) if token_obj else None
+            key_obj = None
             if subject and getattr(token_obj, "subject_kind", None) == "api_key":
-                # Same binding as bearer JWTs: removing or deactivating the API key the user
-                # signed in with ends their OAuth tokens too, not just at TTL expiry.
-                from wazuh_mcp_server.auth import auth_manager
+                # Same binding as bearer JWTs: removing, deactivating or expiring the API key the
+                # user signed in with ends their OAuth tokens too, not just at TTL expiry.
+                from wazuh_mcp_server.auth import usable_api_key
 
-                key_obj = auth_manager.api_keys.get(subject)
-                if key_obj is None or not key_obj.active:
+                key_obj = usable_api_key(subject)
+                if key_obj is None:
                     token_obj = None
             if token_obj:
                 # Return AuthToken with OAuth scopes (fail closed to read-only)
                 scope_str = getattr(token_obj, "scope", "") or ""
                 scopes = scope_str.split() if scope_str else ["wazuh:read"]
+                if key_obj is not None:
+                    from wazuh_mcp_server.auth import current_key_scopes
+
+                    scopes = current_key_scopes(scopes, key_obj)
                 # Per-user principal for RBAC audit, rate limiting and session bounds: the API key
                 # the user signed in with, or the person the IdP authenticated. Tokens minted
                 # before sign-in existed carry only the (shared) client id.
@@ -229,6 +234,14 @@ class MCPRequest(BaseModel):
         # notifications and never reach this model)
         if value is None:
             raise ValueError("request id must not be null")
+        return value
+
+    @field_validator("id", mode="before")
+    @classmethod
+    def _id_not_bool(cls, value):
+        # Lax int parsing turned `"id": true` into 1, so the reply answered a different id
+        if isinstance(value, bool):
+            raise ValueError("request id must be a string or number")
         return value
 
 
@@ -334,9 +347,15 @@ class MCPSession:
         """Update last activity timestamp."""
         self.last_activity = datetime.now(timezone.utc)
 
-    def is_expired(self, timeout_minutes: int = SESSION_TIMEOUT_MINUTES) -> bool:
-        """Check if session is expired."""
-        timeout = timedelta(minutes=timeout_minutes)
+    def is_expired(self, timeout_minutes: Optional[int] = None) -> bool:
+        """Check if session is expired.
+
+        Defaults to the store's TTL: with Redis that is SESSION_TTL_SECONDS, which a fixed
+        30 minutes here used to override (a longer TTL expired sessions Redis still held)."""
+        if timeout_minutes is None:
+            timeout = timedelta(seconds=getattr(_session_store, "ttl_seconds", SESSION_TIMEOUT_MINUTES * 60))
+        else:
+            timeout = timedelta(minutes=timeout_minutes)
         return datetime.now(timezone.utc) - self.last_activity > timeout
 
     def to_dict(self) -> Dict[str, Any]:
@@ -1134,25 +1153,23 @@ MAX_BATCH_SIZE = 100
 # MCP Protocol Handlers
 
 
-# Patterns to redact from output text (credentials, tokens, keys in log lines)
+# Patterns to redact from output text (credentials, tokens, keys in log lines). Results are
+# usually serialized JSON on one line, so a value ends at whitespace, a quote or an escape
+# (an escaped backslash `\\` is part of the value): unbounded `.+` / `\S+` used to swallow the
+# rest of the result or the closing quote and corrupt the JSON.
+_REDACT_VALUE = r"(?:[^\s\"\\]|\\\\)+"
 _OUTPUT_REDACT_PATTERNS = [
-    _re.compile(r"(?i)(password|passwd|pwd)\s*[=:]\s*\S+"),
-    _re.compile(r"(?i)(api[_-]?key|secret|token)\s*[=:]\s*\S+"),
-    _re.compile(r"(?i)Authorization:\s*.+"),
+    _re.compile(r"(?i)((?:password|passwd|pwd)\s*[=:]\s*)" + _REDACT_VALUE),
+    _re.compile(r"(?i)((?:api[_-]?key|secret|token)\s*[=:]\s*)" + _REDACT_VALUE),
+    # The whole header value ("Bearer <token>"), up to the end of the line or JSON string
+    _re.compile(r"(?i)(Authorization:\s*)(?:[^\"\\\n]|\\\\)+"),
 ]
 
 
 def _sanitize_output_text(text: str) -> str:
     """Redact credentials/tokens from log text before returning to MCP clients."""
     for pattern in _OUTPUT_REDACT_PATTERNS:
-        text = pattern.sub(
-            lambda m: (
-                m.group().split("=")[0] + "=[REDACTED]"
-                if "=" in m.group()
-                else m.group().split(":")[0] + ": [REDACTED]"
-            ),
-            text,
-        )
+        text = pattern.sub(r"\1[REDACTED]", text)
     return text
 
 
@@ -1772,6 +1789,8 @@ async def handle_completion_complete(params: Dict[str, Any], session: MCPSession
     # Reading only `name` left ref_name None for a ref/resource, so ref_name.lower()
     # below raised AttributeError → -32603. Coerce to a safe string.
     ref_name = ref.get("name") or ref.get("uri") or ""
+    if not isinstance(ref_name, str):
+        raise ValueError("ref.name / ref.uri must be a string")
     arg_name = argument.get("name", "")
     arg_value = argument.get("value", "")
 
@@ -2006,7 +2025,12 @@ async def handle_tools_list(params: Dict[str, Any], session: MCPSession) -> Dict
             "inputSchema": {
                 "type": "object",
                 "properties": {
-                    "limit": {"type": "integer", "minimum": 1, "maximum": config.MAX_ALERTS_PER_QUERY, "default": 100},
+                    "limit": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": config.MAX_ALERTS_PER_QUERY,
+                        "default": min(100, config.MAX_ALERTS_PER_QUERY),
+                    },
                     "rule_id": {"type": "string", "description": "Filter by specific rule ID"},
                     "level": {
                         "type": "string",
@@ -2121,7 +2145,12 @@ async def handle_tools_list(params: Dict[str, Any], session: MCPSession) -> Dict
                         "enum": ["1h", "6h", "12h", "1d", "24h", "7d", "30d"],
                         "default": "24h",
                     },
-                    "limit": {"type": "integer", "minimum": 1, "maximum": config.MAX_ALERTS_PER_QUERY, "default": 100},
+                    "limit": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": config.MAX_ALERTS_PER_QUERY,
+                        "default": min(100, config.MAX_ALERTS_PER_QUERY),
+                    },
                     "rule_id": {"type": "string", "description": "Filter by Wazuh rule ID (e.g., '5710', '100002')"},
                     "agent_id": {"type": "string", "description": "Filter by Wazuh agent ID (e.g., '001', '1234')"},
                     "level": {
@@ -2904,6 +2933,8 @@ async def handle_tools_call(params: Dict[str, Any], session: MCPSession) -> Dict
     if cluster_id is not None and not isinstance(cluster_id, str):
         raise ToolValidationError("cluster_id", "must be a string", "Use an id from list_wazuh_clusters")
     wazuh_client = cluster_registry.get(cluster_id)
+    # For the audit lines: which cluster a destructive action actually ran against
+    resolved_cluster = cluster_id or getattr(cluster_registry, "default_id", None) or "default"
 
     # Reject unknown tools before the scope gate: every dispatchable tool is in one of the
     # scope sets, and an unknown name would otherwise surface as a misleading
@@ -2966,7 +2997,7 @@ async def handle_tools_call(params: Dict[str, Any], session: MCPSession) -> Dict
         client_id = auth_token.api_key_id if auth_token else "unknown"
         audit_logger.warning(
             f"AUDIT: tool={tool_name} client={client_id} session={session.session_id} "
-            f"args={json.dumps({k: v for k, v in arguments.items() if k != 'parameters'}, default=str)}"
+            f"cluster={resolved_cluster} args={json.dumps({k: v for k, v in arguments.items() if k != 'parameters'}, default=str)}"
         )
 
     # Track tool execution for metrics
@@ -3091,13 +3122,12 @@ async def handle_tools_call(params: Dict[str, Any], session: MCPSession) -> Dict
             level_raw = arguments.get("level")
             level = None
             if level_raw is not None:
-                level_str = str(level_raw).strip().rstrip("+")
-                try:
-                    int(level_str)
-                    level = str(level_raw).strip()
-                except (ValueError, TypeError):
+                # Same rule as get_wazuh_alerts: -1 or a 20-digit number used to reach the
+                # Indexer as a range query it rejects
+                level = str(level_raw).strip()
+                if not _re.match(r"^[0-9]{1,2}\+?$", level) or int(level.rstrip("+")) > 15:
                     raise ToolValidationError(
-                        "level", f"must be a numeric value, got '{level_raw}'", "Use a number like '10' or '12+'"
+                        "level", f"invalid value '{level_raw}'", "Use a number 0-15, optionally with '+' (e.g. '10+')"
                     )
 
             result = await wazuh_client.search_security_events(
@@ -3574,7 +3604,7 @@ async def handle_tools_call(params: Dict[str, Any], session: MCPSession) -> Dict
             )
             audit_logger.warning(
                 f"AUDIT_OUTCOME: tool={tool_name} outcome={_outcome} principal={_principal} "
-                f"session={session.session_id} duration_ms={int(_duration * 1000)} "
+                f"session={session.session_id} cluster={resolved_cluster} duration_ms={int(_duration * 1000)} "
                 f"args={json.dumps(_safe_args, default=str)}"
             )
 
@@ -3623,7 +3653,8 @@ async def process_mcp_notification(method: str, params: Dict[str, Any], session:
     Process MCP notification (no response expected).
     Per MCP spec, notifications MUST NOT receive responses.
     """
-    if method in MCP_NOTIFICATIONS:
+    # A non-string method (e.g. a list) is unhashable; the lookup used to raise and 500
+    if isinstance(method, str) and method in MCP_NOTIFICATIONS:
         handler = MCP_NOTIFICATIONS[method]
         try:
             await handler(params, session)
@@ -3923,6 +3954,12 @@ def is_json_rpc_response(message: Dict[str, Any]) -> bool:
     return ("result" in message or "error" in message) and "method" not in message
 
 
+def _echo_id(message: Any) -> Optional[Union[str, int, float]]:
+    """The id to answer an invalid request with: its own id when that is a usable JSON-RPC id."""
+    msg_id = message.get("id") if isinstance(message, dict) else None
+    return msg_id if isinstance(msg_id, (str, int, float)) and not isinstance(msg_id, bool) else None
+
+
 def is_json_rpc_request(message: Dict[str, Any]) -> bool:
     """Check if a JSON-RPC message is a request (has 'method' and 'id')."""
     return "method" in message and "id" in message
@@ -3939,252 +3976,20 @@ async def mcp_endpoint(
     last_event_id: Optional[str] = Header(None, alias="Last-Event-ID"),
     mcp_protocol_version: Optional[str] = Header(None, alias="MCP-Protocol-Version"),
 ):
-    """
-    Main MCP protocol endpoint supporting both GET and POST.
-    GET: Returns SSE stream for real-time communication
-    POST: Handles JSON-RPC requests
-    """
-    # Same version gate as /mcp (spec: an unsupported MCP-Protocol-Version gets 400)
-    if mcp_protocol_version and mcp_protocol_version not in SUPPORTED_PROTOCOL_VERSIONS:
-        return _modern_error_response(
-            None,
-            MCP_ERRORS["UNSUPPORTED_PROTOCOL_VERSION"],
-            "Unsupported protocol version",
-            data={"supported": SUPPORTED_PROTOCOL_VERSIONS, "requested": mcp_protocol_version},
-        )
+    """Root alias of /mcp: same transport, sessions, headers and errors.
 
-    # Verify authentication based on configured mode
-    auth_token = await _authenticate(request, authorization)
-
-    # Track active connections (request counting handled by monitoring middleware)
-    ACTIVE_CONNECTIONS.inc()
-    _sse_returned = False  # Track if SSE stream was returned (generator handles decrement)
-
-    try:
-        # Origin validation per MCP 2025-11-25 spec
-        validate_origin_header(origin, config.ALLOWED_ORIGINS)
-
-        # Rate limiting — key on the authenticated principal + trusted-proxy IP so a
-        # single client behind the reverse proxy can't exhaust everyone's shared bucket.
-        allowed, retry_after = rate_limiter.is_allowed(_rate_limit_key(request, auth_token))
-        if not allowed:
-            raise _rate_limited_response(retry_after)
-
-        # Parse POST bodies before touching sessions so modern (2026-07-28) requests
-        # take the same stateless path as on /mcp
-        body = None
-        if request.method == "POST":
-            try:
-                # Depth-capped parse: deep nesting raises RecursionError, not JSONDecodeError.
-                body = parse_json_body_safe(await request.body(), max_depth=MAX_JSON_DEPTH)
-            except (json.JSONDecodeError, ValueError):
-                return JSONResponse(
-                    content=create_error_response(None, MCP_ERRORS["PARSE_ERROR"], "Invalid JSON").dict(),
-                    status_code=400,
-                )
-            header_version = request.headers.get("mcp-protocol-version")
-            if is_modern_request(body, header_version):
-                return await handle_modern_request(
-                    body, extract_modern_meta(body), request, auth_token, header_version, origin
-                )
-
-        # Session validation per MCP Streamable HTTP spec
-        if mcp_session_id:
-            existing_session = await sessions.get(mcp_session_id)
-            if not existing_session:
-                raise HTTPException(
-                    status_code=404, detail="Session not found. Please start a new session with InitializeRequest."
-                )
-            if existing_session.is_expired():
-                await sessions.remove(mcp_session_id)
-                _initialized_sessions.pop(mcp_session_id, None)
-                raise HTTPException(
-                    status_code=404, detail="Session expired. Please start a new session with InitializeRequest."
-                )
-            session = existing_session
-            session.update_activity()
-            await sessions.set(mcp_session_id, session)
-        else:
-            # Only an initialize (or a GET stream) starts a stored session
-            session = await get_or_create_session(
-                None,
-                origin,
-                persist=request.method == "GET" or _is_initialize(body),
-                principal=_principal_of(auth_token),
-            )
-
-        session._auth_token = auth_token  # Store token for scope checks in tool handlers
-
-        # Handle GET request (SSE)
-        if request.method == "GET":
-            if accept and "text/event-stream" in accept:
-                # track_connection=True: decrement happens when stream closes
-                _sse_returned = True
-                response = StreamingResponse(
-                    generate_sse_events(session, track_connection=True),
-                    media_type="text/event-stream",
-                    headers={
-                        "Cache-Control": "no-cache",
-                        "Connection": "keep-alive",
-                        "MCP-Session-Id": session.session_id,
-                        "Access-Control-Expose-Headers": "MCP-Session-Id",
-                    },
-                )
-                return response
-            else:
-                # Return JSON response for non-SSE clients
-                return JSONResponse(
-                    content={
-                        "jsonrpc": "2.0",
-                        "id": None,
-                        "result": {
-                            "protocolVersion": "2025-03-26",
-                            "serverInfo": {"name": "Wazuh MCP Server", "version": __version__},
-                            "session": session.to_dict(),
-                        },
-                    },
-                    headers={"MCP-Session-Id": session.session_id, "Access-Control-Expose-Headers": "MCP-Session-Id"},
-                )
-
-        # Handle POST request (JSON-RPC) — body already parsed above
-        elif request.method == "POST":
-            # Handle batch requests
-            if isinstance(body, list):
-                if not body:
-                    return JSONResponse(
-                        content=create_error_response(
-                            None, MCP_ERRORS["INVALID_REQUEST"], "Empty batch request"
-                        ).dict(),
-                        status_code=400,
-                    )
-                if len(body) > MAX_BATCH_SIZE:
-                    return JSONResponse(
-                        content=create_error_response(
-                            None, MCP_ERRORS["INVALID_REQUEST"], f"Batch too large (max {MAX_BATCH_SIZE})"
-                        ).dict(),
-                        status_code=400,
-                    )
-
-                # Per MCP Streamable HTTP spec: If the input consists solely of
-                # notifications or responses, return HTTP 202 Accepted with no body
-                # Anything that isn't a well-formed notification/response is answered, not dropped:
-                # [1, 2] or [{"jsonrpc": "2.0", "id": 1}] must get Invalid Request errors (JSON-RPC 2.0)
-                has_requests = any(
-                    not (isinstance(item, dict) and (is_json_rpc_notification(item) or is_json_rpc_response(item)))
-                    for item in body
-                )
-
-                if not has_requests:
-                    # Process all notifications before returning 202
-                    for item in body:
-                        if isinstance(item, dict) and is_json_rpc_notification(item):
-                            method = item.get("method", "")
-                            params = item.get("params", {})
-                            await process_mcp_notification(method, params, session)
-                    logger.debug(f"Processed batch of {len(body)} notifications/responses")
-                    return Response(
-                        status_code=202,
-                        headers={
-                            "MCP-Session-Id": session.session_id,
-                            "Access-Control-Expose-Headers": "MCP-Session-Id",
-                        },
-                    )
-
-                # Process batch containing requests
-                responses = []
-                for item in body:
-                    # Process notifications but don't add to responses
-                    if isinstance(item, dict) and is_json_rpc_notification(item):
-                        method = item.get("method", "")
-                        params = item.get("params", {})
-                        await process_mcp_notification(method, params, session)
-                        continue
-                    # Skip responses
-                    if isinstance(item, dict) and is_json_rpc_response(item):
-                        continue
-                    try:
-                        if not isinstance(item, dict):
-                            raise ValidationError.from_exception_data("MCPRequest", line_errors=[], input_type="python")
-                        mcp_request = MCPRequest(**item)
-                        response = await process_mcp_request(mcp_request, session)
-                        responses.append(response.dict())
-                    except (ValidationError, TypeError) as e:
-                        responses.append(
-                            create_error_response(
-                                item.get("id") if isinstance(item, dict) else None,
-                                MCP_ERRORS["INVALID_REQUEST"],
-                                f"Invalid request format: {e}",
-                            ).dict()
-                        )
-
-                return JSONResponse(
-                    content=responses,
-                    headers={"MCP-Session-Id": session.session_id, "Access-Control-Expose-Headers": "MCP-Session-Id"},
-                )
-
-            # Handle single message
-            else:
-                # Per MCP spec: notifications and responses return HTTP 202 Accepted
-                if isinstance(body, dict):
-                    if is_json_rpc_notification(body):
-                        # Process the notification (no response)
-                        method = body.get("method", "")
-                        params = body.get("params", {})
-                        await process_mcp_notification(method, params, session)
-                        logger.debug(f"Processed notification: {method}")
-                        return Response(
-                            status_code=202,
-                            headers={
-                                "MCP-Session-Id": session.session_id,
-                                "Access-Control-Expose-Headers": "MCP-Session-Id",
-                            },
-                        )
-                    elif is_json_rpc_response(body):
-                        # Client sending a response - just acknowledge
-                        logger.debug("Received client response")
-                        return Response(
-                            status_code=202,
-                            headers={
-                                "MCP-Session-Id": session.session_id,
-                                "Access-Control-Expose-Headers": "MCP-Session-Id",
-                            },
-                        )
-
-                # Handle request
-                if not isinstance(body, dict):
-                    return JSONResponse(
-                        content=create_error_response(
-                            None, MCP_ERRORS["INVALID_REQUEST"], "Request body must be a JSON object"
-                        ).dict(),
-                        status_code=400,
-                    )
-                try:
-                    mcp_request = MCPRequest(**body)
-                    response = await process_mcp_request(mcp_request, session)
-                    return JSONResponse(
-                        content=response.dict(),
-                        headers={
-                            "MCP-Session-Id": session.session_id,
-                            "Access-Control-Expose-Headers": "MCP-Session-Id",
-                        },
-                    )
-                except (ValidationError, TypeError) as e:
-                    return JSONResponse(
-                        content=create_error_response(
-                            body.get("id") if isinstance(body, dict) else None,
-                            MCP_ERRORS["INVALID_REQUEST"],
-                            f"Invalid request format: {e}",
-                        ).dict(),
-                        status_code=400,
-                    )
-
-        else:
-            raise HTTPException(status_code=405, detail="Method not allowed")
-
-    finally:
-        # Only decrement for non-SSE responses; SSE generator handles its own decrement
-        if not _sse_returned:
-            ACTIVE_CONNECTIONS.dec()
+    It used to be a separate implementation that drifted: session ids for sessions it never
+    stored, a JSON reply (and a stored session) to a non-SSE GET, and no MCP-Protocol-Version
+    response header."""
+    return await mcp_streamable_http_endpoint(
+        request,
+        authorization=authorization,
+        origin=origin,
+        mcp_protocol_version=mcp_protocol_version,
+        mcp_session_id=mcp_session_id,
+        accept=accept if accept is not None else "application/json",
+        last_event_id=last_event_id,
+    )
 
 
 # The legacy HTTP+SSE transport (2024-11-05) was never functional here: it sent no
@@ -4383,7 +4188,7 @@ async def mcp_streamable_http_endpoint(
                     except (ValidationError, TypeError) as e:
                         responses.append(
                             create_error_response(
-                                item.get("id") if isinstance(item, dict) else None,
+                                _echo_id(item),
                                 MCP_ERRORS["INVALID_REQUEST"],
                                 f"Invalid request format: {e}",
                             ).dict()
@@ -4411,7 +4216,7 @@ async def mcp_streamable_http_endpoint(
             except ValidationError as e:
                 return JSONResponse(
                     content=create_error_response(
-                        None, MCP_ERRORS["INVALID_REQUEST"], f"Invalid MCP request: {str(e)}"
+                        _echo_id(body), MCP_ERRORS["INVALID_REQUEST"], f"Invalid MCP request: {str(e)}"
                     ).dict(),
                     status_code=400,
                     headers=response_headers,
@@ -4574,9 +4379,13 @@ async def _evaluate_readiness() -> JSONResponse:
             except Exception:
                 indexer_status = "unhealthy"
 
-        # Check session count
-        all_sessions = await sessions.get_all()
-        active_sessions = len([s for s in all_sessions.values() if not s.is_expired()])
+        # Check session count. Redis expires keys itself, and fetching every session there
+        # (SCAN + one GET per key) made /ready take seconds with many sessions.
+        if isinstance(_session_store, RedisSessionStore):
+            active_sessions = await _session_store.count()
+        else:
+            all_sessions = await sessions.get_all()
+            active_sessions = len([s for s in all_sessions.values() if not s.is_expired()])
 
         # Build auth info
         auth_info = {

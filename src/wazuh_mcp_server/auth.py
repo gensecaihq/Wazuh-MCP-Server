@@ -18,6 +18,8 @@ import jwt
 from jwt.exceptions import ExpiredSignatureError, PyJWTError
 from pydantic import BaseModel, Field
 
+from wazuh_mcp_server.config import env_unquoted
+
 logger = logging.getLogger(__name__)
 
 
@@ -95,7 +97,7 @@ class AuthManager:
         Set MCP_API_KEY_SCOPES (space-separated, e.g. "wazuh:read wazuh:write") to grant
         write access. Defaults to read-only so destructive tools are opt-in.
         """
-        raw = os.getenv("MCP_API_KEY_SCOPES", "").strip()
+        raw = env_unquoted("MCP_API_KEY_SCOPES")
         if not raw:
             return ["wazuh:read"]
         scopes = [s for s in raw.split() if s in ("wazuh:read", "wazuh:write")]
@@ -137,7 +139,7 @@ class AuthManager:
                 )
 
         # Load from API_KEYS environment variable (JSON format for multiple keys)
-        api_keys_json = os.getenv("API_KEYS")
+        api_keys_json = env_unquoted("API_KEYS") or None
         if api_keys_json:
             try:
                 keys_data = json.loads(api_keys_json)
@@ -317,6 +319,25 @@ class AuthManager:
 auth_manager = AuthManager()
 
 
+def usable_api_key(key_id: Optional[str]) -> Optional[APIKey]:
+    """The API key a token was issued for, if it still exists, is active and has not expired."""
+    key_obj = auth_manager.api_keys.get(key_id) if key_id else None
+    if key_obj is None or not key_obj.active:
+        return None
+    if key_obj.expires_at and datetime.now(timezone.utc) > key_obj.expires_at:
+        return None
+    return key_obj
+
+
+def current_key_scopes(granted: List[str], key_obj: APIKey) -> List[str]:
+    """Scopes a token may still use: those it was granted that its key still holds.
+
+    Tokens survive restarts (key ids are deterministic), so narrowing a key's scopes has to
+    narrow the tokens already issued from it, not only new ones.
+    """
+    return [s for s in granted if s in (key_obj.scopes or [])]
+
+
 async def verify_bearer_token(authorization: str) -> AuthToken:
     """
     Verify bearer token from Authorization header.
@@ -364,11 +385,9 @@ async def verify_bearer_token(authorization: str) -> AuthToken:
         # Bind the token to the API key it was minted from: revoking or rotating the key must
         # end its tokens too, not leave them valid until expiry (24h by default).
         sub = payload.get("sub")
-        key_obj = auth_manager.api_keys.get(sub) if sub else None
-        if key_obj is None or not key_obj.active:
+        key_obj = usable_api_key(sub)
+        if key_obj is None:
             raise ValueError("The API key this token was issued for is no longer valid")
-        if key_obj.expires_at and datetime.now(timezone.utc) > key_obj.expires_at:
-            raise ValueError("The API key this token was issued for has expired")
 
         # Extract timestamps from JWT payload
         exp_timestamp = payload.get("exp")
@@ -385,7 +404,7 @@ async def verify_bearer_token(authorization: str) -> AuthToken:
         # Parse scopes from JWT payload. Fail closed: a token without an explicit
         # scope claim gets read-only, never write.
         scope_string = payload.get("scope", "")
-        scopes = scope_string.split() if scope_string else ["wazuh:read"]
+        scopes = current_key_scopes(scope_string.split() if scope_string else ["wazuh:read"], key_obj)
 
         # Derive a stable per-principal id for rate-limit bucketing. Prefer the JWT
         # subject (the API key id); fall back to a token hash so distinct tokens
