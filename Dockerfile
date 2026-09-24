@@ -5,7 +5,7 @@
 
 ARG PYTHON_VERSION=3.13
 ARG BUILD_DATE
-ARG VERSION=4.3.0
+ARG VERSION=5.0.0
 
 # Stage 1: Build dependencies
 FROM python:${PYTHON_VERSION}-alpine AS builder
@@ -44,7 +44,7 @@ FROM python:${PYTHON_VERSION}-alpine AS production
 # Redeclare build args inside this stage. ARGs declared before the first FROM are only in scope
 # for FROM lines; without this, the org.opencontainers.image.version/created LABELs below expand
 # to empty strings and the VERSION/BUILD_DATE build-args passed by compose/CI are silently ignored.
-ARG VERSION=4.3.0
+ARG VERSION=5.0.0
 ARG BUILD_DATE
 
 LABEL stage=production

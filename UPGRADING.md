@@ -1,8 +1,8 @@
 # Upgrading
 
-## Upgrading to the next release (after 4.3.0)
+## Upgrading to 5.0.0
 
-These changes are on `main` and listed under "Unreleased" in [CHANGELOG.md](CHANGELOG.md). Most are fixes; the sections below cover the ones that need action or change what clients see. Sections 1 to 3 can stop an existing deployment from working until you act.
+These changes are listed under 5.0.0 in [CHANGELOG.md](CHANGELOG.md). Most are fixes; the sections below cover the ones that need action or change what clients see. Sections 1 to 3 can stop an existing deployment from working until you act.
 
 ### 1. The Manager certificate is verified by default
 

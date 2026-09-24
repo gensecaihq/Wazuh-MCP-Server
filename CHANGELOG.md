@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [5.0.0] - 2026-09-24
+
+Security and correctness release. Several defaults change and can stop an existing 4.x deployment from working until you act: the Manager certificate is verified, OAuth requires sign-in, write tools need `confirm=true` in production, bearer tokens must be re-minted once, and startup refuses invalid settings. Read [UPGRADING.md](https://github.com/gensecaihq/Wazuh-MCP-Server/blob/main/UPGRADING.md#upgrading-to-500) before upgrading.
+
 ### Security
 - **Manager TLS is verified by default** (#127): `WAZUH_ALLOW_SELF_SIGNED` defaults to `false`; earlier versions sent the Manager API password without verifying the certificate, even with `WAZUH_VERIFY_SSL=true`. New `WAZUH_CA_BUNDLE` (and per-cluster `ca_bundle`) for private CAs, checked at startup and passed to httpx as an SSL context. TLS failures now say why and how to fix them instead of "Cannot connect". Stock self-signed Manager certificates need reissuing or an explicit opt-out; see UPGRADING.md.
 - **OAuth now requires sign-in.** `/oauth/authorize` auto-approved every request, and the pre-registered public client was registered for read+write, so anyone who could reach the server got a `wazuh:write` token and could run active response. Users now sign in with their `wazuh_` API key; the grant is capped at that key's scopes and tokens carry the key's identity, so RBAC, rate limits and the audit log are per user. A refresh-token replay revokes that grant only, instead of every user of the shared client. DCR rejects grant types and auth methods the server doesn't implement.

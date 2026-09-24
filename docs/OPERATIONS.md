@@ -13,7 +13,7 @@ docker compose up -d
 
 What `compose.yml` does:
 
-- **Image:** builds `wazuh-main-server:${VERSION:-4.3.0}` locally from the `Dockerfile` and runs it as the `wazuh-main-server` container.
+- **Image:** builds `wazuh-main-server:${VERSION:-5.0.0}` locally from the `Dockerfile` and runs it as the `wazuh-main-server` container.
 - **Environment:** reads `.env` and forces `ENVIRONMENT=production`, so the server refuses to start without `AUTH_SECRET_KEY` and write tools require `confirm=true` (see [Configuration](configuration.md#production-requirements)). The server also refuses to start without `WAZUH_HOST`, `WAZUH_USER` and `WAZUH_PASS`.
 - **Port:** publishes port 3000 on `${MCP_BIND:-127.0.0.1}:${MCP_PORT:-3000}`. The loopback default expects a TLS-terminating reverse proxy on the same host.
 - **Container hardening:** read-only root filesystem, all capabilities dropped, `no-new-privileges`, and a 64 MB tmpfs for `/tmp`.
@@ -45,7 +45,7 @@ python deploy.py cleanup    # docker compose down --volumes --remove-orphans
 
 ### Published image
 
-Release builds are pushed to `ghcr.io/gensecaihq/wazuh-mcp-server`, tagged `<version>` (for example `4.3.0`), `<major>.<minor>` and `v<version>`. Builds from `main` are also tagged `latest`. The image runs as UID 1000 and defaults to `ENVIRONMENT=production`.
+Release builds are pushed to `ghcr.io/gensecaihq/wazuh-mcp-server`, tagged `<version>` (for example `5.0.0`), `<major>.<minor>` and `v<version>`. Builds from `main` are also tagged `latest`. The image runs as UID 1000 and defaults to `ENVIRONMENT=production`.
 
 ## Service management
 
@@ -195,7 +195,7 @@ tar -czf wazuh-mcp-config-$(date +%Y%m%d).tar.gz .env config/
 CI scans each image with Trivy before publishing it and blocks the push on fixable HIGH or CRITICAL findings. To scan a local build:
 
 ```bash
-trivy image wazuh-main-server:${VERSION:-4.3.0}
+trivy image wazuh-main-server:${VERSION:-5.0.0}
 ```
 
 ## Endpoint reference

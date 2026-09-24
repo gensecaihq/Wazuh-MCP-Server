@@ -1,6 +1,6 @@
 # Tool Reference
 
-Reference for the MCP tools exposed by Wazuh MCP Server 4.3.0. The server registers 55 tools; a 56th, `list_wazuh_clusters`, is added only in multi-cluster mode (see [Multi-cluster routing](#multi-cluster-routing)).
+Reference for the MCP tools exposed by Wazuh MCP Server 5.0.0. The server registers 55 tools; a 56th, `list_wazuh_clusters`, is added only in multi-cluster mode (see [Multi-cluster routing](#multi-cluster-routing)).
 
 Every parameter, type, default and limit on these pages is taken from the server's `tools/list` output and the handler code in `src/wazuh_mcp_server/server.py`. Example outputs were produced by running the real handlers against stubbed Wazuh Manager and Indexer responses.
 

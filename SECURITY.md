@@ -4,11 +4,11 @@
 
 | Version | Supported |
 |---------|-----------|
-| 4.3.x   | Yes       |
-| 4.2.x   | Security fixes only |
-| < 4.2   | No        |
+| 5.0.x   | Yes       |
+| 4.3.x   | Security fixes only |
+| < 4.3   | No        |
 
-The current release is 4.3.0. Fixes made after it are listed under "Unreleased" in
+The current release is 5.0.0. Fixes made after it are listed under "Unreleased" in
 [CHANGELOG.md](CHANGELOG.md) until the next release.
 
 ## Reporting a Vulnerability

@@ -94,10 +94,10 @@ Multi-arch images (amd64, arm64) are published to GitHub Container Registry and 
 
 ```bash
 docker pull ghcr.io/gensecaihq/wazuh-mcp-server:latest   # tracks main
-docker pull ghcr.io/gensecaihq/wazuh-mcp-server:4.3.0    # latest tagged release
+docker pull ghcr.io/gensecaihq/wazuh-mcp-server:5.0.0    # latest tagged release
 ```
 
-`latest` is built from `main` and includes the changes listed under *Unreleased* in the [changelog](CHANGELOG.md); `4.3.0` does not. Release tags are published without a `v` prefix (`4.3.0`, `4.3`); releases after 4.3.0 also get a `v`-prefixed alias.
+`latest` is built from `main` and may include changes listed under *Unreleased* in the [changelog](CHANGELOG.md). Release images are tagged `5.0.0`, `5.0` and `v5.0.0` (4.3.0 and earlier have no `v`-prefixed tag). Upgrading from 4.x: read [UPGRADING.md](UPGRADING.md) first.
 
 ```bash
 docker run -d --name wazuh-mcp-server --env-file .env -e MCP_HOST=0.0.0.0 -e ENVIRONMENT=production \
