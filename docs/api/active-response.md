@@ -74,7 +74,7 @@ Stock Wazuh scripts cannot remove a block through the API, so `wazuh_firewall_al
 | `wazuh:write` scope | all action and rollback tools | Hidden from `tools/list` and refused for tokens without the scope |
 | Explicit target | all dispatching tools | A request is never sent without an explicit numeric agent ID, except `wazuh_block_ip` with `all_agents: true`. `wazuh_block_ip` refuses a call that has neither |
 | Protected IPs | `wazuh_block_ip`, `wazuh_firewall_drop`, `wazuh_host_deny` | Refuses loopback (`127.0.0.0/8`, `::1`), the Manager's own address (when `WAZUH_HOST` is an IP), and any IP or CIDR in `WAZUH_PROTECTED_IPS`. IPs are canonicalized first, so IPv4-mapped IPv6 forms are caught |
-| Agent `000` guard | `wazuh_isolate_host`, `wazuh_kill_process`, `wazuh_disable_user`, `wazuh_quarantine_file`, `wazuh_active_response` | Refuses agent `000` (the Manager itself) unless `WAZUH_ALLOW_MANAGER_AR=true` |
+| Agent `000` guard | `wazuh_isolate_host`, `wazuh_kill_process`, `wazuh_disable_user`, `wazuh_quarantine_file`, `wazuh_active_response`, `wazuh_firewall_drop`, `wazuh_host_deny`, and `wazuh_block_ip` with an `agent_id` | Refuses agent `000` (the Manager itself) unless `WAZUH_ALLOW_MANAGER_AR=true` |
 | Argument sanitization | usernames, file paths, IPs, `parameters` | Rejects shell metacharacters (`; & \| \` $ ( ) { } [ ] < > ! ' "`, newline, carriage return, tab). Usernames, file paths and IPs may not start with `-`. Backslash is allowed only in file paths |
 | Confirmation gate | all action and rollback tools | With `WAZUH_REQUIRE_ACTION_CONFIRMATION=true`, the tool gains a `confirm` parameter and is refused unless `confirm: true` |
 | Audit log | all action and rollback tools | `AUDIT:` line before the call and `AUDIT_OUTCOME:` line after it, with principal and target arguments |
@@ -272,7 +272,7 @@ Dispatches one of an allowlisted set of active-response commands with optional p
 | Name | Type | Required | Default | Constraints |
 |------|------|----------|---------|-------------|
 | `agent_id` | string | yes | | Target agent. `000` is refused unless `WAZUH_ALLOW_MANAGER_AR=true` |
-| `command` | string | yes | | One of `firewall-drop`, `host-isolation`, `kill-process`, `disable-account`, `enable-account`, `quarantine`, `host-deny`, `restart-wazuh`, with or without a leading `!` |
+| `command` | string | yes | | One of `host-isolation`, `kill-process`, `disable-account`, `enable-account`, `quarantine`, `restart-wazuh`, with or without a leading `!`. `firewall-drop` and `host-deny` are refused here; use `wazuh_firewall_drop` / `wazuh_host_deny`, which apply the protected-target guard |
 | `parameters` | object | no | none | Each key/value pair is sent as one argument `key=value`. Values are sanitized; backslashes are not allowed |
 
 #### Notes
@@ -291,6 +291,12 @@ Result: see [How dispatch works](#how-dispatch-works) (label `Active Response Re
 
 ```text
 Tool execution failed: Unknown active response command: !my-script. Allowed commands: !disable-account, !enable-account, !firewall-drop, !host-deny, !host-isolation, !kill-process, !quarantine, !restart-wazuh
+```
+
+An IP block through the generic tool:
+
+```text
+Tool execution failed: Use wazuh_firewall_drop to run !firewall-drop; the generic tool does not dispatch IP blocks.
 ```
 
 ---

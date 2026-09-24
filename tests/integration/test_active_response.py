@@ -26,9 +26,9 @@ class TestGenericActiveResponse:
             return {"data": {"total_affected_items": 1, "total_failed_items": 0, "failed_items": []}}
 
         client.execute_active_response = fake_exec
-        # Previously "firewall-drop" failed validation-vs-allowlist; now it normalizes.
-        await client.run_active_response("001", "firewall-drop")
-        assert sent["command"] == "!firewall-drop"
+        # Previously a bare command name failed validation-vs-allowlist; now it normalizes.
+        await client.run_active_response("001", "restart-wazuh")
+        assert sent["command"] == "!restart-wazuh"
 
     @pytest.mark.asyncio
     async def test_bang_form_still_accepted(self):

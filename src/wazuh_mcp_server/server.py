@@ -3207,6 +3207,10 @@ async def handle_tools_call(params: Dict[str, Any], session: MCPSession) -> Dict
             # all_agents="false" (LLMs routinely send stringly-typed booleans) into a
             # fleet-wide block. validate_boolean maps "false"/"0"/"no"/"off" → False.
             all_agents = validate_boolean(arguments.get("all_agents"), default=False, param_name="all_agents")
+            # Blocking traffic on the manager's own agent can cut agents and analysts off from it.
+            # Fleet-wide blocks are a separate decision (all_agents), not an agent-000 target.
+            if agent_id:
+                _guard_manager_agent(agent_id, tool_name)
             result = await wazuh_client.block_ip(ip_address, agent_id=agent_id, all_agents=all_agents)
             _success = True
             return _tool_result(f"Block IP Result:\n{json.dumps(result, indent=2, default=str)}")
@@ -3260,6 +3264,7 @@ async def handle_tools_call(params: Dict[str, Any], session: MCPSession) -> Dict
 
         elif tool_name == "wazuh_firewall_drop":
             agent_id = validate_agent_id(arguments.get("agent_id"), required=True)
+            _guard_manager_agent(agent_id, tool_name)
             src_ip = validate_ip_address(arguments.get("src_ip"), required=True, param_name="src_ip")
             _reject_block_duration(arguments)
             result = await wazuh_client.firewall_drop(agent_id, src_ip)
@@ -3268,6 +3273,7 @@ async def handle_tools_call(params: Dict[str, Any], session: MCPSession) -> Dict
 
         elif tool_name == "wazuh_host_deny":
             agent_id = validate_agent_id(arguments.get("agent_id"), required=True)
+            _guard_manager_agent(agent_id, tool_name)
             src_ip = validate_ip_address(arguments.get("src_ip"), required=True, param_name="src_ip")
             result = await wazuh_client.host_deny(agent_id, src_ip)
             _success = True
