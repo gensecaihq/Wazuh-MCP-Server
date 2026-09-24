@@ -1,459 +1,306 @@
-# Alert Management API
+# Alerts
 
-Complete reference for Wazuh alert management tools. These tools provide comprehensive access to Wazuh security alerts with advanced filtering, pattern analysis, and threat intelligence capabilities.
+Tools in the `alerts` toolset. All five read the `wazuh-alerts-*` index on the Wazuh Indexer; the Manager API has no alerts endpoint. They require `WAZUH_INDEXER_HOST` and return an `isError` result when it is not set.
 
-## Overview
+| Tool | Purpose |
+|------|---------|
+| [`get_wazuh_alerts`](#get_wazuh_alerts) | Alert documents with filters |
+| [`get_wazuh_alert_summary`](#get_wazuh_alert_summary) | Alert counts grouped by one field |
+| [`get_alerts_aggregated`](#get_alerts_aggregated) | Complete totals, top rules, levels and agents for a window |
+| [`analyze_alert_patterns`](#analyze_alert_patterns) | Rules firing at or above a frequency threshold |
+| [`search_security_events`](#search_security_events) | Free-text search plus structured filters |
 
-The alert management tools offer four main capabilities:
-- **Alert Retrieval**: Query alerts with flexible filtering options
-- **Alert Summarization**: Statistical analysis and grouping of alerts
-- **Pattern Analysis**: AI-powered trend identification and anomaly detection
-- **Event Search**: Advanced full-text search across security events
-
----
-
-## 🚨 get_wazuh_alerts
-
-Retrieve Wazuh security alerts with comprehensive filtering options.
-
-### Parameters
-
-| Parameter | Type | Default | Required | Description |
-|-----------|------|---------|----------|-------------|
-| `limit` | integer | `100` | No | Maximum number of alerts to retrieve (1-1000) |
-| `rule_id` | string | `null` | No | Filter by specific Wazuh rule ID |
-| `level` | string | `null` | No | **Minimum** severity threshold — a number, optionally with `+` (e.g. `'10'` or `'10+'` → level ≥ 10). Ranges are not supported |
-| `agent_id` | string | `null` | No | Filter by specific agent ID |
-| `rule_groups` | array of strings | `null` | No | Filter by rule group(s), e.g. `["authentication_failed", "firewall"]` — matches alerts in ANY listed group (max 20) |
-| `timestamp_start` | string | `null` | No | Start time. ISO 8601 (`2024-01-01T00:00:00Z`) or relative date math (`now-24h`, `now-7d`) |
-| `timestamp_end` | string | `null` | No | End time. ISO 8601 (`2024-01-01T23:59:59Z`) or relative date math (`now`, `now-1h`) |
-| `compact` | boolean | `true` | No | Return compact alerts (essential fields only) to avoid token limits |
-
-### Usage Examples
-
-#### Basic Alert Retrieval
-```
-Ask Claude: "Show me the latest 50 security alerts"
-```
-
-This queries:
-- `limit`: 50
-- Other parameters: default values
-
-#### Filter by Alert Level
-```
-Ask Claude: "Show me all critical alerts from the last hour"
-```
-
-This queries:
-- `level`: "12+" (critical and above)
-- `timestamp_start`: 1 hour ago
-- `limit`: 100 (default)
-
-#### Filter by Specific Agent
-```
-Ask Claude: "Get alerts from agent 001 for the last 24 hours"
-```
-
-This queries:
-- `agent_id`: "001"
-- `timestamp_start`: 24 hours ago
-- `limit`: 100 (default)
-
-#### Complex Filtering
-```
-Ask Claude: "Show me rule 5715 alerts from agent 001 in the last 6 hours"
-```
-
-This queries:
-- `rule_id`: "5715"
-- `agent_id`: "001"
-- `timestamp_start`: 6 hours ago
-
-### Response Format
-
-```json
-{
-  "data": [
-    {
-      "id": "alert_12345",
-      "timestamp": "2024-01-01T14:30:00Z",
-      "rule": {
-        "id": 5715,
-        "level": 8,
-        "description": "Multiple authentication failures"
-      },
-      "agent": {
-        "id": "001",
-        "name": "web-server-01",
-        "ip": "192.168.1.100"
-      },
-      "location": "/var/log/auth.log",
-      "full_log": "Failed password for admin from 192.168.1.200",
-      "decoder": {
-        "name": "sshd"
-      }
-    }
-  ],
-  "total": 156,
-  "pagination": {
-    "limit": 100,
-    "offset": 0,
-    "pages": 2
-  },
-  "metadata": {
-    "query_time": "2024-01-01T15:00:00Z",
-    "api_source": "wazuh_indexer",
-    "search_time_ms": 234
-  }
-}
-```
-
-### Common Use Cases
-
-1. **Security Dashboard**: Real-time alert monitoring
-2. **Incident Investigation**: Historical alert analysis
-3. **Compliance Reporting**: Alert documentation for audits
-4. **Threat Hunting**: Pattern identification across time ranges
-
-### Error Responses
-
-```json
-{
-  "error": "Invalid timestamp. Use ISO 8601 (YYYY-MM-DDTHH:MM:SSZ) or relative date math (e.g. now-24h)",
-  "error_code": "INVALID_TIMESTAMP",
-  "timestamp": "2024-01-01T15:00:00Z"
-}
-```
+Conventions shared by all tools (argument formats, errors, compact mode, truncation, GCF) are described in the [tool reference overview](README.md).
 
 ---
 
-## 📊 get_wazuh_alert_summary
+## get_wazuh_alerts
 
-Get statistical summaries of alerts grouped by specified criteria.
+Returns alert documents, newest first, with optional filters. All filters are combined with AND.
 
-### Parameters
-
-| Parameter | Type | Default | Required | Description |
-|-----------|------|---------|----------|-------------|
-| `time_range` | string | `"24h"` | No | Time range for analysis: `1h`, `6h`, `12h`, `1d`, `24h`, `7d`, `30d` |
-| `group_by` | string | `"rule.level"` | No | Field to group alerts by |
-
-### Grouping Options
-
-| Group By | Description | Example Output |
-|----------|-------------|----------------|
-| `rule.level` | Alert severity levels | Level 12: 45 alerts, Level 10: 23 alerts |
-| `rule.id` | Specific rules | Rule 5715: 12 alerts, Rule 1002: 8 alerts |
-| `agent.name` | Agent hostnames | web-server-01: 15 alerts, db-server-02: 7 alerts |
-| `agent.id` | Agent IDs | Agent 001: 15 alerts, Agent 002: 7 alerts |
-| `decoder.name` | Log decoders | sshd: 20 alerts, apache: 15 alerts |
-| `location` | Log file locations | /var/log/auth.log: 25 alerts |
-
-### Usage Examples
-
-#### Alert Level Summary
-```
-Ask Claude: "Give me a summary of alerts by severity for the last 24 hours"
-```
-
-This queries:
-- `time_range`: "24h"
-- `group_by`: "rule.level"
-
-#### Agent-Based Summary
-```
-Ask Claude: "Show me which agents have the most alerts this week"
-```
-
-This queries:
-- `time_range`: "7d"
-- `group_by`: "agent.name"
-
-#### Rule Analysis
-```
-Ask Claude: "What are the most frequent alert rules in the last hour?"
-```
-
-This queries:
-- `time_range`: "1h"
-- `group_by`: "rule.id"
-
-### Response Format
-
-```json
-{
-  "summary": {
-    "time_range": "24h",
-    "total_alerts": 342,
-    "grouped_by": "rule.level",
-    "groups": [
-      {
-        "key": "12",
-        "label": "Critical (Level 12)",
-        "count": 45,
-        "percentage": 13.16,
-        "trend": "increasing"
-      },
-      {
-        "key": "10",
-        "label": "High (Level 10)",
-        "count": 89,
-        "percentage": 26.02,
-        "trend": "stable"
-      },
-      {
-        "key": "8",
-        "label": "Medium (Level 8)",
-        "count": 156,
-        "percentage": 45.61,
-        "trend": "decreasing"
-      }
-    ]
-  },
-  "metadata": {
-    "query_time": "2024-01-01T15:00:00Z",
-    "period_start": "2024-01-01T15:00:00Z",
-    "period_end": "2024-01-02T15:00:00Z"
-  }
-}
-```
-
----
-
-## 📈 get_alerts_aggregated
-
-Summarize **all** alerts in a time window using Indexer aggregations (`size=0`), with no per-document limit. Unlike `get_wazuh_alerts`/`get_wazuh_alert_summary` (which read at most the most recent documents), this returns the true total match count plus the top rules, severity levels, and agents for the period — ideal for "what happened in the last 7 days" overviews on busy deployments.
+- **Scope:** `wazuh:read`
+- **Data source:** Indexer, `wazuh-alerts-*`
 
 ### Parameters
 
-| Parameter | Type | Default | Required | Description |
-|-----------|------|---------|----------|-------------|
-| `timestamp_start` | string | `now-24h` | No | Start of window. ISO 8601 or relative date math (`now-7d`) |
-| `timestamp_end` | string | `now` | No | End of window. ISO 8601 or relative date math (`now`) |
-| `top_rules` | integer | `50` | No | Number of top rules to return (1–500) |
-| `top_agents` | integer | `50` | No | Number of top agents to return (1–500) |
+| Name | Type | Required | Default | Constraints |
+|------|------|----------|---------|-------------|
+| `limit` | integer | no | `100` | 1 to 1000 |
+| `rule_id` | string | no | none | 1 to 6 digits, exact match on `rule.id` |
+| `level` | string | no | none | Minimum rule level: one or two digits with optional `+` (`"10"` and `"10+"` both mean level 10 and above) |
+| `agent_id` | string | no | none | Agent ID, exact match on `agent.id` |
+| `rule_groups` | array of string | no | none | Up to 20 group names (letters, digits, `.`, `_`, `-`; max 64 chars each). Matches alerts in any of the listed groups |
+| `timestamp_start` | string | no | none | ISO 8601 or date math, e.g. `now-24h` |
+| `timestamp_end` | string | no | none | ISO 8601 or date math, e.g. `now` |
+| `compact` | boolean | no | `true` | Return essential fields only |
 
-### Response Format
+### Notes
 
-```json
-{
-  "time_range": { "gte": "now-7d", "lte": "now" },
-  "total_alerts": 53312,
-  "top_rules": [
-    { "rule_id": "100200", "count": 533, "description": "File modified in /root", "level": 7 }
-  ],
-  "by_level": [ { "level": 10, "count": 42 } ],
-  "top_agents": [ { "agent": "web-01", "count": 400 } ]
-}
-```
+- Without `timestamp_start`/`timestamp_end` there is no time bound: the tool returns the newest `limit` alerts in the index.
+- `total_affected_items` is the true number of matching alerts, not the number returned.
+- Compact records keep `timestamp`, `agent` (`id`, `name`), `rule` (`id`, `level`, `description`, `groups`, and `mitre` when present), `srcip` and `dstip` (from `data.*`, when present), `syscheck` (`path`, `event`, when present) and `full_log` (first 300 characters).
+- A `_warning` is added when the match count reaches `limit`.
 
-Requires the Wazuh Indexer to be configured (`WAZUH_INDEXER_HOST`).
+### Example
 
----
-
-## 🔍 analyze_alert_patterns
-
-Analysis of alert patterns to identify trends, anomalies, and potential security issues.
-
-### Parameters
-
-| Parameter | Type | Default | Required | Description |
-|-----------|------|---------|----------|-------------|
-| `time_range` | string | `"24h"` | No | Time range for pattern analysis |
-| `min_frequency` | integer | `5` | No | Minimum frequency for pattern detection |
-
-### Usage Examples
-
-#### Daily Pattern Analysis
-```
-Ask Claude: "Analyze alert patterns from the last 24 hours"
-```
-
-#### Anomaly Detection
-```
-Ask Claude: "Find unusual alert patterns that occurred more than 10 times today"
-```
-
-This queries:
-- `time_range`: "24h"
-- `min_frequency`: 10
-
-### Response Format
+Arguments:
 
 ```json
+{"level": "5+", "agent_id": "3", "timestamp_start": "now-24h", "limit": 2}
+```
+
+Result (compact, pretty-printed, one record shown):
+
+```text
+Wazuh Alerts:
 {
-  "analysis": {
-    "time_range": "24h",
-    "total_patterns": 12,
-    "anomalies_detected": 3,
-    "patterns": [
+  "data": {
+    "affected_items": [
       {
-        "pattern_id": "pattern_001",
-        "type": "temporal_clustering",
-        "description": "SSH brute force attacks concentrated between 02:00-04:00 UTC",
-        "frequency": 45,
-        "severity": "high",
-        "agents_affected": ["001", "003", "007"],
-        "rules_involved": [5715, 5716],
-        "recommendation": "Implement rate limiting on SSH service during off-hours"
-      },
-      {
-        "pattern_id": "pattern_002",
-        "type": "geographical_anomaly",
-        "description": "Login attempts from unusual geographic locations",
-        "frequency": 12,
-        "severity": "medium",
-        "source_countries": ["Unknown", "TOR Exit Node"],
-        "recommendation": "Review and potentially block suspicious IP ranges"
+        "timestamp": "2026-09-24T09:41:07.512+0000",
+        "agent": {"id": "003", "name": "web-01"},
+        "rule": {
+          "id": "5710",
+          "level": 5,
+          "description": "sshd: Attempt to login using a non-existent user",
+          "groups": ["syslog", "sshd", "authentication_failed", "invalid_login"],
+          "mitre": {"id": ["T1110.001"], "tactic": ["Credential Access"], "technique": ["Password Guessing"]}
+        },
+        "srcip": "203.0.113.45",
+        "full_log": "Sep 24 09:41:07 web-01 sshd[23114]: Invalid user admin from 203.0.113.45 port 51122"
       }
     ],
-    "trends": {
-      "overall_trend": "increasing",
-      "hourly_distribution": {
-        "peak_hours": ["02:00", "03:00", "14:00"],
-        "quiet_hours": ["06:00", "07:00", "08:00"]
-      }
-    }
-  }
+    "total_affected_items": 4231,
+    "total_failed_items": 0,
+    "failed_items": []
+  },
+  "_warning": "Results may be truncated (4231 items returned, limit was 2). Use more specific filters (time_range, agent_id, rule_id, level) or increase limit for complete results."
 }
 ```
 
 ---
 
-## 🔎 search_security_events
+## get_wazuh_alert_summary
 
-Advanced full-text search across all Wazuh security events and logs.
+Counts alerts in a time window, grouped by one field.
+
+- **Scope:** `wazuh:read`
+- **Data source:** Indexer, `wazuh-alerts-*`
 
 ### Parameters
 
-| Parameter | Type | Default | Required | Description |
-|-----------|------|---------|----------|-------------|
-| `query` | string | - | **Yes** | Free-text search (Indexer `simple_query_string`: AND/OR/NOT, quoted phrases, trailing `*` prefix — no leading wildcards or regex) |
-| `time_range` | string | `"24h"` | No | Time range (`1h`, `6h`, `12h`, `1d`, `24h`, `7d`, `30d`) |
-| `limit` | integer | `100` | No | Maximum number of events to retrieve |
-| `rule_id` | string | `null` | No | Filter by rule ID |
-| `agent_id` | string | `null` | No | Filter by agent ID |
-| `level` | string | `null` | No | Minimum severity threshold (e.g. `10` or `10+`) |
-| `srcip` | string | `null` | No | Filter by source IP (`data.srcip`) |
-| `dstip` | string | `null` | No | Filter by destination IP (`data.dstip`) |
-| `compact` | boolean | `true` | No | Return compact results |
+| Name | Type | Required | Default | Constraints |
+|------|------|----------|---------|-------------|
+| `time_range` | string | no | `24h` | `1h`, `6h`, `12h`, `1d`, `24h`, `7d`, `30d` |
+| `group_by` | string | no | `rule.level` | `rule.level`, `rule.id`, `rule.groups`, `agent.id`, `agent.name` |
 
-### Search Query Syntax
+### Notes
 
-#### Basic Search
-```
-Ask Claude: "Search for events containing 'failed login'"
-```
+- Grouping is done in the server over the newest 1,000 alerts in the window. `total_alerts` is the true match count; `alerts_sampled` is the number grouped. When the window holds more than 1,000 alerts, `truncated` is `true` and a `truncation_warning` is included. Use [`get_alerts_aggregated`](#get_alerts_aggregated) for complete counts.
+- With `group_by: "rule.groups"`, an alert is counted once in each of its groups.
 
-#### IP Address Search
-```
-Ask Claude: "Find all events related to IP address 192.168.1.100"
-```
+### Example
 
-#### Pattern Search
-```
-Ask Claude: "Search for SSH connection attempts in the last 6 hours"
-```
-
-#### Complex Queries
-```
-Ask Claude: "Find events with 'authentication failure' AND 'root' in the last hour"
-```
-
-### Response Format
+Arguments:
 
 ```json
+{"time_range": "24h", "group_by": "rule.level"}
+```
+
+Result:
+
+```text
+Alert Summary:
 {
-  "search_results": {
-    "query": "failed login",
+  "data": {
     "time_range": "24h",
-    "total_matches": 89,
-    "events": [
-      {
-        "timestamp": "2024-01-01T14:30:00Z",
-        "agent": {
-          "id": "001",
-          "name": "web-server-01"
-        },
-        "rule": {
-          "id": 5715,
-          "level": 8,
-          "description": "Multiple authentication failures"
-        },
-        "full_log": "Failed password for root from 192.168.1.200 port 22 ssh2",
-        "matched_terms": ["failed", "login"],
-        "context": {
-          "location": "/var/log/auth.log",
-          "decoder": "sshd"
-        }
-      }
-    ]
-  },
-  "search_metadata": {
-    "search_time_ms": 156,
-    "indexes_searched": ["wazuh-alerts", "wazuh-events"],
-    "query_complexity": "simple"
+    "group_by": "rule.level",
+    "total_alerts": 4231,
+    "alerts_sampled": 3,
+    "truncated": true,
+    "groups": {"5": 1, "10": 1, "7": 1},
+    "truncation_warning": "Grouping reflects the newest 3 of 4231 matching alerts."
   }
 }
 ```
 
 ---
 
-## 💡 Best Practices
+## get_alerts_aggregated
 
-### Performance Optimization
+Summarizes every alert in a time window using Indexer aggregations. There is no document limit, so the counts are complete. Prefer this tool over `get_wazuh_alerts` or `get_wazuh_alert_summary` when the goal is an overview of a period.
 
-1. **Use Appropriate Time Ranges**: Shorter time ranges return results faster
-2. **Limit Result Sets**: Use reasonable limits to prevent timeouts
-3. **Specific Filtering**: Use agent_id and rule_id filters when possible
+- **Scope:** `wazuh:read`
+- **Data source:** Indexer, `wazuh-alerts-*` (aggregation query, no documents returned)
 
-### Security Considerations
+### Parameters
 
-1. **Input Validation**: All parameters are validated for security
-2. **Access Control**: Respect Wazuh user permissions
-3. **Rate Limiting**: Don't exceed API rate limits
+| Name | Type | Required | Default | Constraints |
+|------|------|----------|---------|-------------|
+| `timestamp_start` | string | no | `now-24h` | ISO 8601 or date math |
+| `timestamp_end` | string | no | `now` | ISO 8601 or date math |
+| `top_rules` | integer | no | `50` | 1 to 500 |
+| `top_agents` | integer | no | `50` | 1 to 500 |
 
-### Common Patterns
+### Notes
 
-#### Investigation Workflow
-1. Start with `get_wazuh_alert_summary` for overview
-2. Use `get_wazuh_alerts` for specific alert details
-3. Apply `analyze_alert_patterns` for anomaly detection
-4. Use `search_security_events` for detailed forensics
+- Returns `total_alerts`, the `top_rules` rule IDs by count (with description and level), up to 20 rule levels in `by_level`, and the `top_agents` agents by count. Agents are bucketed by `agent.name`.
+- The result is not wrapped in a `data` object.
 
-#### Dashboard Integration
-1. `get_wazuh_alert_summary` for statistics widgets
-2. `get_wazuh_alerts` with recent timestamps for real-time feeds
-3. `analyze_alert_patterns` for trending information
+### Example
 
----
+Arguments:
 
-## 🔧 Troubleshooting
+```json
+{"timestamp_start": "now-7d", "top_rules": 2, "top_agents": 2}
+```
 
-### Common Issues
+Result:
 
-#### No Results Returned
-- Check time range - may be too restrictive
-- Verify agent_id exists and is accessible
-- Ensure rule_id is valid
-
-#### Timeout Errors
-- Reduce limit parameter
-- Narrow time range
-- Use more specific filters
-
-#### Invalid Parameter Errors
-- Validate timestamp format (ISO 8601)
-- Check alert level format (numeric or range)
-- Verify agent_id format (alphanumeric, 3-8 characters)
-
-### Performance Tips
-
-1. **Indexer-backed**: alert query/search/aggregation tools always read from the Wazuh Indexer (the Manager `/alerts` endpoint was removed in Wazuh 4.8) — there is no cross-fallback
-2. **Caching**: Results are cached for 5 minutes
-3. **Pagination**: Use limit and offset for large datasets
+```text
+Aggregated Alerts:
+{
+  "time_range": {"gte": "now-7d", "lte": "now"},
+  "total_alerts": 4231,
+  "top_rules": [
+    {"rule_id": "5710", "count": 2988, "description": "sshd: Attempt to login using a non-existent user", "level": 5},
+    {"rule_id": "550", "count": 611, "description": "Integrity checksum changed.", "level": 7}
+  ],
+  "by_level": [
+    {"level": 5, "count": 3120},
+    {"level": 7, "count": 845},
+    {"level": 10, "count": 266}
+  ],
+  "top_agents": [
+    {"agent": "web-01", "count": 3301},
+    {"agent": "db-01", "count": 930}
+  ]
+}
+```
 
 ---
 
-**Next**: See [Agent Management API](agents.md) for agent monitoring tools.
+## analyze_alert_patterns
+
+Lists rules that fired at least `min_frequency` times in a time window, most frequent first.
+
+- **Scope:** `wazuh:read`
+- **Data source:** Indexer, `wazuh-alerts-*`
+
+### Parameters
+
+| Name | Type | Required | Default | Constraints |
+|------|------|----------|---------|-------------|
+| `time_range` | string | no | `24h` | `1h`, `6h`, `12h`, `1d`, `24h`, `7d`, `30d` |
+| `min_frequency` | integer | no | `5` | 1 to 1000 |
+
+### Notes
+
+- Counts are computed over the newest 1,000 alerts in the window. When more alerts match, `truncated` is `true`, `truncation_warning` is set, and the per-rule counts are lower bounds. `total_alerts` is always the true match count.
+- Each pattern reports `rule_id`, `count`, `description` and `level`.
+
+### Example
+
+Arguments:
+
+```json
+{"time_range": "24h", "min_frequency": 1}
+```
+
+Result (patterns trimmed):
+
+```text
+Alert Patterns:
+{
+  "data": {
+    "time_range": "24h",
+    "min_frequency": 1,
+    "patterns": [
+      {"rule_id": "5710", "count": 1, "description": "sshd: Attempt to login using a non-existent user", "level": 5},
+      {"rule_id": "5763", "count": 1, "description": "sshd: brute force trying to get access to the system. Non existent user.", "level": 10}
+    ],
+    "total_patterns": 3,
+    "total_alerts": 4231,
+    "alerts_analyzed": 3,
+    "truncated": true,
+    "truncation_warning": "Pattern counts reflect the newest 3 of 4231 matching alerts; frequencies are lower bounds."
+  }
+}
+```
+
+---
+
+## search_security_events
+
+Searches alerts in a time window with a free-text query and optional structured filters. All filters are combined with AND.
+
+- **Scope:** `wazuh:read`
+- **Data source:** Indexer, `wazuh-alerts-*`, using an OpenSearch `simple_query_string` query across all alert fields
+
+### Parameters
+
+| Name | Type | Required | Default | Constraints |
+|------|------|----------|---------|-------------|
+| `query` | string | yes | | Free text, max 500 characters. See query syntax below |
+| `time_range` | string | no | `24h` | `1h`, `6h`, `12h`, `1d`, `24h`, `7d`, `30d` |
+| `limit` | integer | no | `100` | 1 to 1000 |
+| `rule_id` | string | no | none | 1 to 6 digits, exact match on `rule.id` |
+| `agent_id` | string | no | none | Agent ID, exact match on `agent.id` |
+| `level` | string | no | none | Minimum rule level, e.g. `"10"` or `"12+"` |
+| `srcip` | string | no | none | IPv4 or IPv6, exact match on `data.srcip` |
+| `dstip` | string | no | none | IPv4 or IPv6, exact match on `data.dstip` |
+| `compact` | boolean | no | `true` | Return essential fields only (same fields as `get_wazuh_alerts`) |
+
+### Query syntax
+
+| Syntax | Meaning |
+|--------|---------|
+| `sshd failed` | Both terms must match (the default operator is AND) |
+| `sshd AND failed` | Same as above; `AND` is translated to `+` |
+| `ssh OR rdp` | Either term; `OR` is translated to `\|` |
+| `NOT windows` | Exclude the term; `NOT` is translated to `-` |
+| `"invalid user"` | Exact phrase. Words inside quotes are not treated as operators |
+| `auth*` | Prefix match (trailing wildcard only) |
+
+Not supported: leading wildcards (a leading `*` or `?` is stripped), regular expressions, and `field:value` syntax. Use the structured parameters (`rule_id`, `agent_id`, `level`, `srcip`, `dstip`) for field filters. Malformed query syntax does not raise an error.
+
+### Notes
+
+- Results are sorted newest first. `total_affected_items` is the true match count, and a `_warning` is added when it reaches `limit`.
+
+### Example
+
+Arguments:
+
+```json
+{"query": "sshd AND \"invalid user\"", "time_range": "24h", "srcip": "203.0.113.45", "limit": 1}
+```
+
+Result (compact, pretty-printed):
+
+```text
+Security Events:
+{
+  "data": {
+    "affected_items": [
+      {
+        "timestamp": "2026-09-24T09:41:07.512+0000",
+        "agent": {"id": "003", "name": "web-01"},
+        "rule": {
+          "id": "5710",
+          "level": 5,
+          "description": "sshd: Attempt to login using a non-existent user",
+          "groups": ["syslog", "sshd", "authentication_failed", "invalid_login"],
+          "mitre": {"id": ["T1110.001"], "tactic": ["Credential Access"], "technique": ["Password Guessing"]}
+        },
+        "srcip": "203.0.113.45",
+        "full_log": "Sep 24 09:41:07 web-01 sshd[23114]: Invalid user admin from 203.0.113.45 port 51122"
+      }
+    ],
+    "total_affected_items": 4231,
+    "total_failed_items": 0,
+    "failed_items": []
+  },
+  "_warning": "Results may be truncated (4231 items returned, limit was 1). Use more specific filters (time_range, agent_id, rule_id, level) or increase limit for complete results."
+}
+```

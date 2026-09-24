@@ -55,8 +55,18 @@ def main() -> None:
         logger.info(f"Docs: http://{host}:{port}/docs")
 
         # Run the server
+        # Bound shutdown: without a timeout an open SSE stream keeps uvicorn "waiting for
+        # connections to close" forever after SIGTERM, lifespan cleanup never runs, and the
+        # orchestrator has to SIGKILL.
         uvicorn.run(
-            app, host=host, port=port, log_level=log_level, access_log=True, server_header=False, date_header=False
+            app,
+            host=host,
+            port=port,
+            log_level=log_level,
+            access_log=True,
+            server_header=False,
+            date_header=False,
+            timeout_graceful_shutdown=20,
         )
 
     except ImportError as e:

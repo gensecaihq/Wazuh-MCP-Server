@@ -1,171 +1,196 @@
 # Advanced Features
 
-Production-grade features for enterprise deployments.
+Resilience, scaling, output formats, tool exposure and protocol details. Configuration variables are listed in [configuration.md](configuration.md).
 
-## High Availability (HA)
+## Resilience
 
-The server includes production-grade HA features for maximum reliability.
+### Retries
 
-### Circuit Breakers
+- Wazuh Manager API reads (GET) and Indexer searches are retried up to 3 attempts in total, with exponential backoff between 1 and 10 seconds.
+- Manager API calls retry only transient failures: connection errors, timeouts, `429` and `5xx`. Other `4xx` responses are returned immediately.
+- State-changing Manager calls (PUT/DELETE, i.e. active response) are never retried, because they are not idempotent.
 
-- Automatically opens after 5 consecutive failures
-- Prevents cascading failures to Wazuh API
-- Recovers automatically after 60 seconds
-- Falls back gracefully during outages
+### Circuit breakers
 
-### Retry Logic
+- Each Wazuh client has a circuit breaker for the Manager API and one for the Indexer. A breaker opens after 5 consecutive failures and allows a trial request after 60 seconds.
+- The optional You.com lookup (`search_external_context`) has its own breaker, so an external outage cannot block Wazuh calls.
+- In [multi-cluster](MULTI_CLUSTER.md) mode every cluster has its own client and breakers.
 
-- Exponential backoff with jitter
-- 3 retry attempts with 1-10 second delays
-- Applies to all Wazuh API and Indexer calls (including alert queries)
-- Only retries transient errors (5xx, connection errors) — not 400/401/404
+### Shutdown
 
-### Graceful Shutdown
+On SIGTERM the server stops background tasks, closes the session-store connection (Redis sessions are left in place for other replicas), closes the Wazuh clients for every configured cluster, and releases connection pools.
 
-- Waits for active connections to complete (max 30s)
-- Runs cleanup tasks before termination
-- Prevents data loss during restarts
-- Integrates with Docker health checks
+### Response limits
 
-**Implementation:** Automatically applied to all Wazuh API calls - no configuration required.
+- Each tool result is capped at `MAX_TOOL_RESPONSE_CHARS` (default 1,000,000 characters); longer results are truncated with a note asking for a narrower query.
+- Credentials in log text (`password=`, `token=`, `Authorization:` and similar) are redacted from every tool result.
+- When process memory exceeds `MAX_MEMORY_MB` (default 512, minimum 64), non-probe requests receive `503` and `/ready` reports `memory: over_limit`.
 
-### Security & Monitoring Middleware
+## Scaling and session storage
 
-Two middleware layers are automatically registered on all HTTP requests:
+Only legacy-handshake clients (protocol `2025-11-25` and earlier) use sessions. Requests using the `2026-07-28` revision are stateless: no session is created or stored, and any replica can serve them.
 
-- **Monitoring Middleware**: Tracks request counts, active connections, response durations, and adds correlation IDs to every request
-- **Security Middleware**: Adds security headers to all responses (X-Content-Type-Options, X-Frame-Options, Content-Security-Policy, X-XSS-Protection, Strict-Transport-Security (HSTS))
+### In-memory (default)
 
-Prometheus metrics are available at `/metrics` using a custom collector registry for accurate reporting.
+Sessions live in the server process and are lost on restart. Clients then receive `404` for their session ID and start a new session with `initialize`. Sessions expire after 30 minutes of inactivity.
 
----
+The startup log shows:
 
-## Serverless Ready
-
-Enable horizontally scalable, serverless deployments with external session storage.
-
-### Default Mode: In-Memory Sessions
-
-```bash
-# Single-instance deployments (default)
-docker compose up -d
+```
+Initialized InMemorySessionStore (single-instance mode)
 ```
 
-| Pros | Cons |
-|------|------|
-| ✅ Zero configuration | ❌ Sessions lost on restart |
-| ✅ Works immediately | ❌ Cannot scale horizontally |
+### Redis
 
-### Serverless Mode: Redis Sessions
+Set `REDIS_URL` to share legacy sessions between replicas and keep them across restarts. The `redis` client is included in the image.
 
 ```bash
-# Configure Redis in .env file
+# .env
 REDIS_URL=redis://redis:6379/0
-SESSION_TTL_SECONDS=1800  # 30 minutes
-
-# Deploy with Redis (create compose.redis.yml first — see Redis Setup below)
-docker compose -f compose.yml -f compose.redis.yml up -d
+SESSION_TTL_SECONDS=1800   # positive integer; an invalid value stops startup
 ```
 
-| Pros |
-|------|
-| ✅ Sessions persist across restarts |
-| ✅ Horizontal scaling support |
-| ✅ Serverless compatible (AWS Lambda, Cloud Run) |
-| ✅ Automatic session expiration |
-
-### Redis Setup
-
-Create a `compose.redis.yml` overlay next to `compose.yml`:
+There is no Redis service in `compose.yml`. A minimal overlay, saved as `compose.redis.yml` next to `compose.yml`:
 
 ```yaml
-# compose.redis.yml
 services:
   redis:
     image: redis:7-alpine
-    ports:
-      - "6379:6379"
+    # No published port: Redis holds session data without authentication.
     volumes:
       - redis-data:/data
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 5s
 
+  wazuh-main-server:
+    depends_on:
+      redis:
+        condition: service_healthy
+
 volumes:
   redis-data:
 ```
 
-### Verification
-
-The active session store is logged at startup:
-
 ```bash
-docker compose logs wazuh-main-server | grep -i "SessionStore"
-# InMemorySessionStore: "Initialized InMemorySessionStore (single-instance mode)"
-# RedisSessionStore:    "RedisSessionStore configured with TTL=1800s"
+docker compose -f compose.yml -f compose.redis.yml up -d
+docker compose logs wazuh-main-server | grep -i sessionstore
+# RedisSessionStore configured with TTL=1800s
 ```
 
-Redis itself can be checked with `docker compose exec redis redis-cli ping` (expects `PONG`).
+With `REDIS_URL` set there is no fallback to in-memory storage. If Redis is unreachable, requests that need the session store fail with `503`, `Retry-After: 5` and `{"error": "Session store unavailable; retry shortly"}`, rather than a `404` that would tell clients to re-initialize.
 
----
+### Running several replicas
 
-## Compact Output Mode
+- Use the same `AUTH_SECRET_KEY` on every replica. It signs bearer and OAuth access tokens and derives API-key hashes.
+- Use Redis if any client uses the legacy handshake.
+- OAuth authorization codes, refresh tokens and the revocation list are per process. Route `/oauth/*` to a consistent replica (sticky sessions) or run one replica in OAuth mode.
+- Rate-limit counters are per process, so the effective limit scales with the replica count.
 
-Reduce token usage by ~66% with compact output mode (enabled by default).
+## Output formats
 
-### Supported Tools
+### Compact mode
 
-| Tool | Compact Format |
+`get_wazuh_alerts`, `search_security_events`, `get_wazuh_vulnerabilities` and `get_wazuh_critical_vulnerabilities` take a `compact` argument, default `true`.
+
+| Tool | Compact output |
 |------|----------------|
-| `get_wazuh_alerts` | timestamp, agent, rule, IPs, syscheck, truncated logs |
-| `search_security_events` | Same as alerts |
-| `get_wazuh_vulnerabilities` | id, severity, description (120 chars), package, agent |
-| `get_wazuh_critical_vulnerabilities` | Same as vulnerabilities |
+| Alerts and security events | `timestamp`, agent `id`/`name`, rule `id`/`level`/`description`/`groups` (and `mitre` when present), `srcip`, `dstip`, syscheck `path`/`event`, `full_log` truncated to 300 characters |
+| Vulnerabilities | `id`/`cve`, `severity`, `description` truncated to 120 characters, `reference`, `published_at`, package `name`/`version`, agent `id`/`name` |
 
-### Usage
+Compact results are serialized without indentation. Pass `"compact": false` for the full documents, pretty-printed:
 
-```bash
-# Compact mode (default) - minimal JSON, essential fields only
-curl -X POST http://localhost:3000/mcp \
-  -H "Authorization: Bearer <token>" \
-  -d '{"jsonrpc":"2.0","method":"tools/call","params":{"name":"get_wazuh_alerts","arguments":{"limit":10}},"id":"1"}'
-
-# Full mode - complete data with pretty-printing
-curl -X POST http://localhost:3000/mcp \
-  -H "Authorization: Bearer <token>" \
-  -d '{"jsonrpc":"2.0","method":"tools/call","params":{"name":"get_wazuh_alerts","arguments":{"limit":10,"compact":false}},"id":"1"}'
+```json
+{"name": "get_wazuh_alerts", "arguments": {"limit": 10, "compact": false}}
 ```
 
-### Token Savings
+### GCF encoding
 
-| Mode | Chars/alert | 100 alerts | Estimated Tokens |
-|------|-------------|------------|------------------|
-| Full | ~1,350 | 135K | ~33,750 |
-| Compact | ~450 | 45K | ~11,300 |
-| **Savings** | **67%** | **90K** | **~22,000** |
+`RESPONSE_FORMAT=gcf` encodes the results of the same four tools in Graph Compact Format, which factors repeated field names into a header. The encoding is lossless and applies on top of the `compact` setting. `gcf-python` is included in the image (`pip install 'wazuh-mcp-server[gcf]'` otherwise); if it is missing or encoding fails, the server logs a warning and returns JSON. The default is `json`.
+
+## Tool exposure
+
+### Toolsets
+
+`WAZUH_TOOLSETS` limits the catalogue to a comma-separated list of groups; empty or `all` exposes everything. `WAZUH_DISABLED_TOOLS` removes individual tools. Hidden tools are absent from `tools/list` and refused by `tools/call`. Unknown toolset or tool names stop startup.
+
+| Toolset | Tools |
+|---------|------:|
+| `alerts` | 5 |
+| `agents` | 6 |
+| `vulnerabilities` | 3 |
+| `analysis` | 5 |
+| `web_search` | 1 (`search_external_context`, the only tool that sends data off-box, to You.com) |
+| `compliance` | 6 |
+| `system` | 10, plus `list_wazuh_clusters` in multi-cluster mode |
+| `response` | 19 (14 write tools and 5 read-only verification tools) |
+
+```bash
+WAZUH_TOOLSETS=alerts,agents,vulnerabilities,analysis
+WAZUH_DISABLED_TOOLS=wazuh_restart,wazuh_active_response
+```
+
+### Scopes
+
+Tools require `wazuh:read` (41 tools) or `wazuh:write` (14 tools). Write tools are omitted from `tools/list` for tokens without `wazuh:write`, and refused if called. Every write-tool call that passes the scope and confirmation checks is logged to the `wazuh_mcp_server.audit` logger with the principal, session and arguments.
+
+`WAZUH_REQUIRE_ACTION_CONFIRMATION=true` additionally requires `confirm=true` on every write tool and adds that argument to their schemas.
+
+### Tool annotations
+
+Every tool carries MCP tool annotations derived from its scope:
+
+| Tools | Annotations |
+|-------|-------------|
+| Read tools | `readOnlyHint: true`, `openWorldHint: false` (`true` for `search_external_context`) |
+| Write tools | `readOnlyHint: false`, `destructiveHint: true`, `idempotentHint: false`, `openWorldHint: false` |
+| Reversal tools (`wazuh_unisolate_host`, `wazuh_enable_user`, `wazuh_restore_file`, `wazuh_firewall_allow`, `wazuh_host_allow`) | As write tools, but `destructiveHint: false` |
+
+Annotations are hints for clients deciding when to ask for approval. Authorization is enforced by scope on the server.
+
+Every input schema sets `additionalProperties: false`, and the server enforces it: an unknown argument returns a tool error listing the valid arguments instead of being silently ignored.
+
+## Rate limiting
+
+| Traffic | Limit | Key |
+|---------|-------|-----|
+| `/mcp` and `/` | 100 requests / 60 s (fixed) | Authenticated principal + client IP |
+| Failed authentication on those endpoints | Same budget | Client IP; repeated `401`s turn into `429` |
+| Other routes (`/auth/token`, `/oauth/*`, …) | `RATE_LIMIT_REQUESTS` per `RATE_LIMIT_WINDOW` seconds (default 100 / 60) | Client IP |
+| `/health`, `/ready`, `/metrics` | Not limited | — |
+
+A `429` carries `Retry-After`. Client IPs are taken from `X-Forwarded-For` / `X-Real-IP` only when the direct peer is loopback or listed in `TRUSTED_PROXIES`.
+
+## Health, readiness and metrics
+
+- `/health` is a liveness probe. It returns `200` while the process is serving and does not contact Wazuh, so a SIEM outage does not restart the container.
+- `/ready` checks the Manager API, the Indexer (if configured) and memory headroom, and returns `503` when any is unhealthy. Results are cached for 5 seconds and evaluated one at a time, so frequent probes do not load the Manager. In multi-cluster mode only the environment-configured cluster is probed.
+- `/metrics` exposes Prometheus metrics, including `wazuh_mcp_requests_total`, `wazuh_mcp_request_duration_seconds`, `wazuh_mcp_tool_executions_total`, `wazuh_mcp_tool_duration_seconds`, `wazuh_mcp_auth_attempts_total`, `wazuh_mcp_rate_limit_hits_total` and `wazuh_mcp_errors_total`. It is unauthenticated; restrict it at the reverse proxy.
+
+Every response carries `X-Content-Type-Options`, `X-Frame-Options`, `X-XSS-Protection`, `Strict-Transport-Security` and a `Content-Security-Policy` header, and an `X-Correlation-ID` header (taken from the request's `X-Correlation-ID` or `X-Request-ID`, or generated). The same ID appears in JSON-RPC error data.
+
+## MCP protocol support
+
+The server is dual-era:
+
+| Revision | Behaviour |
+|----------|-----------|
+| `2026-07-28` | Stateless. Each request carries `MCP-Protocol-Version`, `Mcp-Method`, `Mcp-Name` (for `tools/call`, `prompts/get`, `resources/read`) and `params._meta["io.modelcontextprotocol/protocolVersion"]`; header/body mismatches are rejected. `server/discover` is available; `initialize`, `ping` and `logging/setLevel` are not. List and read results include `ttlMs` and `cacheScope: "private"`. Batches are rejected. |
+| `2025-11-25`, `2025-06-18`, `2025-03-26`, `2024-11-05` | `initialize` handshake. The response sets `MCP-Session-Id`; sessions are created only by `initialize` (or a GET stream) and ended with `DELETE /mcp`. |
+
+| Feature | Support |
+|---------|---------|
+| Transport | Streamable HTTP on `/mcp` (POST, GET for SSE, DELETE). `/sse` returns `410`. |
+| Responses | POST requests are answered with JSON. GET with `Accept: text/event-stream` opens an SSE stream; GET without it returns `405`. |
+| Tools | 55 (56 in multi-cluster mode) |
+| Prompts | 5: `security_investigation`, `threat_hunt`, `compliance_audit`, `vulnerability_assessment`, `iso27001_assessment` |
+| Resources | 6 resources and 3 resource templates; no subscriptions |
+| Completions | `completion/complete` |
+| Logging | `logging/setLevel` (legacy handshake only) |
+| Origin validation | Requests with an `Origin` header not in `ALLOWED_ORIGINS` get `403` |
+
+See [MCP_COMPLIANCE_VERIFICATION.md](../MCP_COMPLIANCE_VERIFICATION.md) for the detailed conformance notes.
 
 ---
 
-## MCP Protocol Compliance
-
-Dual-era compliance: MCP 2026-07-28 (modern, stateless) plus 2025-11-25 and earlier (legacy handshake).
-
-| Standard | Status |
-|----------|--------|
-| Streamable HTTP | ✅ `/mcp` endpoint with POST/GET/DELETE |
-| Protocol Versioning | ✅ `MCP-Protocol-Version` header validation |
-| Dynamic Streaming | ✅ JSON or SSE based on Accept header |
-| Authentication | ✅ Bearer token (JWT) authentication |
-| Security | ✅ HTTPS, origin validation, rate limiting |
-| Legacy Support | ✅ Legacy `/sse` endpoint maintained |
-| Session Management | ✅ `MCP-Session-Id` header, full lifecycle with DELETE |
-| Prompts | ✅ `prompts/list` and `prompts/get` with 5 security prompts |
-| Resources | ✅ `resources/list`, `resources/read`, `resources/templates/list` |
-| Logging | ✅ `logging/setLevel` with RFC 5424 levels |
-| Completion | ✅ `completion/complete` for argument suggestions |
-
-**Full verification details:** [MCP_COMPLIANCE_VERIFICATION.md](../MCP_COMPLIANCE_VERIFICATION.md)
-
----
-
-[← Back to README](../README.md)
+[Configuration](configuration.md) · [Operations](OPERATIONS.md) · [Back to README](../README.md)

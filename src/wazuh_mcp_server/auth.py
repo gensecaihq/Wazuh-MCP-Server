@@ -113,7 +113,10 @@ class AuthManager:
         mcp_api_key = os.getenv("MCP_API_KEY", "").strip()
         if mcp_api_key:
             if mcp_api_key.startswith("wazuh_") and len(mcp_api_key) == 49:
-                key_id = secrets.token_urlsafe(16)
+                # Deterministic id (HMAC of the key): identical on every replica sharing
+                # AUTH_SECRET_KEY and across restarts, so tokens bound to it keep validating
+                # and audit/rate-limit identities stay stable.
+                key_id = f"env-{self.hash_api_key(mcp_api_key)[:16]}"
                 key_obj = APIKey(
                     id=key_id,
                     name="MCP API Key (from environment)",
@@ -150,7 +153,9 @@ class AuthManager:
         # key plus a loud warning — operators should set MCP_API_KEY explicitly. In
         # development it grants write for convenience.
         if not self.api_keys:
-            is_prod = os.getenv("ENVIRONMENT", "development").lower() == "production"
+            from wazuh_mcp_server.config import get_config
+
+            is_prod = get_config().ENVIRONMENT == "production"
             if is_prod:
                 default_scopes = ["wazuh:read"]
                 logger.warning(
@@ -351,6 +356,19 @@ async def verify_bearer_token(authorization: str) -> AuthToken:
         # Verify and decode the JWT token using the config's AUTH_SECRET_KEY
         # This must match the key used in server.py's /auth/token endpoint
         payload = verify_token(token, config.AUTH_SECRET_KEY)
+        if not payload.get("exp"):
+            raise ValueError("Token has no expiry")
+        if payload.get("type") == "refresh":
+            raise ValueError("Refresh tokens are not access tokens")
+
+        # Bind the token to the API key it was minted from: revoking or rotating the key must
+        # end its tokens too, not leave them valid until expiry (24h by default).
+        sub = payload.get("sub")
+        key_obj = auth_manager.api_keys.get(sub) if sub else None
+        if key_obj is None or not key_obj.active:
+            raise ValueError("The API key this token was issued for is no longer valid")
+        if key_obj.expires_at and datetime.now(timezone.utc) > key_obj.expires_at:
+            raise ValueError("The API key this token was issued for has expired")
 
         # Extract timestamps from JWT payload
         exp_timestamp = payload.get("exp")

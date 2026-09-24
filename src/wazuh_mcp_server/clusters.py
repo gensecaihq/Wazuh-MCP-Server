@@ -42,7 +42,13 @@ import os
 import re
 from typing import Any, Dict, List, Optional
 
-from wazuh_mcp_server.config import WazuhConfig
+from wazuh_mcp_server.config import (
+    ConfigurationError,
+    WazuhConfig,
+    normalize_host,
+    validate_port,
+    validate_positive_int,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -73,7 +79,13 @@ def _as_bool(value: Any, default: bool) -> bool:
         return value
     if isinstance(value, (int, float)):
         return bool(value)
-    return str(value).strip().lower() in ("true", "1", "yes", "y", "on")
+    text = str(value).strip().lower()
+    if text in ("true", "1", "yes", "y", "on"):
+        return True
+    if text in ("false", "0", "no", "n", "off"):
+        return False
+    # Anything else used to read as False — "verify_ssl": "enabled" silently disabled TLS
+    raise ValueError(f"expected a boolean (true/false), got {value!r}")
 
 
 class ClusterRegistry:
@@ -110,26 +122,49 @@ class ClusterRegistry:
 
 
 def _cluster_config(entry: Dict[str, Any]) -> WazuhConfig:
-    """Build a WazuhConfig from one clusters-file entry."""
+    """Build a WazuhConfig from one clusters-file entry, validated like the env vars are."""
+    cid = entry.get("id", "?")
     resolved = {k: _resolve_env(v) for k, v in entry.items()}
 
     for key in ("wazuh_host", "wazuh_user", "wazuh_pass"):
         if not resolved.get(key):
-            raise ValueError(f"cluster '{entry.get('id', '?')}' is missing required field '{key}'")
+            raise ValueError(f"cluster '{cid}' is missing required field '{key}'")
+
+    def field(name, parse):
+        try:
+            return parse()
+        except (ConfigurationError, ValueError, TypeError) as e:
+            raise ValueError(f"cluster '{cid}': invalid {name}: {e}") from None
+
+    # A CA bundle keeps verification ON for stock self-signed certificates: per-entry
+    # "ca_bundle" wins, else the global WAZUH_CA_BUNDLE. verify_ssl=false still disables.
+    ca_bundle = str(resolved.get("ca_bundle") or os.getenv("WAZUH_CA_BUNDLE", "")).strip()
+    if ca_bundle and not os.path.isfile(ca_bundle):
+        raise ValueError(f"cluster '{cid}': ca_bundle file does not exist: {ca_bundle}")
+    verify_manager = field("verify_ssl", lambda: _as_bool(resolved.get("verify_ssl"), True))
+    verify_indexer = field("indexer_verify_ssl", lambda: _as_bool(resolved.get("indexer_verify_ssl"), True))
 
     return WazuhConfig(
-        wazuh_host=resolved["wazuh_host"],
+        wazuh_host=normalize_host(str(resolved["wazuh_host"])),
         wazuh_user=resolved["wazuh_user"],
         wazuh_pass=resolved["wazuh_pass"],
-        wazuh_port=int(resolved.get("wazuh_port", 55000)),
-        verify_ssl=_as_bool(resolved.get("verify_ssl"), True),
+        wazuh_port=field("wazuh_port", lambda: validate_port(str(resolved.get("wazuh_port", 55000)), "wazuh_port")),
+        verify_ssl=(ca_bundle or True) if verify_manager else False,
+        # Left as given: an http:// prefix is how a plain-HTTP indexer is selected
         wazuh_indexer_host=resolved.get("indexer_host"),
-        wazuh_indexer_port=int(resolved.get("indexer_port", 9200)),
+        wazuh_indexer_port=field(
+            "indexer_port", lambda: validate_port(str(resolved.get("indexer_port", 9200)), "indexer_port")
+        ),
         wazuh_indexer_user=resolved.get("indexer_user"),
         wazuh_indexer_pass=resolved.get("indexer_pass"),
-        wazuh_indexer_ssl=_as_bool(resolved.get("indexer_ssl"), True),
-        wazuh_indexer_verify_ssl=_as_bool(resolved.get("indexer_verify_ssl"), True),
-        request_timeout_seconds=int(resolved.get("request_timeout_seconds", 30)),
+        wazuh_indexer_ssl=field("indexer_ssl", lambda: _as_bool(resolved.get("indexer_ssl"), True)),
+        wazuh_indexer_verify_ssl=(ca_bundle or True) if verify_indexer else False,
+        request_timeout_seconds=field(
+            "request_timeout_seconds",
+            lambda: validate_positive_int(
+                str(resolved.get("request_timeout_seconds", 30)), "request_timeout_seconds", max_val=300
+            ),
+        ),
     )
 
 
@@ -157,12 +192,16 @@ def load_cluster_registry(default_client, clusters_file: Optional[str] = None) -
         except json.JSONDecodeError as e:
             raise ValueError(f"Invalid JSON in clusters file {path}: {e}")
 
+    if not isinstance(data, dict):
+        raise ValueError(f"clusters file {path} must be a JSON object with a 'clusters' list")
     entries = data.get("clusters")
     if not isinstance(entries, list) or not entries:
         raise ValueError(f"clusters file {path} must contain a non-empty 'clusters' list")
 
     clients: Dict[str, Any] = {"default": default_client}
     for entry in entries:
+        if not isinstance(entry, dict):
+            raise ValueError(f"clusters file {path}: each cluster must be an object, got {type(entry).__name__}")
         cluster_id = str(entry.get("id", "")).strip()
         if not CLUSTER_ID_PATTERN.match(cluster_id):
             raise ValueError(f"clusters file {path}: invalid or missing cluster id {cluster_id!r}")

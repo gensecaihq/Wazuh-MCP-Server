@@ -1,389 +1,200 @@
-# MCP Remote Server Standards Compliance Verification
+# MCP Protocol Compliance
 
-## Overview
+How the server implements the Model Context Protocol, and what was checked.
 
-This document verifies that the Wazuh MCP Remote Server fully complies with the latest Model Context Protocol specifications.
+## Method
 
-**Current Implementation Status**: ✅ **Dual-era server — MCP 2026-07-28 (modern, stateless) and 2025-11-25 and earlier (legacy handshake)**
+Checked on `main` at `aac0fda` by reading `src/wazuh_mcp_server/server.py` and sending
+requests to the ASGI app in-process (the `modern_body`/`modern_headers` helpers from
+`tests/integration/test_mcp_protocol.py`, `AUTH_MODE=none`, `AUTHLESS_ALLOW_WRITE=true`,
+`ALLOWED_ORIGINS=https://claude.ai`). Responses quoted below are from that run, with the
+`correlation_id` values shortened. The protocol, scope-enforcement and OAuth suites
+(`test_mcp_protocol.py`, `test_scope_enforcement.py`, `test_oauth*.py`) pass.
 
-**References:**
-- [MCP Specification 2026-07-28](https://modelcontextprotocol.io/specification/2026-07-28)
-- [MCP Specification 2025-11-25](https://modelcontextprotocol.io/specification/2025-11-25/basic/transports)
-- [MCP Streamable HTTP Transport](https://modelcontextprotocol.io/specification/2026-07-28/basic/transports/streamable-http)
-- [MCP Server Development](https://modelcontextprotocol.io/docs/develop/build-server)
+Not covered here: interoperability with specific MCP clients, and behavior behind a reverse
+proxy.
 
----
+## Protocol versions
 
-## ✅ **COMPLIANCE — MCP 2026-07-28 (modern era)**
-
-The 2026-07-28 revision removed protocol-level sessions and the `initialize` handshake:
-every request carries its protocol version, client info, and capabilities in `params._meta`.
-This server implements the spec's **dual-era** model: a request carrying
-`_meta["io.modelcontextprotocol/protocolVersion"]` is served statelessly per 2026-07-28,
-while an `initialize` request selects legacy semantics for that session.
-
-| Requirement | Status | Implementation |
-|-------------|--------|----------------|
-| **Stateless requests via `_meta`** | ✅ COMPLIANT | `extract_modern_meta` / `handle_modern_request` in `server.py`; no session minted or echoed |
-| **`server/discover` (MUST)** | ✅ COMPLIANT | Returns `supportedVersions`, `capabilities`, `instructions`, `serverInfo`; also answers legacy-era probes |
-| **`MCP-Protocol-Version` header ↔ `_meta` match** | ✅ COMPLIANT | Mismatch → HTTP 400 + `HeaderMismatch` (`-32020`) |
-| **`Mcp-Method` header (all requests)** | ✅ COMPLIANT | Validated against body `method`; mismatch → `-32020` |
-| **`Mcp-Name` header (`tools/call`, `resources/read`, `prompts/get`)** | ✅ COMPLIANT | Validated with Base64 sentinel (`=?base64?...?=`) decoding |
-| **`UnsupportedProtocolVersionError` (`-32022`)** | ✅ COMPLIANT | 400 + `data.supported` listing all supported revisions |
-| **`resultType: "complete"` on results** | ✅ COMPLIANT | Added to every modern-era result |
-| **`ttlMs`/`cacheScope` (CacheableResult)** | ✅ COMPLIANT | On `tools/list`, `prompts/list`, `resources/list`, `resources/read`, `resources/templates/list`, `server/discover` |
-| **`serverInfo` in result `_meta`** | ✅ COMPLIANT | `io.modelcontextprotocol/serverInfo` on modern results |
-| **Removed methods not served** | ✅ COMPLIANT | `initialize`, `ping`, `logging/setLevel` → 404 + `-32601` on the modern path (still served to legacy clients) |
-| **Deterministic `tools/list` order** | ✅ COMPLIANT | Static tool registry |
-| **Resource not found → `-32602`** | ✅ COMPLIANT | Invalid Params per JSON-RPC alignment |
-| **Protected resource metadata (RFC 9728)** | ✅ COMPLIANT | `/.well-known/oauth-protected-resource` + `WWW-Authenticate` `resource_metadata` hint (OAuth mode) |
-| **MRTR / sampling / elicitation** | ➖ N/A | Server never initiates client interactions |
-| **`subscriptions/listen`** | ➖ N/A | No `listChanged` capabilities advertised to modern clients (static lists) |
-
-Legacy-era behavior (sessions, `initialize`, `ping`, SSE `GET /mcp`, JSON-RPC batching for
-pre-2025-06-18 clients) is preserved unchanged for backward compatibility and verified below.
-
----
-
-## ✅ **COMPLIANCE CHECKLIST - MCP 2025-11-25**
-
-### 🔗 **Primary Transport: Streamable HTTP**
-
-| Requirement | Status | Implementation |
-|-------------|--------|----------------|
-| **Single `/mcp` endpoint** | ✅ COMPLIANT | `@app.post("/mcp")` and `@app.get("/mcp")` implemented |
-| **POST method support** | ✅ COMPLIANT | JSON-RPC requests via POST |
-| **GET method support (SSE only)** | ✅ COMPLIANT | Returns 405 without SSE Accept header (per spec) |
-| **DELETE method support** | ✅ COMPLIANT | Session termination via DELETE |
-| **MCP-Protocol-Version header** | ✅ COMPLIANT | Validates 2026-07-28, 2025-11-25, 2025-06-18, 2025-03-26, 2024-11-05; returns 400 (-32022) for unsupported |
-| **Accept header handling** | ✅ COMPLIANT | Supports both `application/json` and `text/event-stream` |
-| **Dynamic response format** | ✅ COMPLIANT | JSON or SSE based on Accept header |
-| **MCP-Session-Id header** | ✅ COMPLIANT | Full session management with proper casing |
-| **SSE priming event** | ✅ COMPLIANT | Empty data priming event sent first (per 2025-11-25) |
-| **SSE event IDs** | ✅ COMPLIANT | Unique event IDs for resumability |
-
-**Implementation Location:** `src/wazuh_mcp_server/server.py`
-
-### 🔄 **Legacy Transport: SSE (BACKWARDS COMPATIBILITY)**
-
-| Requirement | Status | Implementation |
-|-------------|--------|----------------|
-| **Legacy `/sse` endpoint** | ✅ MAINTAINED | Kept for backwards compatibility |
-| **SSE Content-Type** | ✅ COMPLIANT | `media_type="text/event-stream"` |
-| **Proper SSE headers** | ✅ COMPLIANT | Cache-Control, Connection, Session-Id headers |
-
-**Implementation Location:** `src/wazuh_mcp_server/server.py:1056-1171`
-
-### 🔐 **Authentication Requirements**
-
-| Requirement | Status | Implementation |
-|-------------|--------|----------------|
-| **Bearer token authentication** | ✅ COMPLIANT | `Authorization: Bearer <token>` required |
-| **JWT token validation** | ✅ COMPLIANT | `verify_bearer_token()` function |
-| **Token endpoint** | ✅ COMPLIANT | `POST /auth/token` for token generation |
-| **Secure token storage** | ✅ COMPLIANT | HMAC-SHA256 hashed API keys |
-| **Token expiration** | ✅ COMPLIANT | 24-hour token lifetime with refresh |
-
-**Implementation Location:** `src/wazuh_mcp_server/auth.py:254-266`
-
-### 🚦 **Protocol Version Negotiation**
-
-| Requirement | Status | Implementation |
-|-------------|--------|----------------|
-| **Version header support** | ✅ COMPLIANT | `MCP-Protocol-Version` header parsed |
-| **Multiple version support** | ✅ COMPLIANT | 2026-07-28 (modern) + 2025-11-25, 2025-06-18, 2025-03-26, 2024-11-05 (legacy) |
-| **Default version fallback** | ✅ COMPLIANT | Defaults to 2025-03-26 if no header (per spec) |
-| **Strict version validation** | ✅ COMPLIANT | Returns HTTP 400 for unsupported versions |
-| **Version validation** | ✅ COMPLIANT | `validate_protocol_version()` function with strict mode |
-
-**Implementation Location:** `src/wazuh_mcp_server/server.py`
-
-### 🛡️ **Security Requirements (2025-11-25)**
-
-| Requirement | Status | Implementation |
-|-------------|--------|----------------|
-| **Origin validation (conditional)** | ✅ COMPLIANT | Only validates if Origin header present (per 2025-11-25) |
-| **403 for invalid Origin** | ✅ COMPLIANT | Returns 403 when Origin is present but not allowed |
-| **HTTPS support** | ✅ COMPLIANT | Production deployment with TLS |
-| **CORS configuration** | ✅ COMPLIANT | Restricted origins and methods |
-| **Rate limiting** | ✅ COMPLIANT | Request rate limiting implemented |
-| **Input validation** | ✅ COMPLIANT | Comprehensive input sanitization |
-| **Security headers** | ✅ COMPLIANT | CSP, HSTS, X-Frame-Options |
-
-**Implementation Location:** `src/wazuh_mcp_server/security.py`, `src/wazuh_mcp_server/server.py`
-
-### 📋 **Protocol Compliance**
-
-| Requirement | Status | Implementation |
-|-------------|--------|----------------|
-| **JSON-RPC 2.0** | ✅ COMPLIANT | Full JSON-RPC 2.0 compliance |
-| **Session management** | ✅ COMPLIANT | MCPSession class with state tracking |
-| **Tool registration** | ✅ COMPLIANT | 55 tools properly registered |
-| **Error handling** | ✅ COMPLIANT | Standard MCP error codes |
-| **Capability negotiation** | ✅ COMPLIANT | Server capabilities exposed |
-
-**Implementation Location:** `src/wazuh_mcp_server/server.py`
-
-### 📝 **MCP Methods (2025-11-25)**
-
-| Method | Status | Implementation |
-|--------|--------|----------------|
-| **initialize** | ✅ COMPLIANT | Session creation with capability negotiation |
-| **ping** | ✅ COMPLIANT | Returns empty `{}` per spec |
-| **tools/list** | ✅ COMPLIANT | 55 tools with pagination support |
-| **tools/call** | ✅ COMPLIANT | Tool execution with error handling |
-| **prompts/list** | ✅ COMPLIANT | 5 security prompts with pagination |
-| **prompts/get** | ✅ COMPLIANT | Prompt content with argument substitution |
-| **resources/list** | ✅ COMPLIANT | 6 Wazuh resources |
-| **resources/read** | ✅ COMPLIANT | Resource content via `wazuh://` URIs |
-| **resources/templates/list** | ✅ COMPLIANT | 3 parameterized templates |
-| **logging/setLevel** | ✅ COMPLIANT | RFC 5424 log levels |
-| **completion/complete** | ✅ COMPLIANT | Argument suggestions |
-
-### 📬 **MCP Notifications**
-
-| Notification | Status | Implementation |
-|--------------|--------|----------------|
-| **notifications/initialized** | ✅ COMPLIANT | Tracks session initialization state |
-| **notifications/cancelled** | ✅ COMPLIANT | Handles cancellation gracefully |
-
----
-
-## 🎯 **Client Integration**
-
-### ✅ **Recommended Configuration (Streamable HTTP)**
-
-**Legacy handshake config (MCP 2025-11-25 and earlier):**
-```json
-{
-  "mcpServers": {
-    "wazuh": {
-      "url": "https://your-server.com/mcp",
-      "headers": {
-        "Authorization": "Bearer your-jwt-token",
-        "MCP-Protocol-Version": "2025-11-25"
-      }
-    }
-  }
-}
+```python
+MODERN_PROTOCOL_VERSIONS = ["2026-07-28"]
+LEGACY_PROTOCOL_VERSIONS = ["2025-11-25", "2025-06-18", "2025-03-26", "2024-11-05"]
 ```
 
-### ✅ **Legacy Configuration (SSE only)**
+The server is dual-era:
 
-**For older clients (backwards compatibility):**
-```json
-{
-  "mcpServers": {
-    "wazuh": {
-      "url": "https://your-server.com/sse",
-      "headers": {
-        "Authorization": "Bearer your-jwt-token"
-      }
-    }
-  }
-}
+- **2026-07-28 (modern, stateless).** A request is routed to the modern path when its
+  `MCP-Protocol-Version` header is `2026-07-28`, or when
+  `params._meta["io.modelcontextprotocol/protocolVersion"]` holds a version that is not a
+  legacy revision. No session is created or echoed; `Mcp-Session-Id` is ignored.
+- **2024-11-05 to 2025-11-25 (legacy).** `initialize` negotiates the version and creates a
+  session identified by `Mcp-Session-Id`. A legacy client whose `_meta` carries a legacy
+  version stays on the legacy path.
+
+`GET /health` reports `mcp_protocol_version: "2026-07-28"`,
+`legacy_handshake_protocol_version: "2025-11-25"` and the full `supported_protocol_versions`
+list.
+
+## Endpoints
+
+| Endpoint | Behavior |
+|---|---|
+| `POST /mcp` | JSON-RPC (modern or legacy) |
+| `GET /mcp` | SSE stream (legacy sessions); 405 unless `Accept` includes `text/event-stream` |
+| `DELETE /mcp` | Ends a legacy session: 204, or 404 if unknown. Requires `Mcp-Session-Id`; checks auth, Origin and rate limit. |
+| `GET /`, `POST /` | Same routing as `/mcp` |
+| `GET`/`POST /sse` | 410 Gone: `{"error":"The legacy /sse transport is not supported. Use the Streamable HTTP endpoint /mcp.","endpoint":"/mcp"}` |
+
+The old HTTP+SSE transport (2024-11-05) is not available; clients must use Streamable HTTP.
+
+## 2026-07-28 (modern) requirements
+
+| Requirement | Result | Evidence |
+|---|---|---|
+| `server/discover` | Implemented | Returns `supportedVersions` (all five), `capabilities` (`tools`, `prompts`, `resources`, `completions`), `instructions`, `resultType`, `ttlMs: 3600000`, `cacheScope: "private"`, and `serverInfo` in `_meta` |
+| `resultType` on results | `"complete"` on every modern success result | `handle_modern_request` |
+| CacheableResult hints | `ttlMs` and `cacheScope: "private"` on `server/discover`, `tools/list`, `prompts/list`, `resources/list`, `resources/read`, `resources/templates/list` | `CACHEABLE_METHOD_TTLS` |
+| `serverInfo` | `_meta["io.modelcontextprotocol/serverInfo"] = {"name":"Wazuh MCP Server","version":"4.3.0"}` | discover response |
+| Modern header without `_meta` | HTTP 400, `-32020` | see below |
+| `MCP-Protocol-Version` vs `_meta` mismatch | HTTP 400, `-32020` | `handle_modern_request` |
+| `Mcp-Method` must match body `method` | HTTP 400, `-32020` | see below |
+| `Mcp-Name` must match `params.name`/`params.uri` for `tools/call`, `prompts/get`, `resources/read` | HTTP 400, `-32020`; `=?base64?...?=` values are decoded first | base64-encoded `Mcp-Name` for `prompts/get` returned 200 |
+| Unsupported version | HTTP 400, `-32022` with `data.supported` and `data.requested` | see below |
+| Batches | HTTP 400, `-32600` | `"Batch requests are not supported by modern protocol revisions; send one request per POST"` |
+| Removed methods (`initialize`, `ping`, `logging/setLevel`) | HTTP 404, `-32601` | `"Method 'initialize' not found"` |
+| Notifications | HTTP 202, empty body | `notifications/cancelled` |
+| Server-initiated requests (sampling, elicitation, roots) | Not used | The server never sends requests to the client |
+| `subscriptions/listen`, list-changed notifications | Not implemented | Lists are static |
+
+Modern header without `_meta`:
+
+```
+HTTP 400
+{"jsonrpc":"2.0","id":1,"error":{"code":-32020,"message":"Header mismatch: MCP-Protocol-Version header '2026-07-28' requires params._meta['io.modelcontextprotocol/protocolVersion'] on every request","data":{"correlation_id":"…"}}}
 ```
 
-### ✅ **Authentication Flow**
+`Mcp-Method: prompts/list` on a `tools/list` body:
 
-1. **Get API Key**: Server generates secure API key on startup
-2. **Exchange for JWT**: `POST /auth/token` with API key
-3. **Use Bearer Token**: Include in Authorization header for `/mcp` or `/sse` endpoint
-4. **Token Refresh**: Automatic token renewal before expiration
-
-### ✅ **Connection Process**
-
-#### Streamable HTTP (Recommended):
-1. **Client connects to**: `https://server.com/mcp`
-2. **Headers sent**: `Authorization: Bearer <token>`, `MCP-Protocol-Version: 2025-11-25`, `Origin: https://client.com`
-3. **POST requests**: Send JSON-RPC requests, get JSON or SSE responses
-4. **GET requests**: Establish SSE stream only (requires `Accept: text/event-stream`; returns 405 otherwise)
-5. **DELETE requests**: Cleanly terminate session
-6. **Session header**: `MCP-Session-Id` returned and required for subsequent requests
-
-#### Legacy SSE:
-1. **Client connects to**: `https://server.com/sse`
-2. **Headers sent**: `Authorization: Bearer <token>`, `Origin: https://client.com`
-3. **GET only**: Receive SSE stream
-4. **Separate POST endpoint**: Use root `/` for JSON-RPC requests
-
----
-
-## 🔍 **Standards Verification Tests**
-
-### ✅ **Streamable HTTP Tests (2025-11-25)**
-
-```bash
-# Test MCP endpoint availability
-curl -I http://localhost:3000/mcp
-# Expected: 401 Unauthorized (authentication required)
-
-# Test GET without SSE Accept header
-curl -H "Authorization: Bearer <token>" \
-     -H "Origin: http://localhost" \
-     -H "MCP-Protocol-Version: 2025-11-25" \
-     -H "Accept: application/json" \
-     http://localhost:3000/mcp
-# Expected: 405 Method Not Allowed (per 2025-11-25 spec)
-
-# Test POST with JSON-RPC request (initialize)
-curl -X POST http://localhost:3000/mcp \
-     -H "Authorization: Bearer <token>" \
-     -H "Origin: http://localhost" \
-     -H "MCP-Protocol-Version: 2025-11-25" \
-     -H "Content-Type: application/json" \
-     -d '{"jsonrpc":"2.0","method":"initialize","params":{"protocolVersion":"2025-11-25","clientInfo":{"name":"test","version":"1.0"},"capabilities":{}},"id":"1"}'
-# Expected: JSON-RPC response with MCP-Session-Id header
-
-# Test invalid protocol version (strict mode)
-curl -X POST http://localhost:3000/mcp \
-     -H "Authorization: Bearer <token>" \
-     -H "MCP-Protocol-Version: 2020-01-01" \
-     -H "Content-Type: application/json" \
-     -d '{"jsonrpc":"2.0","method":"initialize","id":"1"}'
-# Expected: 400 Bad Request (unsupported protocol version)
-
-# Test POST with JSON-RPC request (tools/list)
-curl -X POST http://localhost:3000/mcp \
-     -H "Authorization: Bearer <token>" \
-     -H "Origin: http://localhost" \
-     -H "MCP-Protocol-Version: 2025-11-25" \
-     -H "MCP-Session-Id: <session-id>" \
-     -H "Content-Type: application/json" \
-     -d '{"jsonrpc":"2.0","method":"tools/list","id":"2"}'
-# Expected: JSON-RPC response with 55 tools
-
-# Test GET with SSE (requires Accept header)
-curl -H "Authorization: Bearer <token>" \
-     -H "Origin: http://localhost" \
-     -H "MCP-Protocol-Version: 2025-11-25" \
-     -H "MCP-Session-Id: <session-id>" \
-     -H "Accept: text/event-stream" \
-     http://localhost:3000/mcp
-# Expected: 200 OK with SSE stream (priming event first)
-
-# Test session termination
-curl -X DELETE http://localhost:3000/mcp \
-     -H "Authorization: Bearer <token>" \
-     -H "MCP-Session-Id: <session-id>"
-# Expected: 204 No Content
-
-# Test 404 for invalid session
-curl -X POST http://localhost:3000/mcp \
-     -H "Authorization: Bearer <token>" \
-     -H "MCP-Session-Id: invalid-session-id" \
-     -H "Content-Type: application/json" \
-     -d '{"jsonrpc":"2.0","method":"tools/list","id":"1"}'
-# Expected: 404 Not Found
+```
+HTTP 400
+{"jsonrpc":"2.0","id":1,"error":{"code":-32020,"message":"Header mismatch: Mcp-Method header 'prompts/list' does not match body method 'tools/list'","data":{"correlation_id":"…"}}}
 ```
 
-### ✅ **Legacy SSE Tests**
+Unsupported version (`2099-01-01`):
 
-```bash
-# Test SSE endpoint
-curl -H "Authorization: Bearer <token>" \
-     -H "Origin: http://localhost" \
-     -H "Accept: text/event-stream" \
-     http://localhost:3000/sse
-# Expected: 200 OK with SSE stream
+```
+HTTP 400
+{"jsonrpc":"2.0","id":1,"error":{"code":-32022,"message":"Unsupported protocol version","data":{"supported":["2026-07-28","2025-11-25","2025-06-18","2025-03-26","2024-11-05"],"requested":"2099-01-01","correlation_id":"…"}}}
 ```
 
-### ✅ **Authentication Tests**
+## Legacy (2024-11-05 to 2025-11-25) requirements
 
-```bash
-# Get authentication token
-curl -X POST http://localhost:3000/auth/token \
-     -H "Content-Type: application/json" \
-     -d '{"api_key": "wazuh_..."}'
-# Expected: JWT token response
+| Requirement | Result |
+|---|---|
+| `initialize` | Returns `protocolVersion` (the client's if it is a legacy revision, otherwise `2025-11-25`), `capabilities`, `serverInfo`, `instructions`, and an `Mcp-Session-Id` header. The `MCP-Protocol-Version` response header carries the negotiated version. |
+| Declared capabilities | `logging: {}`, `prompts: {listChanged: false}`, `resources: {subscribe: false, listChanged: false}`, `tools: {listChanged: false}`, `completions: {}` |
+| `notifications/initialized` | 202, marks the session initialized |
+| `ping` | `{}` |
+| `logging/setLevel` | Accepts the eight RFC 5424 levels; returns `{}`. The server does not send `notifications/message`. |
+| `completion/complete` | Returns `{"completion":{"values":[...],"total":n,"hasMore":bool}}` |
+| Unknown `Mcp-Session-Id` | HTTP 404 (`"Session not found. Please start a new session with InitializeRequest."`) |
+| Missing `MCP-Protocol-Version` | Treated as `2025-03-26`, echoed in the response header |
+| Unsupported `MCP-Protocol-Version` | HTTP 400, `-32022` with the same `data` as above and `id: null` (the header is checked before the body is parsed) |
+| Request without session that is not `initialize` | Served, but no session is stored and no `Mcp-Session-Id` is returned |
+| JSON-RPC batches | Accepted on the legacy path; at most 100 items; an empty batch is `-32600`; a batch of only notifications/responses returns 202 |
 
-# Test invalid token
-curl -H "Authorization: Bearer invalid-token" \
-     http://localhost:3000/mcp
-# Expected: 401 Unauthorized
+## Shared behavior
+
+### Methods
+
+`tools/list`, `tools/call`, `prompts/list`, `prompts/get`, `resources/list`, `resources/read`,
+`resources/templates/list`, `completion/complete` and `server/discover` are served on both
+paths. Notifications handled: `notifications/initialized`, `notifications/cancelled` (logged;
+in-flight calls are not interrupted).
+
+### Catalogue
+
+| List | Count |
+|---|---|
+| Tools | 55 with a write-scoped token (41 read, 14 write); 41 with a read-only token. A clusters file adds `list_wazuh_clusters`. `WAZUH_TOOLSETS`/`WAZUH_DISABLED_TOOLS` reduce the list. |
+| Prompts | 5 |
+| Resources | 6 (`wazuh://manager/info`, `wazuh://agents/summary`, `wazuh://alerts/recent`, `wazuh://cluster/status`, `wazuh://rules/summary`, `wazuh://vulnerabilities/critical`) |
+| Resource templates | 3 (`wazuh://agents/{agent_id}/info`, `.../alerts`, `.../vulnerabilities`) |
+
+### Tools
+
+- Every tool has `annotations`. Write tools: `readOnlyHint: false`,
+  `destructiveHint: true` (false for the five reversal tools: `wazuh_unisolate_host`, `wazuh_enable_user`, `wazuh_restore_file`, `wazuh_firewall_allow`, `wazuh_host_allow`), `idempotentHint: false`,
+  `openWorldHint: false`. Read tools: `readOnlyHint: true`, `openWorldHint` true only for
+  `search_external_context`.
+- Every `inputSchema` has `additionalProperties: false`; undeclared arguments are refused.
+- Business refusals (missing scope, confirmation required, disabled tool, unknown argument) are
+  tool results with `isError: true`, for example:
+
+  ```
+  {"content":[{"type":"text","text":"Unknown argument(s) for 'get_wazuh_agents': bogus. Valid arguments: agent_id, limit, status."}],"isError":true}
+  ```
+
+### Pagination
+
+`tools/list`, `prompts/list` and `resources/list` return everything in one page. The `cursor`
+parameter is accepted and ignored, and no `nextCursor` is returned.
+
+### Error codes
+
+| Code | Meaning | When |
+|---|---|---|
+| `-32700` | Parse error | Invalid JSON (HTTP 400) |
+| `-32600` | Invalid request | Malformed request, empty batch, batch over 100 items, any batch on the modern path |
+| `-32601` | Method not found | Unknown method; removed methods on the modern path (HTTP 404) |
+| `-32602` | Invalid params | Validation errors, unknown tool name (`"Unknown tool: nope. Use 'tools/list' to see available tools."`) |
+| `-32603` | Internal error | Unhandled exception; details are logged, not returned |
+| `-32002` | Resource not found | `resources/read` with an unknown URI (`"Resource not found: wazuh://nope"`), both paths |
+| `-32020` | Header mismatch | Modern path header/body checks |
+| `-32022` | Unsupported protocol version | Unknown `MCP-Protocol-Version` header or modern `_meta` version |
+
+Error responses include `data.correlation_id`, the request's correlation id from the monitoring middleware, for tracing in the server logs.
+
+### SSE
+
+`GET /mcp` with `Accept: text/event-stream` opens a stream for a legacy session. The first
+event is a priming event with an id and empty data; after that the server sends a comment
+(`: keepalive`) every 30 seconds. Event ids are `<stream id>-<n>`, where the stream id is random
+per stream, so ids are unique across a session's streams:
+
+```
+id: de347ee3e345-1
+retry: 3000
+data: 
+
 ```
 
----
+`Last-Event-ID` is accepted but nothing is replayed; the stream carries no server messages.
+POST responses are always `application/json`, even when the client accepts
+`text/event-stream`.
 
-## 📊 **Architecture Compliance**
+### Transport security
 
-### ✅ **Modern Transport Architecture**
+- `Origin` present and not in `ALLOWED_ORIGINS`: HTTP 403 (`{"detail":"Origin not allowed: https://evil.example"}`).
+  A missing `Origin` is accepted.
+- CORS preflight allows `Mcp-Method`, `Mcp-Name`, `MCP-Protocol-Version`, `MCP-Session-Id`,
+  `Last-Event-ID` and `Authorization`; `MCP-Session-Id` and `MCP-Protocol-Version` are exposed.
+- Authentication (bearer, OAuth or none) applies to `/mcp` and `/`. With `OAUTH_ISSUER_URL`
+  set, 401 responses point to `/.well-known/oauth-protected-resource` (RFC 9728) via
+  `WWW-Authenticate`.
 
-| Feature | Status | Benefit |
-|---------|--------|---------|
-| **Single endpoint** | ✅ | Simplified client implementation |
-| **Dynamic streaming** | ✅ | Efficient for both short and long operations |
-| **Bidirectional communication** | ✅ | Real-time notifications and updates |
-| **Serverless compatible** | ✅ | Can scale to zero when idle |
-| **HTTP/2 & HTTP/3 ready** | ✅ | Modern protocol support |
+See [docs/security/README.md](docs/security/README.md) for authentication, scopes and rate
+limits.
 
-### ✅ **Production Deployment**
+## Known gaps
 
-| Requirement | Status | Implementation |
-|-------------|--------|----------------|
-| **Container Security** | ✅ | Non-root user, read-only filesystem |
-| **Multi-platform** | ✅ | AMD64/ARM64 support |
-| **Health Checks** | ✅ | Kubernetes-ready health endpoints |
-| **Graceful Shutdown** | ✅ | Proper cleanup and connection draining |
-| **Resource Limits** | ✅ | CPU/memory constraints |
-| **Monitoring** | ✅ | Prometheus metrics exposed |
+- No pagination (single page for all lists).
+- No server-to-client messages: no `notifications/message` logging, no progress
+  notifications, no list-changed notifications, no resource subscriptions.
+- `notifications/cancelled` does not stop an in-flight tool call.
+- `Last-Event-ID` resumption has nothing to replay.
 
----
+## References
 
-## 🏆 **FINAL COMPLIANCE VERDICT**
-
-### **✅ DUAL-ERA: MCP 2026-07-28 (modern) + 2025-11-25 and earlier (legacy)**
-
-The Wazuh MCP Remote Server implements the current 2026-07-28 revision on the stateless
-per-request path while preserving the legacy handshake for older clients:
-
-🎯 **Perfect Score: 45/45 Requirements Met**
-
-| Category | Score | Status |
-|----------|-------|--------|
-| **Streamable HTTP Transport** | 10/10 | ✅ COMPLIANT |
-| **Legacy SSE Support** | 3/3 | ✅ COMPLIANT |
-| **Authentication** | 5/5 | ✅ COMPLIANT |
-| **Protocol Versioning** | 5/5 | ✅ COMPLIANT |
-| **Security (2025-11-25)** | 7/7 | ✅ COMPLIANT |
-| **MCP Methods** | 11/11 | ✅ COMPLIANT |
-| **MCP Notifications** | 2/2 | ✅ COMPLIANT |
-| **Production Readiness** | 6/6 | ✅ COMPLIANT |
-
-### **Transport Status**
-
-- ✅ **Streamable HTTP (2025-11-25)**: Primary transport, fully implemented
-- ✅ **Legacy SSE (2024-11-05)**: Maintained for backwards compatibility
-- ✅ **Dual Transport Support**: Seamless migration path for clients
-
-### **New in 2025-11-25 Compliance**
-
-- ✅ **GET returns 405 without SSE Accept header** (per spec)
-- ✅ **Strict protocol version validation** (400 for invalid versions)
-- ✅ **SSE priming event** (empty data event sent first)
-- ✅ **Origin validation only when present** (no validation if header absent)
-- ✅ **MCP-Session-Id header** (proper casing)
-- ✅ **404 for invalid session ID** (per spec)
-- ✅ **Full MCP method support** (prompts, resources, logging, completion)
-
-### **Ready for Production Deployment**
-
-This implementation is **immediately ready** for production use and supports:
-
-- ✅ **Modern MCP clients** (2026-07-28) and **legacy clients** (2025-11-25 and earlier)
-- ✅ **Legacy MCP Clients** (backwards compatible with 2025-06-18, 2025-03-26, 2024-11-05)
-- ✅ **Enterprise Security Standards**
-- ✅ **Scalable Architecture**
-- ✅ **Modern Cloud Deployments**
-
----
-
-## 📚 **Additional Resources**
-
-- **Server Code**: `src/wazuh_mcp_server/server.py`
-- **Authentication**: `src/wazuh_mcp_server/auth.py`
-- **Security**: `src/wazuh_mcp_server/security.py`
-- **Documentation**: `README.md`, `INSTALLATION.md`
-- **Deployment**: `compose.yml`, `Dockerfile`
-
-**This implementation is up-to-date with the latest 2026-07-28 specification (served on the modern stateless path) and remains backward compatible with the 2025-11-25 and earlier handshake-based revisions.**
+- [MCP specification 2026-07-28](https://modelcontextprotocol.io/specification/2026-07-28)
+- [MCP specification 2025-11-25](https://modelcontextprotocol.io/specification/2025-11-25)

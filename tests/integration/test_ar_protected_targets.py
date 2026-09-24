@@ -65,9 +65,9 @@ class TestEveryBlockingPathRefusesProtectedTargets:
     @pytest.mark.asyncio
     @pytest.mark.parametrize("command", ["!firewall-drop", "host-deny"])
     async def test_generic_active_response(self, monkeypatch, target, command):
-        """Generic active response."""
+        """The generic tool never dispatches IP blocks; it points at the dedicated tool."""
         client = _client(monkeypatch)
-        with pytest.raises(ValueError, match="protected target"):
+        with pytest.raises(ValueError, match="Use wazuh_(firewall_drop|host_deny)"):
             await client.run_active_response("001", command, {"srcip": target})
         assert client.sent == []
 
@@ -82,13 +82,7 @@ class TestLegitimateTargetsStillDispatch:
         await client.block_ip(ATTACKER_IP, agent_id="001")
         await client.firewall_drop("001", ATTACKER_IP)
         await client.host_deny("001", ATTACKER_IP)
-        await client.run_active_response("001", "firewall-drop", {"srcip": ATTACKER_IP})
-        assert [d["command"] for d in client.sent] == [
-            "!firewall-drop",
-            "!firewall-drop",
-            "!host-deny",
-            "!firewall-drop",
-        ]
+        assert [d["command"] for d in client.sent] == ["!firewall-drop", "!firewall-drop", "!host-deny"]
 
     @pytest.mark.asyncio
     async def test_generic_non_blocking_command_ignores_ip_guard(self, monkeypatch):
@@ -119,11 +113,12 @@ class TestGuardCannotBeSidestepped:
             {"srcip": "::ffff:10.0.10.20"},  # IPv4-mapped spelling of the manager
         ],
     )
-    async def test_generic_tool_value_based_guard(self, monkeypatch, parameters):
-        """Generic tool value based guard."""
+    async def test_generic_tool_refuses_ip_blocks_whatever_the_parameters(self, monkeypatch, parameters):
+        """No parameter spelling gets an IP block through the generic tool."""
         client = _client(monkeypatch)
-        with pytest.raises(ValueError, match="protected target"):
-            await client.run_active_response("001", "!firewall-drop", parameters)
+        for extra in ({}, {"srcip": "10.0.10.0/24"}, {"srcip": "127.1"}, {"x": "srcip=127.0.0.1"}):
+            with pytest.raises(ValueError, match="Use wazuh_firewall_drop"):
+                await client.run_active_response("001", "!firewall-drop", {**parameters, **extra})
         assert client.sent == []
 
     @pytest.mark.asyncio
@@ -215,10 +210,10 @@ class TestManagerAgentGuardCoversBlockingTools:
         assert stub.calls == []
 
     @pytest.mark.asyncio
-    async def test_fleet_wide_block_counts_as_manager_target(self, stub):
-        """Fleet wide block counts as manager target."""
-        self._refused(await self._call("wazuh_block_ip", all_agents=True, ip_address=ATTACKER_IP), "agent 000")
-        assert stub.calls == []
+    async def test_fleet_wide_block_is_not_an_agent_000_target(self, stub):
+        """all_agents is its own decision, not a manager-agent action (no WAZUH_ALLOW_MANAGER_AR needed)."""
+        await self._call("wazuh_block_ip", all_agents=True, ip_address=ATTACKER_IP)
+        assert stub.calls == ["block_ip"]
 
     @pytest.mark.asyncio
     async def test_real_agents_and_opt_in_still_work(self, stub, monkeypatch):
