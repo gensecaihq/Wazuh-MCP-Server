@@ -25,10 +25,10 @@ You can expect an acknowledgment within 72 hours and a fix or mitigation plan wi
 
 ## Scope
 
-In scope: authentication/authorization bypass (API keys, bearer JWTs, OAuth 2.1, RBAC scopes), bypass of the active-response safeguards (confirmation gate, protected targets, manager-agent guard), credential exposure in logs or tool output, injection via tool parameters, SSRF through Wazuh connection settings, and container/deployment hardening gaps in the shipped configs.
+In scope: authentication or authorization bypass (API keys, bearer JWTs, the OAuth authorization server including API-key and OpenID Connect sign-in, RBAC scopes); bypass of the active-response safeguards (confirmation gate, protected IP targets, the Manager-agent and fleet-wide opt-ins, quarantine path limits, the refusal of IP blocks through `wazuh_active_response`); Wazuh Manager or Indexer TLS verification being skipped while enabled; credential exposure in logs or tool output; injection via tool parameters; SSRF through Wazuh connection settings; and hardening gaps in the shipped container and compose configuration.
 
 Out of scope: vulnerabilities in Wazuh itself (report to the [Wazuh project](https://github.com/wazuh/wazuh/security)), issues requiring a compromised host, denial of service against your own deployment, and the documented limitations in [docs/security/README.md](docs/security/README.md#known-limitations) (for example, Manager certificate verification being off while `WAZUH_ALLOW_SELF_SIGNED=true`).
 
 ## Hardening Guidance
 
-See [docs/security/README.md](docs/security/README.md) for the security model and deployment hardening: authentication modes, RBAC scopes, active-response safeguards, TLS, least-privilege Wazuh accounts, and a production checklist.
+See [docs/security/README.md](docs/security/README.md) for the security model and deployment hardening: authentication modes and OAuth sign-in, RBAC scopes, active-response safeguards, TLS verification toward Wazuh, least-privilege Wazuh accounts, and a production checklist.

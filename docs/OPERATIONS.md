@@ -14,10 +14,10 @@ docker compose up -d
 What `compose.yml` does:
 
 - **Image:** builds `wazuh-main-server:${VERSION:-4.3.0}` locally from the `Dockerfile` and runs it as the `wazuh-main-server` container.
-- **Environment:** reads `.env` and forces `ENVIRONMENT=production`, so the server refuses to start without `AUTH_SECRET_KEY` (see [Configuration](configuration.md#production-requirements)).
+- **Environment:** reads `.env` and forces `ENVIRONMENT=production`, so the server refuses to start without `AUTH_SECRET_KEY` and write tools require `confirm=true` (see [Configuration](configuration.md#production-requirements)). The server also refuses to start without `WAZUH_HOST`, `WAZUH_USER` and `WAZUH_PASS`.
 - **Port:** publishes port 3000 on `${MCP_BIND:-127.0.0.1}:${MCP_PORT:-3000}`. The loopback default expects a TLS-terminating reverse proxy on the same host.
 - **Container hardening:** read-only root filesystem, all capabilities dropped, `no-new-privileges`, and a 64 MB tmpfs for `/tmp`.
-- **Mounts:** mounts `./config` read-only at `/app/config`, for `clusters.json`.
+- **Mounts:** mounts `./config` read-only at `/app/config`, for `clusters.json`. A commented `./certs:/app/certs:ro` line is provided for a CA bundle; enable it and set `WAZUH_CA_BUNDLE=/app/certs/ca.pem` (see [Manager TLS](configuration.md#manager-tls)).
 - **Limits:** 1 CPU and 512 MB of memory.
 
 ### Deployment helper
@@ -67,7 +67,8 @@ On `SIGTERM` the server waits up to 20 seconds for open connections, such as SSE
 
 - Set the same `AUTH_SECRET_KEY` and API keys on every instance. Bearer tokens then validate on any of them.
 - Set a shared `REDIS_URL` so legacy MCP sessions are visible to every instance.
-- Use sticky sessions (or a single instance) if you rely on OAuth or on rate limits. OAuth tokens, the token revocation list and rate-limit counters are held in each process.
+- Use sticky sessions (or a single instance) if you rely on OAuth or on rate limits. OAuth authorization codes, refresh tokens, the revocation list, identity-provider logins in progress and rate-limit counters are held in each process.
+- `MAX_SESSIONS` and `MAX_SESSIONS_PER_PRINCIPAL` bound each instance's in-memory store. With `REDIS_URL` they are not applied; Redis key TTLs bound the store instead.
 - Set `TRUSTED_PROXIES` to the load balancer's address so rate limiting sees real client IPs.
 
 ## Health and readiness
@@ -155,7 +156,7 @@ AUDIT_OUTCOME: tool=<name> outcome=success|failure principal=<principal> session
 docker compose logs wazuh-main-server | grep -E 'AUDIT(_OUTCOME)?:'
 ```
 
-The principal is the API key id: `env-<hash>` for `MCP_API_KEY`, the entry's `id` for `API_KEYS`, and `oauth:<client>:<key id>` for OAuth. Forward these records to your SIEM if you need to keep them. Container logs are rotated.
+The principal is `env-<hash>` for `MCP_API_KEY`, the entry's `id` for `API_KEYS`, and `oauth:<client>:<subject>` for OAuth, where the subject is the API key id or, with an identity provider, the user identity chosen by `OAUTH_IDP_SUBJECT_CLAIM`. Forward these records to your SIEM if you need to keep them. Container logs are rotated.
 
 ## Maintenance
 
@@ -211,7 +212,8 @@ trivy image wazuh-main-server:${VERSION:-4.3.0}
 | `/sse` | `GET`, `POST` | no | Always `410 Gone`. The legacy HTTP+SSE transport was removed; use `/mcp` |
 | `/.well-known/oauth-authorization-server` | `GET` | no | RFC 8414 metadata (`404` unless `AUTH_MODE=oauth`) |
 | `/.well-known/oauth-protected-resource` | `GET` | no | RFC 9728 metadata (`404` unless `AUTH_MODE=oauth`) |
-| `/oauth/authorize` | `GET`, `POST` | API key sign-in | Authorization endpoint (OAuth mode only) |
+| `/oauth/authorize` | `GET`, `POST` | API key or IdP sign-in | Authorization endpoint (OAuth mode only). With `OAUTH_IDP_ISSUER` set, `GET` redirects to the identity provider |
+| `/oauth/callback` | `GET` | IdP | Return from the identity provider (OAuth mode with `OAUTH_IDP_ISSUER` only; `404` otherwise) |
 | `/oauth/token` | `POST` | PKCE | Code exchange and refresh (OAuth mode only) |
 | `/oauth/revoke` | `POST` | | Token revocation, RFC 7009 (OAuth mode only) |
 | `/oauth/register` | `POST` | | Dynamic Client Registration. Returns `400` unless `OAUTH_ENABLE_DCR=true` (OAuth mode only) |
@@ -244,8 +246,10 @@ curl -s -X DELETE $BASE/mcp -H "Authorization: Bearer $TOKEN" -H "MCP-Session-Id
 |---------|-------|---------|-------|
 | CPU and memory limit | `compose.yml` `deploy.resources` | 1 CPU, 512 MB | Raise the memory limit and `MAX_MEMORY_MB` together. With both at 512, the container can be OOM-killed before the server's own 503 guard triggers |
 | `MAX_MEMORY_MB` | `.env` | `512` | Above this RSS, non-probe requests get `503 Server overloaded` |
-| `MAX_CONNECTIONS` | `.env` | `10` | Concurrent Manager requests per cluster (1–100) |
-| `REQUEST_TIMEOUT_SECONDS` | `.env` | `30` | Manager and Indexer timeout (1–300) |
+| `MAX_CONNECTIONS` | `.env` | `10` | Concurrent Manager requests for the environment-configured cluster (1–100); `clusters.json` entries use 10 |
+| `REQUEST_TIMEOUT_SECONDS` | `.env` | `30` | Manager and Indexer timeout (1–300); `clusters.json` entries use `request_timeout_seconds` |
+| `MAX_ALERTS_PER_QUERY` | `.env` | `1000` | Largest `limit` for `get_wazuh_alerts` and `search_security_events` (1–10000) |
+| `MAX_SESSIONS` / `MAX_SESSIONS_PER_PRINCIPAL` | `.env` | `1000` / `100` | In-memory session caps; the least recently active sessions are evicted beyond them |
 | `MAX_TOOL_RESPONSE_CHARS` | `.env` | `1000000` | Cap on a single tool result |
 | `RATE_LIMIT_REQUESTS` / `RATE_LIMIT_WINDOW` | `.env` | `100` / `60` | Sliding-window limit: per principal and client IP on `/mcp` and `/`, per IP on other routes |
 

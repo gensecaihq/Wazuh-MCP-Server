@@ -4,12 +4,13 @@ How the server implements the Model Context Protocol, and what was checked.
 
 ## Method
 
-Checked on `main` at `aac0fda` by reading `src/wazuh_mcp_server/server.py` and sending
+Checked on `main` at `a6a8172` by reading `src/wazuh_mcp_server/server.py` and sending
 requests to the ASGI app in-process (the `modern_body`/`modern_headers` helpers from
 `tests/integration/test_mcp_protocol.py`, `AUTH_MODE=none`, `AUTHLESS_ALLOW_WRITE=true`,
 `ALLOWED_ORIGINS=https://claude.ai`). Responses quoted below are from that run, with the
-`correlation_id` values shortened. The protocol, scope-enforcement and OAuth suites
-(`test_mcp_protocol.py`, `test_scope_enforcement.py`, `test_oauth*.py`) pass.
+`correlation_id` values shortened. The protocol, scope-enforcement, OAuth and OpenID Connect
+suites (`test_mcp_protocol.py`, `test_scope_enforcement.py`, `test_oauth*.py`,
+`test_oidc_identity_provider.py`; 116 tests) pass.
 
 Not covered here: interoperability with specific MCP clients, and behavior behind a reverse
 proxy.
@@ -59,7 +60,7 @@ The old HTTP+SSE transport (2024-11-05) is not available; clients must use Strea
 | `MCP-Protocol-Version` vs `_meta` mismatch | HTTP 400, `-32020` | `handle_modern_request` |
 | `Mcp-Method` must match body `method` | HTTP 400, `-32020` | see below |
 | `Mcp-Name` must match `params.name`/`params.uri` for `tools/call`, `prompts/get`, `resources/read` | HTTP 400, `-32020`; `=?base64?...?=` values are decoded first | base64-encoded `Mcp-Name` for `prompts/get` returned 200 |
-| Unsupported version | HTTP 400, `-32022` with `data.supported` and `data.requested` | see below |
+| Unsupported version | HTTP 400, `-32022` with `data.supported` and `data.requested`, `id: null` (the header is checked before the body is parsed) | see below |
 | Batches | HTTP 400, `-32600` | `"Batch requests are not supported by modern protocol revisions; send one request per POST"` |
 | Removed methods (`initialize`, `ping`, `logging/setLevel`) | HTTP 404, `-32601` | `"Method 'initialize' not found"` |
 | Notifications | HTTP 202, empty body | `notifications/cancelled` |
@@ -84,7 +85,7 @@ Unsupported version (`2099-01-01`):
 
 ```
 HTTP 400
-{"jsonrpc":"2.0","id":1,"error":{"code":-32022,"message":"Unsupported protocol version","data":{"supported":["2026-07-28","2025-11-25","2025-06-18","2025-03-26","2024-11-05"],"requested":"2099-01-01","correlation_id":"…"}}}
+{"jsonrpc":"2.0","id":null,"error":{"code":-32022,"message":"Unsupported protocol version","data":{"supported":["2026-07-28","2025-11-25","2025-06-18","2025-03-26","2024-11-05"],"requested":"2099-01-01","correlation_id":"…"}}}
 ```
 
 ## Legacy (2024-11-05 to 2025-11-25) requirements
@@ -128,8 +129,10 @@ in-flight calls are not interrupted).
   `openWorldHint: false`. Read tools: `readOnlyHint: true`, `openWorldHint` true only for
   `search_external_context`.
 - Every `inputSchema` has `additionalProperties: false`; undeclared arguments are refused.
-- Business refusals (missing scope, confirmation required, disabled tool, unknown argument) are
-  tool results with `isError: true`, for example:
+- When `WAZUH_REQUIRE_ACTION_CONFIRMATION` is on (the default with `ENVIRONMENT=production`),
+  write tools declare a boolean `confirm` argument and refuse to run without `confirm=true`.
+- Business refusals (missing scope, confirmation required, disabled tool, unknown argument) and
+  tool failures such as a guard-rail refusal are tool results with `isError: true`, for example:
 
   ```
   {"content":[{"type":"text","text":"Unknown argument(s) for 'get_wazuh_agents': bogus. Valid arguments: agent_id, limit, status."}],"isError":true}
@@ -179,9 +182,16 @@ POST responses are always `application/json`, even when the client accepts
   A missing `Origin` is accepted.
 - CORS preflight allows `Mcp-Method`, `Mcp-Name`, `MCP-Protocol-Version`, `MCP-Session-Id`,
   `Last-Event-ID` and `Authorization`; `MCP-Session-Id` and `MCP-Protocol-Version` are exposed.
-- Authentication (bearer, OAuth or none) applies to `/mcp` and `/`. With `OAUTH_ISSUER_URL`
-  set, 401 responses point to `/.well-known/oauth-protected-resource` (RFC 9728) via
+- Authentication (bearer, OAuth or none) applies to `/mcp` and `/`. In OAuth mode the server is
+  its own authorization server (authorization code with S256 PKCE); users sign in with an API key
+  or at an OpenID Connect provider when `OAUTH_IDP_ISSUER` is set. With `OAUTH_ISSUER_URL` set,
+  401 responses point to `/.well-known/oauth-protected-resource` (RFC 9728) via
   `WWW-Authenticate`.
+- `/mcp` and `/` are rate limited per principal and client IP (`RATE_LIMIT_REQUESTS` per
+  `RATE_LIMIT_WINDOW` seconds); failed authentication is rate limited per client IP.
+- Sessions are stored only for `initialize`. The in-memory store is capped by `MAX_SESSIONS` and
+  `MAX_SESSIONS_PER_PRINCIPAL` (least recently active sessions are evicted), and stored
+  `clientInfo` fields are truncated.
 
 See [docs/security/README.md](docs/security/README.md) for authentication, scopes and rate
 limits.

@@ -63,10 +63,11 @@ Wazuh-MCP-Server/
 │   ├── server.py           # FastAPI app, MCP protocol handling, tool definitions and dispatch
 │   ├── toolsets.py         # Toolset membership, WAZUH_TOOLSETS resolution, tool annotations
 │   ├── auth.py             # API keys and bearer JWTs
-│   ├── oauth.py            # OAuth 2.0 authorization server
+│   ├── oauth.py            # OAuth 2.0 authorization server (PKCE, API-key sign-in)
+│   ├── oidc.py             # OpenID Connect sign-in at an external identity provider
 │   ├── config.py           # Environment configuration and startup validation
 │   ├── security.py         # Rate limiting, CORS, input validation, log redaction
-│   ├── clusters.py         # Multi-cluster registry
+│   ├── clusters.py         # Multi-cluster registry and Cross-Cluster Search routing
 │   ├── session_store.py    # In-memory and Redis session storage
 │   ├── resilience.py       # Circuit breakers, retries, graceful shutdown
 │   ├── monitoring.py       # Prometheus metrics, structured logging
@@ -117,7 +118,7 @@ ruff check src/
 pytest tests/ -v --cov=src/wazuh_mcp_server --cov-report=xml --cov-fail-under=50
 ```
 
-Run them locally before pushing; to apply formatting instead of checking it, run `black src/ tests/` and `isort src/ tests/`.
+It also byte-compiles the sources (`python -m py_compile`) and builds the package (`python -m build`). Run them locally before pushing; to apply formatting instead of checking it, run `black src/ tests/` and `isort src/ tests/`.
 
 Other useful invocations:
 
