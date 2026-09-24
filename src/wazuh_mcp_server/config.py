@@ -381,8 +381,13 @@ class ServerConfig:
                 parsed_keys = json.loads(api_keys_json)
             except json.JSONDecodeError as exc:
                 raise ConfigurationError(f"API_KEYS is not valid JSON: {exc}") from exc
-            if not isinstance(parsed_keys, list) or not all(isinstance(k, dict) for k in parsed_keys):
-                raise ConfigurationError("API_KEYS must be a JSON array of key objects")
+            if (
+                not isinstance(parsed_keys, list)
+                or not parsed_keys
+                or not all(isinstance(k, dict) for k in parsed_keys)
+            ):
+                # An empty array loaded zero keys and skipped the generated default: no usable key at all
+                raise ConfigurationError("API_KEYS must be a non-empty JSON array of key objects")
 
         # Optional CA bundle for the Wazuh Manager / Indexer certificates. Fail fast on a
         # bad path: silently falling back would either break every request or, worse,

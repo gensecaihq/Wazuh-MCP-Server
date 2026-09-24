@@ -4357,7 +4357,8 @@ _last_manager_failure: Optional[str] = None
 def _manager_failure_reason(exc: Exception) -> str:
     """Coarse category for /ready, which is unauthenticated: no host names or messages."""
     text = str(exc).lower()
-    if "certificate" in text or "ssl" in text or "tls" in text:
+    # The client raises this message only after finding ssl.SSLCertVerificationError in the chain
+    if "tls certificate verification failed" in text:
         return "tls_verification_failed"
     if "401" in text or "403" in text or "authenticat" in text or "credential" in text:
         return "authentication_failed"

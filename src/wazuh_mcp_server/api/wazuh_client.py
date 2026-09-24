@@ -7,6 +7,7 @@ import logging
 import math
 import os
 import re
+import ssl
 import time
 from collections import OrderedDict, deque
 from datetime import datetime, timedelta, timezone
@@ -152,8 +153,18 @@ _ISO27001_CONTROL_MAP: Dict[str, Dict] = {
 
 
 def _is_tls_failure(exc: Exception) -> bool:
-    text = str(exc).lower()
-    return "ssl" in text or "certificate" in text or "verify" in text
+    """True only for certificate-verification failures, found in the exception chain.
+
+    Matching "ssl" in the message also caught other handshake errors (protocol mismatch,
+    reset during handshake) and gave them the certificate-reissue hint."""
+    seen = set()
+    current: Optional[BaseException] = exc
+    while current is not None and id(current) not in seen:
+        seen.add(id(current))
+        if isinstance(current, ssl.SSLCertVerificationError):
+            return True
+        current = current.__cause__ or current.__context__
+    return "certificate verify failed" in str(exc).lower()
 
 
 def _retry_after_seconds(value: Optional[str], default: int = 30) -> int:

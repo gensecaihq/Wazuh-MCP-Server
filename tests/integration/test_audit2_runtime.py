@@ -363,7 +363,7 @@ class TestDeployVerdictGaps:
         with pytest.raises(ConfigurationError, match="MCP_API_KEY"):
             ServerConfig.from_env()
 
-    @pytest.mark.parametrize("raw", ["[{bad json", '{"id": "k"}'])
+    @pytest.mark.parametrize("raw", ["[{bad json", '{"id": "k"}', "[]"])
     def test_unusable_api_keys_stops_startup(self, monkeypatch, raw):
         from wazuh_mcp_server.config import ServerConfig
 
@@ -389,3 +389,19 @@ class TestDeployVerdictGaps:
         assert body["services"]["wazuh_manager_reason"] == "tls_verification_failed"
         assert "wazuh.internal" not in json.dumps(body)  # unauthenticated endpoint: category only
         assert any("wazuh.internal" in r.getMessage() for r in caplog.records)
+
+    def test_tls_failure_detected_by_exception_type(self):
+        import ssl
+
+        from wazuh_mcp_server.api.wazuh_client import _is_tls_failure
+
+        def wrapped(cause):
+            try:
+                raise httpx.ConnectError("handshake failed") from cause
+            except httpx.ConnectError as e:
+                return e
+
+        assert _is_tls_failure(wrapped(ssl.SSLCertVerificationError(1, "certificate verify failed")))
+        # other handshake errors mention SSL but are not a certificate problem
+        assert not _is_tls_failure(wrapped(ssl.SSLError(1, "[SSL: WRONG_VERSION_NUMBER] wrong version number")))
+        assert not _is_tls_failure(httpx.ConnectError("All connection attempts failed"))
