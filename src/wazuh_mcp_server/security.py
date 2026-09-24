@@ -500,7 +500,7 @@ def validate_file_path(value: Any, required: bool = False, param_name: str = "fi
 
 
 # Locations where "quarantining" a file means breaking the host or the agent itself.
-# Overridable with WAZUH_QUARANTINE_DENY_PREFIXES; an optional WAZUH_QUARANTINE_ALLOW_PREFIXES
+# Extended (not replaced) by WAZUH_QUARANTINE_DENY_PREFIXES; an optional WAZUH_QUARANTINE_ALLOW_PREFIXES
 # turns the policy into an allow-list (only paths under one of the prefixes are accepted).
 DEFAULT_QUARANTINE_DENY_PREFIXES = (
     "/etc",
@@ -573,7 +573,10 @@ def validate_quarantine_path(value: Any, param_name: str = "file_path") -> str:
             "is outside WAZUH_QUARANTINE_ALLOW_PREFIXES",
             "Only files under the configured allow-listed directories can be quarantined",
         )
-    for prefix in _path_prefixes("WAZUH_QUARANTINE_DENY_PREFIXES", DEFAULT_QUARANTINE_DENY_PREFIXES):
+    # Configured prefixes add to the defaults: replacing them meant adding /srv/critical
+    # silently re-allowed /etc/passwd
+    deny = DEFAULT_QUARANTINE_DENY_PREFIXES + tuple(_path_prefixes("WAZUH_QUARANTINE_DENY_PREFIXES", ()))
+    for prefix in deny:
         if _is_under(file_path, prefix):
             raise ToolValidationError(
                 param_name,

@@ -1853,24 +1853,27 @@ def _require_action_confirmation() -> bool:
     alert text: the model has to come back with confirm=true, which is its cue to ask a
     human operator first.
     """
-    raw = os.getenv("WAZUH_REQUIRE_ACTION_CONFIRMATION", "").strip().lower()
-    if raw:
-        if raw in ("true", "1", "yes"):
-            return True
-        if raw in ("false", "0", "no"):
-            return False
-        raise ValueError("WAZUH_REQUIRE_ACTION_CONFIRMATION must be true or false")
-    return os.getenv("ENVIRONMENT", getattr(config, "ENVIRONMENT", "development")).strip().lower() == "production"
+    from wazuh_mcp_server.config import env_bool, normalize_environment
+
+    if os.getenv("WAZUH_REQUIRE_ACTION_CONFIRMATION", "").strip():
+        # Same spellings as every other boolean (on/off, yes/no, 1/0); garbage is rejected at startup
+        return env_bool("WAZUH_REQUIRE_ACTION_CONFIRMATION", False)
+    environment = os.getenv("ENVIRONMENT")
+    return (normalize_environment(environment) if environment else config.ENVIRONMENT) == "production"
 
 
 def _fleet_wide_ar_allowed() -> bool:
     """Fleet-wide active response (all_agents=true) is opt-in via WAZUH_ALLOW_FLEET_AR=true."""
-    return os.getenv("WAZUH_ALLOW_FLEET_AR", "false").strip().lower() in ("true", "1", "yes")
+    from wazuh_mcp_server.config import env_bool
+
+    return env_bool("WAZUH_ALLOW_FLEET_AR", False)
 
 
 def _manager_ar_allowed() -> bool:
     """True when the operator opted in to active response against the Manager (WAZUH_ALLOW_MANAGER_AR)."""
-    return os.getenv("WAZUH_ALLOW_MANAGER_AR", "false").strip().lower() in ("true", "1", "yes")
+    from wazuh_mcp_server.config import env_bool
+
+    return env_bool("WAZUH_ALLOW_MANAGER_AR", False)
 
 
 def _guard_manager_agent(agent_id: str, tool_name: str) -> None:

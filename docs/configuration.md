@@ -201,8 +201,11 @@ How tool exposure works:
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `WAZUH_PROTECTED_IPS` | *(none)* | Comma-separated IPs or CIDRs that `wazuh_block_ip`, `wazuh_firewall_drop` and `wazuh_host_deny` refuse to block. Loopback is always protected, and so is `WAZUH_HOST` when it is an IP address. Invalid entries are skipped, with a warning |
-| `WAZUH_REQUIRE_ACTION_CONFIRMATION` | `false` | *Opt-in.* Every `wazuh:write` tool must be called with `confirm=true`, and the flag is added to their schemas |
-| `WAZUH_ALLOW_MANAGER_AR` | `false` | *Opt-in.* Allows `wazuh_isolate_host`, `wazuh_kill_process`, `wazuh_disable_user`, `wazuh_quarantine_file` and `wazuh_active_response` against agent `000`, the Manager itself |
+| `WAZUH_REQUIRE_ACTION_CONFIRMATION` | `true` when `ENVIRONMENT=production`, otherwise `false` | *Strict.* Every `wazuh:write` tool must be called with `confirm=true`. Write tools always advertise the optional `confirm` flag. An explicit value wins over the environment default |
+| `WAZUH_ALLOW_MANAGER_AR` | `false` | *Strict.* Allows host-level actions against agent `000` (the Manager itself): isolate, kill, disable user, quarantine, generic active response, the IP-block tools with that agent, and `wazuh_restart` with `target=manager` |
+| `WAZUH_ALLOW_FLEET_AR` | `false` | *Strict.* Allows `wazuh_block_ip` with `all_agents=true` (a block on every agent at once) |
+| `WAZUH_QUARANTINE_DENY_PREFIXES` | *(none)* | Comma-separated directories `wazuh_quarantine_file` refuses, in addition to the built-in list (system directories such as `/etc`, `/boot`, `/bin`, and the Wazuh agent's own directories) |
+| `WAZUH_QUARANTINE_ALLOW_PREFIXES` | *(none)* | When set, `wazuh_quarantine_file` only accepts absolute paths under these directories (the deny list still applies) |
 | `WAZUH_AR_FIREWALL_UNDO_COMMAND` | *(none)* | Name of an active-response command you have deployed that removes a `firewall-drop` block. `wazuh_firewall_allow` refuses to run without it, because stock Wazuh cannot remove a block through the API. The name must match `[A-Za-z0-9_-]{1,64}`; a leading `!` is added if missing. An invalid name fails startup |
 | `WAZUH_AR_HOSTDENY_UNDO_COMMAND` | *(none)* | Same, for removing a `host-deny` block with `wazuh_host_allow` |
 

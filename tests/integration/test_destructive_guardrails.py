@@ -94,8 +94,8 @@ class TestConfirmationDefault:
     async def test_on_by_default_in_production(self, stub, monkeypatch):
         """On by default in production."""
         monkeypatch.setenv("ENVIRONMENT", "production")
-        with pytest.raises(ValueError, match="confirm"):
-            await _call("wazuh_block_ip", ip_address="8.8.8.8", agent_id="001")
+        # The refusal is a tool result the model sees, carrying the confirm guidance
+        _refused(await _call("wazuh_block_ip", ip_address="8.8.8.8", agent_id="001"), "confirm")
         assert stub.calls == []
         await _call("wazuh_block_ip", ip_address="8.8.8.8", agent_id="001", confirm=True)
         assert stub.calls[-1][0] == "block_ip"
@@ -175,9 +175,11 @@ class TestQuarantinePathPolicy:
     def test_operator_can_override_denylist(self, monkeypatch):
         """Operator can override denylist."""
         monkeypatch.setenv("WAZUH_QUARANTINE_DENY_PREFIXES", "/srv/critical")
-        assert validate_quarantine_path("/etc/passwd") == "/etc/passwd"  # explicitly relaxed
         with pytest.raises(ToolValidationError):
             validate_quarantine_path("/srv/critical/db")
+        # Configured prefixes add to the defaults; they never re-allow system paths
+        with pytest.raises(ToolValidationError):
+            validate_quarantine_path("/etc/passwd")
 
     def test_allowlist_mode(self, monkeypatch):
         """Allowlist mode."""
@@ -291,3 +293,26 @@ class TestConfirmAdvertisedInSchemas:
             assert "confirm" not in by_name[name]["inputSchema"].get("required", []), name
         read_tool = next(t for t in tools if t["name"] not in WRITE_SCOPE_TOOLS)
         assert "confirm" not in read_tool["inputSchema"].get("properties", {})
+
+
+class TestSwitchParsing:
+    """Active-response switches use the same boolean spellings as every other setting."""
+
+    @pytest.mark.parametrize(
+        "value,expected", [("on", True), ("yes", True), ("1", True), ("off", False), ("no", False)]
+    )
+    def test_confirmation_spellings(self, monkeypatch, value, expected):
+        from wazuh_mcp_server.server import _require_action_confirmation
+
+        monkeypatch.setenv("WAZUH_REQUIRE_ACTION_CONFIRMATION", value)
+        assert _require_action_confirmation() is expected
+
+    @pytest.mark.parametrize(
+        "var", ["WAZUH_REQUIRE_ACTION_CONFIRMATION", "WAZUH_ALLOW_FLEET_AR", "WAZUH_ALLOW_MANAGER_AR"]
+    )
+    def test_garbage_fails_at_startup(self, monkeypatch, var):
+        from wazuh_mcp_server.config import ConfigurationError, ServerConfig
+
+        monkeypatch.setenv(var, "enabled")
+        with pytest.raises(ConfigurationError):
+            ServerConfig.from_env()

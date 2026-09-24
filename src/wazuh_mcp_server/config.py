@@ -358,6 +358,12 @@ class ServerConfig:
         else:
             indexer_ssl = not indexer_host_raw.strip().lower().startswith("http://")
 
+        # Active-response switches are read per call, but a typo must fail here, at startup,
+        # not on every write-tool call
+        for switch in ("WAZUH_REQUIRE_ACTION_CONFIRMATION", "WAZUH_ALLOW_FLEET_AR", "WAZUH_ALLOW_MANAGER_AR"):
+            if os.getenv(switch, "").strip():
+                env_bool(switch, False)
+
         try:
             enabled_tools = resolve_enabled_tools(os.getenv("WAZUH_TOOLSETS"), os.getenv("WAZUH_DISABLED_TOOLS"))
         except ValueError as e:

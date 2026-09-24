@@ -210,8 +210,9 @@ class TestManagerAgentGuardCoversBlockingTools:
         assert stub.calls == []
 
     @pytest.mark.asyncio
-    async def test_fleet_wide_block_is_not_an_agent_000_target(self, stub):
-        """all_agents is its own decision, not a manager-agent action (no WAZUH_ALLOW_MANAGER_AR needed)."""
+    async def test_fleet_wide_block_is_not_an_agent_000_target(self, stub, monkeypatch):
+        """all_agents has its own opt-in (WAZUH_ALLOW_FLEET_AR); WAZUH_ALLOW_MANAGER_AR isn't needed."""
+        monkeypatch.setenv("WAZUH_ALLOW_FLEET_AR", "true")
         await self._call("wazuh_block_ip", all_agents=True, ip_address=ATTACKER_IP)
         assert stub.calls == ["block_ip"]
 
