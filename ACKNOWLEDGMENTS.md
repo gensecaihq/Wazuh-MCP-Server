@@ -16,7 +16,7 @@ Thanks to everyone who has contributed code, reviews, bug reports and design fee
 - **[@aiunmukto](https://github.com/aiunmukto)** — `.env.example`, an early CI workflow and the Glama registry listing (#12).
 - **[@Karibusan](https://github.com/Karibusan)** — dependency fixes (#38).
 - **[@lwsinclair](https://github.com/lwsinclair)** — MseeP.ai listing (#9).
-- **[@markeclaudio](https://github.com/markeclaudio)** — OIDC login, active-response guard-rails, session bounds and TLS-by-default hardening (#123–#127, in review).
+- **[@markeclaudio](https://github.com/markeclaudio)** — OpenID Connect sign-in (#123) and Manager TLS verification by default (#127); active-response guard-rails and session bounds (#124–#126, in review).
 - **[@MilkyWay88](https://github.com/MilkyWay88)** and **[@taylorwalton](https://github.com/taylorwalton)** — early pull requests on configuration, logging and packaging.
 
 ## Bug reports and discussions
