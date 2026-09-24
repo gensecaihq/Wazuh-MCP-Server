@@ -415,3 +415,13 @@ class TestDeployVerdictGaps:
         outer.__cause__ = RuntimeError("unrelated")
         outer.__context__ = ssl.SSLCertVerificationError(1, "verify")
         assert _is_tls_failure(outer)
+
+    def test_generated_dev_key_is_read_only(self, monkeypatch):
+        from wazuh_mcp_server.auth import AuthManager
+
+        monkeypatch.delenv("MCP_API_KEY", raising=False)
+        monkeypatch.delenv("API_KEYS", raising=False)
+        monkeypatch.setenv("ENVIRONMENT", "development")
+        manager = AuthManager()
+        # README: write is never granted implicitly (the dev key used to have it)
+        assert [k.scopes for k in manager.api_keys.values()] == [["wazuh:read"]]

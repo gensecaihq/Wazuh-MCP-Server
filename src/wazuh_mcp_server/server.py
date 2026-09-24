@@ -683,7 +683,8 @@ async def lifespan(app: FastAPI):
                 # generated key unusable. Development only.
                 print(
                     f"\n🔑 Auto-generated API key for this process (dev only):\n   {default_key}\n"
-                    "   Exchange it at POST /auth/token. Set MCP_API_KEY for a stable key.\n",
+                    "   Read-only. Exchange it at POST /auth/token. For a stable key, or write access,\n"
+                    "   set MCP_API_KEY (and MCP_API_KEY_SCOPES).\n",
                     file=sys.stderr,
                     flush=True,
                 )

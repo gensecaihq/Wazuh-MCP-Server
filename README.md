@@ -117,7 +117,7 @@ All clients use the Streamable HTTP endpoint `https://<your-host>/mcp`.
 | Claude custom connectors (claude.ai, Claude Desktop) | `oauth` | OAuth authorization code with PKCE. The server pre-registers a public client, `claude-desktop`, for Claude's callback URLs. Users sign in on the server's `/oauth/authorize` page with a `wazuh_` API key (the grant is capped at that key's scopes), or at your OpenID Connect provider when `OAUTH_IDP_ISSUER` is set. |
 | Open WebUI, LibreChat, scripts and other MCP clients | `bearer` (default) | `Authorization: Bearer <token>` using a token from `POST /auth/token`. |
 
-In OAuth mode, set `OAUTH_ISSUER_URL` to the server's public HTTPS URL (otherwise it is derived from each request, which behind a proxy may not be the public URL). Dynamic Client Registration (`/oauth/register`) is off unless `OAUTH_ENABLE_DCR=true`.
+In OAuth mode, set `OAUTH_ISSUER_URL` to the server's public HTTPS URL (otherwise it is derived from each request, which behind a proxy may not be the public URL). Dynamic Client Registration (`/oauth/register`) is off unless `OAUTH_ENABLE_DCR=true`, and cannot be combined with `OAUTH_IDP_ISSUER`.
 
 Guides: [Claude Integration](docs/CLAUDE_INTEGRATION.md) · [Local LLMs](docs/LOCAL_LLM.md)
 
@@ -183,12 +183,12 @@ Per-tool parameters: [API documentation](docs/api/).
 | **Scopes (RBAC)** | Each tool requires `wazuh:read` or `wazuh:write`. A token without a scope claim is read-only. `MCP_API_KEY` is read-only unless `MCP_API_KEY_SCOPES` includes `wazuh:write`. With `AUTH_MODE=none`, write tools are disabled unless `AUTHLESS_ALLOW_WRITE=true`. |
 | **Bearer tokens** | JWTs signed with `AUTH_SECRET_KEY`, must carry `exp`, and are bound to the API key they were minted from: revoking or rotating the key invalidates its tokens. Refresh tokens are not accepted as access tokens. |
 | **OAuth** | Authorization code flow with mandatory S256 PKCE, single-use codes, refresh-token rotation with replay detection, and revocation. Users sign in with a `wazuh_` API key (the grant is capped at that key's scopes, and its tokens end when the key is revoked) or at an OpenID Connect provider (ID token signature, issuer, audience, expiry and nonce verified; tenant, domain and user allow-lists; group-to-scope mapping), so scopes, rate limits and audit entries are per user. |
-| **Action guardrails** | IP-blocking tools refuse loopback, the Manager's address (when `WAZUH_HOST` is an IP) and anything in `WAZUH_PROTECTED_IPS`; the generic active-response tool does not dispatch IP blocks. Actions and restarts aimed at agent `000` (the Manager) need `WAZUH_ALLOW_MANAGER_AR=true`; fleet-wide blocks need `WAZUH_ALLOW_FLEET_AR=true`; quarantine refuses system and agent directories. In production, write tools require `confirm=true` (`WAZUH_REQUIRE_ACTION_CONFIRMATION`). |
+| **Action guardrails** | IP-blocking tools refuse loopback, the Manager's address (when `WAZUH_HOST` is an IP) and anything in `WAZUH_PROTECTED_IPS`; the generic active-response tool does not dispatch IP blocks, quarantine, process kills or account disables. Actions and restarts aimed at agent `000` (the Manager) need `WAZUH_ALLOW_MANAGER_AR=true`; fleet-wide blocks need `WAZUH_ALLOW_FLEET_AR=true`; quarantine refuses system and agent directories. In production, write tools require `confirm=true` (`WAZUH_REQUIRE_ACTION_CONFIRMATION`). |
 | **Wazuh TLS** | The Manager and Indexer certificates are verified by default, against the system store or `WAZUH_CA_BUNDLE`. Disabling Manager verification (`WAZUH_ALLOW_SELF_SIGNED=true`) is logged at startup, as an error in production. |
-| **Audit log** | Every write-tool call is logged before and after execution (logger `wazuh_mcp_server.audit`) with the principal, session, arguments and outcome. |
+| **Audit log** | Every write-tool call that passes the scope and confirmation checks is logged before and after execution (logger `wazuh_mcp_server.audit`) with the principal, session, arguments and outcome. |
 | **Redaction** | Credentials and tokens are redacted from tool output in every response format, and from server logs. |
 | **Input validation** | Typed validation of agent IDs, IPs, paths and command names; Indexer queries are built as Query DSL, not by string interpolation. |
-| **Rate limiting** | Sliding window, default 100 requests per 60 s (`RATE_LIMIT_REQUESTS`, `RATE_LIMIT_WINDOW`): per principal and client IP on `/mcp` and `/`, per client IP on other endpoints except `/health`, `/ready` and `/metrics`. Failed authentication is rate limited by client IP. Set `TRUSTED_PROXIES` when running behind a proxy. |
+| **Rate limiting** | Sliding window, default 100 requests per 60 s (`RATE_LIMIT_REQUESTS`, `RATE_LIMIT_WINDOW`): per principal and client IP on `/mcp` and `/`, per client IP on other endpoints except the probe endpoints (`/health`, `/ready`, `/metrics` and their `/healthz`, `/readyz`, `/live`, `/livez` aliases). Failed authentication is rate limited by client IP. Set `TRUSTED_PROXIES` when running behind a proxy. |
 | **Resource bounds** | Circuit breaker on Wazuh calls: opens after 5 consecutive failures, retries after 60 s. Oversized tool results are truncated with a note (`MAX_TOOL_RESPONSE_CHARS`). `limit` on `get_wazuh_alerts` and `search_security_events` is capped at `MAX_ALERTS_PER_QUERY` (default 1000). The in-memory session store is capped at `MAX_SESSIONS` (1000) and `MAX_SESSIONS_PER_PRINCIPAL` (100), and stored client metadata is truncated. |
 | **Container** | Runs as UID 1000; `compose.yml` sets a read-only root filesystem, `cap_drop: ALL` and `no-new-privileges`. The runtime image does not include pip. |
 
@@ -252,7 +252,7 @@ Requires Python 3.11 or later.
 | `/auth/token` | POST | Exchange an API key for a bearer JWT |
 | `/.well-known/oauth-authorization-server` | GET | OAuth metadata (RFC 8414), `AUTH_MODE=oauth` only |
 | `/.well-known/oauth-protected-resource` | GET | Protected-resource metadata (RFC 9728), `AUTH_MODE=oauth` only |
-| `/oauth/authorize`, `/oauth/token`, `/oauth/revoke`, `/oauth/register`, `/oauth/callback` | GET/POST | OAuth endpoints, `AUTH_MODE=oauth` only (`/oauth/register` requires `OAUTH_ENABLE_DCR=true`; `/oauth/callback` is the OpenID Connect redirect URI and needs `OAUTH_IDP_ISSUER`) |
+| `/oauth/authorize`, `/oauth/token`, `/oauth/revoke`, `/oauth/register`, `/oauth/callback` | GET/POST | OAuth endpoints, `AUTH_MODE=oauth` only (`/oauth/register` requires `OAUTH_ENABLE_DCR=true` and no `OAUTH_IDP_ISSUER`; `/oauth/callback` is the OpenID Connect redirect URI and needs `OAUTH_IDP_ISSUER`) |
 | `/docs`, `/redoc`, `/openapi.json` | GET | OpenAPI documentation |
 
 ---
@@ -261,13 +261,13 @@ Requires Python 3.11 or later.
 
 ```
 src/wazuh_mcp_server/
-├── server.py          # FastAPI app, MCP protocol handling, tool definitions and dispatch
+├── server.py          # FastAPI app, MCP protocol handling, CORS/Origin checks, tool definitions and dispatch
 ├── toolsets.py        # Toolset membership, WAZUH_TOOLSETS resolution, tool annotations
 ├── auth.py            # API keys and bearer JWTs
 ├── oauth.py           # OAuth 2.0 authorization server (PKCE, API-key sign-in)
 ├── oidc.py            # OpenID Connect sign-in at an external identity provider
 ├── config.py          # Environment configuration and startup validation
-├── security.py        # Rate limiting, CORS, input validation, log redaction
+├── security.py        # Rate limiting, request and input validation, log redaction
 ├── clusters.py        # Multi-cluster registry and Cross-Cluster Search routing
 ├── session_store.py   # In-memory and Redis session storage
 ├── resilience.py      # Circuit breakers, retries, graceful shutdown
@@ -303,7 +303,7 @@ Related project: [Wazuh Autopilot](https://github.com/gensecaihq/Wazuh-Autopilot
 
 ## Contributing
 
-See [CONTRIBUTING.md](CONTRIBUTING.md). Bugs and feature requests go to [Issues](https://github.com/gensecaihq/Wazuh-MCP-Server/issues), questions to [Discussions](https://github.com/gensecaihq/Wazuh-MCP-Server/discussions), and security reports to a private [security advisory](https://github.com/gensecaihq/Wazuh-MCP-Server/security/advisories/new).
+See [CONTRIBUTING.md](CONTRIBUTING.md). Bugs, feature requests and questions go to [Issues](https://github.com/gensecaihq/Wazuh-MCP-Server/issues), and security reports to a private [security advisory](https://github.com/gensecaihq/Wazuh-MCP-Server/security/advisories/new).
 
 ---
 
@@ -328,7 +328,7 @@ Thanks to everyone who has contributed code, reviews, bug reports and design fee
 - [@mouse-value-add](https://github.com/mouse-value-add) — optional You.com web-search context (#85)
 - [@DrRSatzteil](https://github.com/DrRSatzteil) — `tools/list` pagination fix (#70)
 - [@SiM22](https://github.com/SiM22) — MCP 2025-06-18 support for Windsurf compatibility (#66)
-- [@aiunmukto](https://github.com/aiunmukto) — `.env.example`, CI workflow and Glama registry listing (#12)
+- [@aiunmukto](https://github.com/aiunmukto) — `.env.example` (#12), an early CI workflow and the Glama registry listing
 - [@Karibusan](https://github.com/Karibusan) — dependency fixes (#38)
 - [@lwsinclair](https://github.com/lwsinclair) — MseeP.ai listing (#9)
 - [@markeclaudio](https://github.com/markeclaudio) — OpenID Connect sign-in (#123), active-response guard-rails (#124, #125), session-store bounds (#126), Manager TLS verification by default (#127)

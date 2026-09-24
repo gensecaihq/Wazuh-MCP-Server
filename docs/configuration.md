@@ -96,7 +96,7 @@ The Indexer is required for alert search, alert aggregation, vulnerability tools
 
 When no key is configured, the server generates one for the life of the process:
 
-- **Development:** the generated key has read and write scopes. In bearer mode it is printed to stderr at startup; in OAuth mode it is not shown.
+- **Development:** the generated key is read-only. In bearer mode it is printed to stderr at startup; in OAuth mode it is not shown. For write access, set `MCP_API_KEY` and `MCP_API_KEY_SCOPES`.
 - **Production:** the generated key is read-only and is never shown, so no client can use it. Set `MCP_API_KEY` or `API_KEYS`.
 
 Bearer JWTs are bound to the API key they were minted from. Changing `MCP_API_KEY` or removing a key from `API_KEYS` invalidates that key's tokens: clients get `401 Invalid or expired token` and must call `POST /auth/token` again. Tokens remain valid across restarts and replicas as long as `AUTH_SECRET_KEY` and the key stay the same.

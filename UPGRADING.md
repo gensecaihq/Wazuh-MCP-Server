@@ -32,6 +32,7 @@ Bearer JWTs are now bound to the API key they came from, and `MCP_API_KEY` got a
 
 ### 4. Active-response guard-rails
 
+- **Write access is always explicit.** In development, the key generated when none is configured is now read-only, like in production. Set `MCP_API_KEY` and `MCP_API_KEY_SCOPES="wazuh:read wazuh:write"` for write tools.
 - **Confirmation in production.** With `ENVIRONMENT=production` (set by the Dockerfile and `compose.yml`), every write tool requires `confirm=true` unless `WAZUH_REQUIRE_ACTION_CONFIRMATION=false`. LLM clients see the refusal and re-invoke after asking a person; scripted clients must pass `confirm: true`.
 - **Fleet-wide blocks** (`all_agents=true` on `wazuh_block_ip`) need `WAZUH_ALLOW_FLEET_AR=true`.
 - **The Manager as a target.** Active response against agent `000` and `wazuh_restart` with `target=manager` need `WAZUH_ALLOW_MANAGER_AR=true`.

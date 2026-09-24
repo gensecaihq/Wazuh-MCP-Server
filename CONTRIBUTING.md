@@ -204,7 +204,7 @@ On a `v*.*.*` tag:
 ## Getting help
 
 - Bugs and feature requests: [GitHub Issues](https://github.com/gensecaihq/Wazuh-MCP-Server/issues), using the bug report or feature request template.
-- Questions: [GitHub Discussions](https://github.com/gensecaihq/Wazuh-MCP-Server/discussions).
+- Questions: [GitHub Issues](https://github.com/gensecaihq/Wazuh-MCP-Server/issues).
 - Security vulnerabilities: report privately as described in [SECURITY.md](SECURITY.md); do not open a public issue.
 - Setup problems: check [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md) first.
 

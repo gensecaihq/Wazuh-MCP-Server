@@ -165,7 +165,9 @@ class AuthManager:
                     "default key. Set MCP_API_KEY (and MCP_API_KEY_SCOPES for write) for a stable key."
                 )
             else:
-                default_scopes = ["wazuh:read", "wazuh:write"]
+                # Read-only here too: write access is only ever granted explicitly
+                # (MCP_API_KEY_SCOPES or API_KEYS), as README and RBAC promise
+                default_scopes = ["wazuh:read"]
             default_key = self.create_api_key(name="Default API Key", scopes=default_scopes)
             # Store the raw key for display
             self._default_api_key = default_key
