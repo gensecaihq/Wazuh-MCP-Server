@@ -89,7 +89,7 @@ curl -s http://localhost:3000/ready | jq '{status, services}'
 How to read `/ready`:
 
 - **Status:** `status` is `healthy` or `degraded`. It is `unhealthy` if the check itself failed, for example while Redis is unreachable.
-- **Manager:** `wazuh_manager` is `healthy` or `unhealthy`.
+- **Manager:** `wazuh_manager` is `healthy` or `unhealthy`. When unhealthy, `wazuh_manager_reason` gives the category (`tls_verification_failed`, `authentication_failed`, `unreachable` or `error`); the full message is logged once each time it changes.
 - **Indexer:** `wazuh_indexer` is `healthy` (cluster green or yellow), `degraded` (red), `unhealthy` or `not_configured`.
 - **Memory:** `memory` is `healthy` or `over_limit`.
 - **Other fields:** the response also reports the auth mode, the configured clusters and session counts.

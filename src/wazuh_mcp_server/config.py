@@ -1,6 +1,7 @@
 """Configuration management for Wazuh MCP Server."""
 
 import ipaddress
+import json
 import logging
 import os
 import ssl
@@ -365,6 +366,28 @@ class ServerConfig:
                     f"(need a random value of at least 32 characters; got {len(auth_secret)}).\n"
                     "Generate one with: openssl rand -hex 32"
                 )
+
+        # A configured key that can't be loaded used to log a warning and fall back to a
+        # generated key nobody knows: every client then got 401 with no obvious cause.
+        mcp_api_key = os.getenv("MCP_API_KEY", "").strip()
+        if mcp_api_key and not (mcp_api_key.startswith("wazuh_") and len(mcp_api_key) == 49):
+            raise ConfigurationError(
+                "MCP_API_KEY is not a valid key (expected wazuh_ followed by 43 characters). Generate one with: "
+                "python -c \"import secrets; print('wazuh_' + secrets.token_urlsafe(32))\""
+            )
+        api_keys_json = env_unquoted("API_KEYS")
+        if api_keys_json and not mcp_api_key:
+            try:
+                parsed_keys = json.loads(api_keys_json)
+            except json.JSONDecodeError as exc:
+                raise ConfigurationError(f"API_KEYS is not valid JSON: {exc}") from exc
+            if (
+                not isinstance(parsed_keys, list)
+                or not parsed_keys
+                or not all(isinstance(k, dict) for k in parsed_keys)
+            ):
+                # An empty array loaded zero keys and skipped the generated default: no usable key at all
+                raise ConfigurationError("API_KEYS must be a non-empty JSON array of key objects")
 
         # Optional CA bundle for the Wazuh Manager / Indexer certificates. Fail fast on a
         # bad path: silently falling back would either break every request or, worse,

@@ -351,3 +351,77 @@ class TestReadyWithRedis:
         async with _http() as client:
             body = (await client.get("/ready")).json()
         assert body.get("metrics", {}).get("total_sessions") == 3, body
+
+
+class TestDeployVerdictGaps:
+    @pytest.mark.parametrize("key", ["wazuh_short", "not-a-wazuh-key", "wazuh_" + "a" * 44])
+    def test_malformed_mcp_api_key_stops_startup(self, monkeypatch, key):
+        from wazuh_mcp_server.config import ServerConfig
+
+        monkeypatch.setenv("MCP_API_KEY", key)
+        # used to log a warning and run with a generated key nobody knew
+        with pytest.raises(ConfigurationError, match="MCP_API_KEY"):
+            ServerConfig.from_env()
+
+    @pytest.mark.parametrize("raw", ["[{bad json", '{"id": "k"}', "[]"])
+    def test_unusable_api_keys_stops_startup(self, monkeypatch, raw):
+        from wazuh_mcp_server.config import ServerConfig
+
+        monkeypatch.delenv("MCP_API_KEY", raising=False)
+        monkeypatch.setenv("API_KEYS", raw)
+        with pytest.raises(ConfigurationError, match="API_KEYS"):
+            ServerConfig.from_env()
+
+    @pytest.mark.asyncio
+    async def test_ready_names_the_manager_failure(self, monkeypatch, caplog):
+        class Client:
+            _indexer_client = None
+
+            async def ping_manager(self):
+                raise ConnectionError("TLS certificate verification failed for wazuh.internal. The stock ...")
+
+        monkeypatch.setattr(mcp_server, "wazuh_client", Client())
+        monkeypatch.setattr(mcp_server, "_ready_cache", None)
+        monkeypatch.setattr(mcp_server, "_last_manager_failure", None)
+        with caplog.at_level(logging.ERROR):
+            async with _http() as client:
+                body = (await client.get("/ready")).json()
+        assert body["services"]["wazuh_manager_reason"] == "tls_verification_failed"
+        assert "wazuh.internal" not in json.dumps(body)  # unauthenticated endpoint: category only
+        assert any("wazuh.internal" in r.getMessage() for r in caplog.records)
+
+    def test_tls_failure_detected_by_exception_type(self):
+        import ssl
+
+        from wazuh_mcp_server.api.wazuh_client import _is_tls_failure
+
+        def wrapped(cause):
+            try:
+                raise httpx.ConnectError("handshake failed") from cause
+            except httpx.ConnectError as e:
+                return e
+
+        assert _is_tls_failure(wrapped(ssl.SSLCertVerificationError(1, "certificate verify failed")))
+        # other handshake errors mention SSL but are not a certificate problem
+        assert not _is_tls_failure(wrapped(ssl.SSLError(1, "[SSL: WRONG_VERSION_NUMBER] wrong version number")))
+        assert not _is_tls_failure(httpx.ConnectError("All connection attempts failed"))
+
+    def test_tls_failure_found_on_context_when_cause_is_unrelated(self):
+        import ssl
+
+        from wazuh_mcp_server.api.wazuh_client import _is_tls_failure
+
+        outer = httpx.ConnectError("handshake failed")
+        outer.__cause__ = RuntimeError("unrelated")
+        outer.__context__ = ssl.SSLCertVerificationError(1, "verify")
+        assert _is_tls_failure(outer)
+
+    def test_generated_dev_key_is_read_only(self, monkeypatch):
+        from wazuh_mcp_server.auth import AuthManager
+
+        monkeypatch.delenv("MCP_API_KEY", raising=False)
+        monkeypatch.delenv("API_KEYS", raising=False)
+        monkeypatch.setenv("ENVIRONMENT", "development")
+        manager = AuthManager()
+        # README: write is never granted implicitly (the dev key used to have it)
+        assert [k.scopes for k in manager.api_keys.values()] == [["wazuh:read"]]

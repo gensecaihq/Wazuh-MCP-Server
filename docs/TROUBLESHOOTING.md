@@ -65,7 +65,7 @@ If the process exits during startup, the container restarts in a loop. `docker c
 | `401 {"detail":"Authorization header required"}` | No `Authorization` header (bearer or OAuth mode) | Send `Authorization: Bearer <token>` |
 | `401 {"detail":"Invalid or expired token"}` | The JWT has expired (`TOKEN_LIFETIME_HOURS`, default 24), its API key was changed or removed, `AUTH_SECRET_KEY` changed, or the token was minted before the upgrade that bound tokens to keys | Get a new token from `POST /auth/token` |
 | `401 {"detail":"Invalid API key format"}` from `/auth/token` | The key does not start with `wazuh_` | Use the `MCP_API_KEY` value |
-| `401 {"detail":"Invalid API key"}` from `/auth/token` | The key is unknown | Check `grep ^MCP_API_KEY= .env`. If the log shows `MCP_API_KEY format invalid. Expected format: wazuh_<43-char-base64>.`, the server ignored the configured key: generate a new one with `python -c "import secrets; print('wazuh_' + secrets.token_urlsafe(32))"` |
+| `401 {"detail":"Invalid API key"}` from `/auth/token` | The key is unknown | Check `grep ^MCP_API_KEY= .env`. A malformed `MCP_API_KEY` now stops the server at startup with `MCP_API_KEY is not a valid key`; generate a new one with `python -c "import secrets; print('wazuh_' + secrets.token_urlsafe(32))"` |
 | `400 {"detail":"API key required"}` | The body has no `api_key` | Send `{"api_key": "wazuh_..."}` with `Content-Type: application/json` |
 | Log: `No MCP_API_KEY configured in production — generated a temporary READ-ONLY default key.` | No key is configured. In production the generated key is never shown | Set `MCP_API_KEY` (and `MCP_API_KEY_SCOPES`) or `API_KEYS` |
 

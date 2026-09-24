@@ -89,14 +89,14 @@ The Indexer is required for alert search, alert aggregation, vulnerability tools
 | `AUTH_MODE` | `bearer` | `bearer`, `oauth` or `none`. Any other value fails startup |
 | `AUTH_SECRET_KEY` | random per process (outside production) | Signs JWTs and hashes API keys. **Required when `ENVIRONMENT=production` and `AUTH_MODE` is not `none`.** In production it must be at least 32 characters and must not look like a placeholder (containing `change_me`, `changeme`, `your-secret` or `example`, or starting with `<`). Use the same value on every instance. Generate with `openssl rand -hex 32` |
 | `TOKEN_LIFETIME_HOURS` | `24` | Lifetime of JWTs issued by `POST /auth/token` (1–8760) |
-| `MCP_API_KEY` | *(none)* | A single API key: `wazuh_` followed by 43 URL-safe characters (49 in total). Generate with `python -c "import secrets; print('wazuh_' + secrets.token_urlsafe(32))"`. A value in any other format is ignored, with a warning |
+| `MCP_API_KEY` | *(none)* | A single API key: `wazuh_` followed by 43 URL-safe characters (49 in total). Generate with `python -c "import secrets; print('wazuh_' + secrets.token_urlsafe(32))"`. A value in any other format stops the server at startup |
 | `MCP_API_KEY_SCOPES` | `wazuh:read` | Space-separated scopes for `MCP_API_KEY`: `wazuh:read`, `wazuh:write`. Unknown scopes are dropped. Add `wazuh:write` to allow the active-response tools |
-| `API_KEYS` | *(none)* | JSON array of keys with individual scopes (see [Multiple API keys](#multiple-api-keys)). Ignored when a valid `MCP_API_KEY` is set |
+| `API_KEYS` | *(none)* | JSON array of keys with individual scopes (see [Multiple API keys](#multiple-api-keys)). Ignored when `MCP_API_KEY` is set. Invalid JSON, or anything other than an array of objects, stops the server at startup |
 | `AUTHLESS_ALLOW_WRITE` | `false` | *Opt-in.* With `AUTH_MODE=none`, grant `wazuh:write` to every caller. Otherwise authless callers are read-only |
 
 When no key is configured, the server generates one for the life of the process:
 
-- **Development:** the generated key has read and write scopes. In bearer mode it is printed to stderr at startup; in OAuth mode it is not shown.
+- **Development:** the generated key is read-only. In bearer mode it is printed to stderr at startup; in OAuth mode it is not shown. For write access, set `MCP_API_KEY` and `MCP_API_KEY_SCOPES`.
 - **Production:** the generated key is read-only and is never shown, so no client can use it. Set `MCP_API_KEY` or `API_KEYS`.
 
 Bearer JWTs are bound to the API key they were minted from. Changing `MCP_API_KEY` or removing a key from `API_KEYS` invalidates that key's tokens: clients get `401 Invalid or expired token` and must call `POST /auth/token` again. Tokens remain valid across restarts and replicas as long as `AUTH_SECRET_KEY` and the key stay the same.
