@@ -240,7 +240,7 @@ These are read by Docker Compose when it expands `compose.yml`, from the shell o
 | `MCP_BIND` | `127.0.0.1` | Host interface the port is published on. The loopback default assumes a reverse proxy on the same host. Set `0.0.0.0` only on a trusted network |
 | `MCP_PORT` | `3000` | Host port. The container always listens on 3000 |
 | `AUTH_MODE` | `bearer` | Passed through to the container |
-| `VERSION` | `4.3.0` | Image tag (`wazuh-main-server:<VERSION>`) and build argument |
+| `VERSION` | `5.0.0` | Image tag (`wazuh-main-server:<VERSION>`) and build argument |
 | `PYTHON_VERSION` | `3.13` | Base image Python version |
 
 The local LLM stack (`compose.local-llm.yml`) has its own variables (`VLLM_*`, `WEBUI_SECRET_KEY`, `HF_TOKEN`, and others); see [Local LLMs](LOCAL_LLM.md).

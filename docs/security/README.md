@@ -2,8 +2,8 @@
 
 How Wazuh MCP Server authenticates clients, limits what they can do, and protects the Wazuh
 deployment behind it, plus the settings to review before running it in production. Applies to
-the current `main` branch (package version 4.3.0 plus the unreleased changes in
-[CHANGELOG.md](../../CHANGELOG.md)).
+version 5.0.0 and the current `main` branch (see [CHANGELOG.md](../../CHANGELOG.md) for
+changes since).
 
 To report a vulnerability, see [SECURITY.md](../../SECURITY.md).
 
