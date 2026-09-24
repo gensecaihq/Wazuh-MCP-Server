@@ -405,3 +405,13 @@ class TestDeployVerdictGaps:
         # other handshake errors mention SSL but are not a certificate problem
         assert not _is_tls_failure(wrapped(ssl.SSLError(1, "[SSL: WRONG_VERSION_NUMBER] wrong version number")))
         assert not _is_tls_failure(httpx.ConnectError("All connection attempts failed"))
+
+    def test_tls_failure_found_on_context_when_cause_is_unrelated(self):
+        import ssl
+
+        from wazuh_mcp_server.api.wazuh_client import _is_tls_failure
+
+        outer = httpx.ConnectError("handshake failed")
+        outer.__cause__ = RuntimeError("unrelated")
+        outer.__context__ = ssl.SSLCertVerificationError(1, "verify")
+        assert _is_tls_failure(outer)

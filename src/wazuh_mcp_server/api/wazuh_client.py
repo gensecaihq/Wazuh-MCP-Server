@@ -11,7 +11,7 @@ import ssl
 import time
 from collections import OrderedDict, deque
 from datetime import datetime, timedelta, timezone
-from typing import Any, Dict, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 import httpx
 
@@ -158,12 +158,15 @@ def _is_tls_failure(exc: Exception) -> bool:
     Matching "ssl" in the message also caught other handshake errors (protocol mismatch,
     reset during handshake) and gave them the certificate-reissue hint."""
     seen = set()
-    current: Optional[BaseException] = exc
-    while current is not None and id(current) not in seen:
+    pending: List[BaseException] = [exc]
+    while pending:
+        current = pending.pop()
+        if id(current) in seen:
+            continue
         seen.add(id(current))
         if isinstance(current, ssl.SSLCertVerificationError):
             return True
-        current = current.__cause__ or current.__context__
+        pending.extend(e for e in (current.__cause__, current.__context__) if e is not None)
     return "certificate verify failed" in str(exc).lower()
 
 
