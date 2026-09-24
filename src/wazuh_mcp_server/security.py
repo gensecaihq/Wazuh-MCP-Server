@@ -91,9 +91,17 @@ def validate_limit(
         # Clamp the default to the allowed range to prevent crashes
         return max(min_val, min(default, max_val))
 
+    # int() would turn True into 1 (a PID-1 kill for process_id), truncate 1.5, and raise
+    # OverflowError on infinity; only accept real integers, integral floats and digit strings.
+    if isinstance(value, bool) or (isinstance(value, float) and not value.is_integer()):
+        raise ToolValidationError(
+            param_name,
+            f"must be an integer, got {value!r}",
+            f"Use a whole number between {min_val} and {max_val}",
+        )
     try:
         limit = int(value)
-    except (ValueError, TypeError):
+    except (ValueError, TypeError, OverflowError):
         raise ToolValidationError(
             param_name,
             f"must be an integer, got {type(value).__name__}",
@@ -132,8 +140,9 @@ def validate_agent_id(value: Any, required: bool = False, param_name: str = "age
 
     # Wazuh zero-pads agent IDs to at least 3 digits ("1" -> "001"). The Manager API
     # requires the padded form and the Indexer stores agent.id padded, so an exact-match
-    # term on "1" would silently return nothing. Normalize here.
-    return agent_id.zfill(3)
+    # term on "1" would silently return nothing. Normalize here — including over-padded
+    # input ("0001" -> "001").
+    return str(int(agent_id)).zfill(3)
 
 
 def validate_rule_id(value: Any, required: bool = False, param_name: str = "rule_id") -> Optional[str]:
@@ -250,6 +259,14 @@ def validate_timestamp(value: Any, required: bool = False, param_name: str = "ti
         return normalized
 
     if ISO_TIMESTAMP_PATTERN.match(timestamp):
+        # The regex checks shape only; "2026-13-45" or "T25:99:99Z" would reach the indexer
+        # and fail there. fromisoformat checks the calendar (and accepts Z on 3.11+).
+        try:
+            datetime.fromisoformat(timestamp)
+        except ValueError:
+            raise ToolValidationError(
+                param_name, f"not a real date/time '{value}'", "Use ISO 8601, e.g. 2026-09-23T14:00:00Z, or now-24h"
+            ) from None
         return timestamp
 
     raise ToolValidationError(
@@ -700,7 +717,13 @@ SENSITIVE_PATTERNS = [
     (r'(authorization["\']?\s*[:=]\s*["\']?)[^"\'\s,}]+', r"\1[REDACTED]"),
     (r"wst_[a-zA-Z0-9_-]+", "wst_[REDACTED]"),
     (r"wazuh_[a-zA-Z0-9_-]{40,}", "wazuh_[REDACTED]"),
+    # A bare JWT (no Bearer prefix), e.g. a token echoed in an exception or a tool argument
+    (r"eyJ[a-zA-Z0-9_-]{8,}\.eyJ[a-zA-Z0-9_-]{8,}\.[a-zA-Z0-9_-]+", "[REDACTED_JWT]"),
 ]
+
+# Attributes every LogRecord has; anything else arrived via `extra=` (the JSON formatter
+# emits those fields, so they need redacting too)
+_STANDARD_LOG_ATTRS = frozenset(vars(logging.LogRecord("", 0, "", 0, "", (), None))) | {"message", "asctime"}
 
 
 def sanitize_log_message(message: str) -> str:
@@ -745,6 +768,15 @@ class SanitizingLogFilter(logging.Filter):
                     else:
                         sanitized_args.append(arg)
                 record.args = tuple(sanitized_args)
+        # Tracebacks (logger.exception / exc_info=True) are rendered from exc_info by the
+        # formatter; pre-render and redact so exception text can't carry credentials out.
+        if record.exc_info and not record.exc_text:
+            record.exc_text = sanitize_log_message(logging.Formatter().formatException(record.exc_info))
+        elif record.exc_text:
+            record.exc_text = sanitize_log_message(record.exc_text)
+        for key, value in list(vars(record).items()):
+            if key not in _STANDARD_LOG_ATTRS and isinstance(value, str):
+                setattr(record, key, sanitize_log_message(value))
         return True
 
 
@@ -1016,14 +1048,12 @@ class SecurityManager:
 
     def __init__(self):
         self.metrics = SecurityMetrics()
-        try:
-            max_req = int(os.getenv("RATE_LIMIT_REQUESTS", "100"))
-        except (ValueError, TypeError):
-            max_req = 100
-        try:
-            window = int(os.getenv("RATE_LIMIT_WINDOW", "60"))
-        except (ValueError, TypeError):
-            window = 60
+        from wazuh_mcp_server.config import validate_positive_int
+
+        # Fail at startup on a bad value: 0 or negative used to make every limited route 500
+        # (IndexError on an empty window), and garbage silently fell back to the default.
+        max_req = validate_positive_int(os.getenv("RATE_LIMIT_REQUESTS", "100"), "RATE_LIMIT_REQUESTS")
+        window = validate_positive_int(os.getenv("RATE_LIMIT_WINDOW", "60"), "RATE_LIMIT_WINDOW", max_val=86400)
         self.rate_limiter = RateLimiter(max_requests=max_req, window_seconds=window)
         self.validator = SecurityValidator()
         self.trusted_proxies = {p.strip() for p in os.getenv("TRUSTED_PROXIES", "").split(",") if p.strip()}
@@ -1099,9 +1129,16 @@ class SecurityManager:
         body = None
         if request.method == "POST":
             try:
-                raw = await request.body()
-                if len(raw) > max_size:
-                    raise HTTPException(status_code=413, detail="Payload too large")
+                # Stream with a running cap: a chunked upload has no Content-Length, and
+                # request.body() would buffer all of it before the size check.
+                chunks, received = [], 0
+                async for chunk in request.stream():
+                    received += len(chunk)
+                    if received > max_size:
+                        raise HTTPException(status_code=413, detail="Payload too large")
+                    chunks.append(chunk)
+                raw = b"".join(chunks)
+                request._body = raw  # Starlette replays a cached _body to the endpoint
                 body = raw.decode("utf-8") if raw else None
             except (UnicodeDecodeError, RuntimeError) as e:
                 logger.debug(f"Failed to read request body: {e}")
@@ -1153,10 +1190,12 @@ class MemoryManager:
         if max_memory_mb is None:
             # Honor MAX_MEMORY_MB (same knob monitoring.py reads) so the kill-switch and the
             # metrics threshold agree; fall back to 512 only when unset/invalid.
-            try:
-                max_memory_mb = int(os.getenv("MAX_MEMORY_MB", "512"))
-            except (TypeError, ValueError):
-                max_memory_mb = 512
+            from wazuh_mcp_server.config import ConfigurationError, validate_positive_int
+
+            max_memory_mb = validate_positive_int(os.getenv("MAX_MEMORY_MB", "512"), "MAX_MEMORY_MB")
+            if max_memory_mb < 64:
+                # Below the idle footprint every request would be refused as "overloaded"
+                raise ConfigurationError(f"MAX_MEMORY_MB must be at least 64, got {max_memory_mb}")
         self.max_memory_bytes = max_memory_mb * 1024 * 1024
         self.last_check = time.time()
         self.check_interval = 30  # seconds
@@ -1214,7 +1253,8 @@ async def security_middleware(request: Request, call_next):
         response.headers["X-Frame-Options"] = "DENY"
         response.headers["X-XSS-Protection"] = "1; mode=block"
         response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
-        response.headers["Content-Security-Policy"] = "default-src 'self'"
+        # Keep a stricter policy a route set itself (e.g. the OAuth sign-in page)
+        response.headers.setdefault("Content-Security-Policy", "default-src 'self'")
 
         return response
 

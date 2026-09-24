@@ -21,7 +21,7 @@ services:
     hostname: wazuh-main-server
     
     restart: unless-stopped
-    init: true
+    # No `init: true`: the image's ENTRYPOINT is already tini
     
     env_file: 
       - .env
@@ -39,9 +39,11 @@ services:
       # (only behind a trusted network/firewall).
       - "${MCP_BIND:-127.0.0.1}:${MCP_PORT:-3000}:3000"
     
-    # Modern health check with curl (follows the container's MCP_PORT, pinned to 3000 above)
+    # The app always listens on 3000 in the container (MCP_PORT is pinned above; the host
+    # side is the ports mapping). Interpolating ${MCP_PORT} here used the HOST value, so a
+    # custom port left the container permanently unhealthy.
     healthcheck:
-      test: ["CMD-SHELL", "curl -sf --max-time 5 http://localhost:${MCP_PORT:-3000}/health | jq -e '.status == \"healthy\"' > /dev/null"]
+      test: ["CMD-SHELL", "curl -sf --max-time 5 http://localhost:3000/health | jq -e '.status == \"healthy\"' > /dev/null"]
       interval: 15s
       timeout: 5s
       retries: 3
@@ -64,10 +66,17 @@ services:
       - ALL
     read_only: true
     
+    # Multi-cluster topology (config/clusters.json) — without this mount the file
+    # MULTI_CLUSTER.md describes was never visible to the container
+    volumes:
+      - ./config:/app/config:ro
+      # CA bundle for Manager/Indexer TLS verification (then set WAZUH_CA_BUNDLE=/app/certs/ca.pem)
+      # - ./certs:/app/certs:ro
+
     # Writable directories
     tmpfs:
       - /tmp:noexec,nosuid,size=64m
-      - /app/logs:noexec,nosuid,size=128m
+      - /app/logs:noexec,nosuid,size=128m,uid=1000,gid=1000
     
     # Structured logging
     logging:

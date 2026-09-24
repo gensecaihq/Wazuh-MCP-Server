@@ -10,16 +10,37 @@ Wazuh stores alerts and vulnerability data in the Wazuh Indexer
 import asyncio
 import json
 import logging
-from typing import Any, Dict, List, Optional
+import re
+from typing import Any, Dict, List, Optional, Union
 
 import httpx
 from tenacity import retry, retry_if_exception_type, stop_after_attempt, wait_exponential
+
+from wazuh_mcp_server.config import tls_verify
 
 logger = logging.getLogger(__name__)
 
 # Index patterns for Wazuh 4.x
 ALERTS_INDEX = "wazuh-alerts-*"
 VULNERABILITY_INDEX = "wazuh-states-vulnerabilities-*"
+
+
+_QUOTED = re.compile(r'("[^"]*")')
+
+
+def _to_simple_query_syntax(query: str) -> str:
+    """Map AND/OR/NOT to simple_query_string's +, |, - operators (outside quoted phrases).
+
+    simple_query_string has no word operators: "sshd AND fail*" searched for the literal term
+    "AND" and, with default_operator=AND, required it in every hit, silently emptying results.
+    The tool description advertises AND/OR/NOT, so translate them.
+    """
+    parts = _QUOTED.split(query)
+    for i in range(0, len(parts), 2):  # even indexes are outside quotes
+        seg = re.sub(r"\bNOT\s+", "-", parts[i])
+        seg = re.sub(r"\bAND\b", "+", seg)
+        parts[i] = re.sub(r"\bOR\b", "|", seg)
+    return "".join(parts)
 
 
 class WazuhIndexerClient:
@@ -35,7 +56,7 @@ class WazuhIndexerClient:
         port: int = 9200,
         username: Optional[str] = None,
         password: Optional[str] = None,
-        verify_ssl: bool = True,
+        verify_ssl: Union[bool, str] = True,
         timeout: int = 30,
         use_ssl: bool = True,
         ccs_prefix: str = "",
@@ -113,7 +134,7 @@ class WazuhIndexerClient:
             auth = (self.username, self.password)
 
         self.client = httpx.AsyncClient(
-            verify=self.verify_ssl,
+            verify=tls_verify(self.verify_ssl),
             timeout=self.timeout,
             auth=auth,
             limits=httpx.Limits(max_connections=20, max_keepalive_connections=10),
@@ -397,7 +418,7 @@ class WazuhIndexerClient:
             # syntax — unlike query_string, which allowed Lucene injection and wildcard/regex
             # denial-of-service from authenticated read users. AND/OR/NOT, quoted phrases,
             # and trailing-wildcard prefixes remain supported.
-            qt = query_text.strip().lstrip("*?")  # forbid a leading wildcard (full-index scan)
+            qt = _to_simple_query_syntax(query_text.strip().lstrip("*?"))  # no leading wildcard
             must_clauses.append(
                 {
                     "simple_query_string": {
@@ -429,6 +450,21 @@ class WazuhIndexerClient:
                 "failed_items": [],
             }
         }
+
+    async def latest_fim_event(self, agent_id: str, path: str, event: str) -> Optional[Dict[str, Any]]:
+        """Most recent FIM alert of `event` type ("added"/"modified"/"deleted") for an exact path."""
+        query = {
+            "bool": {
+                "filter": [
+                    {"term": {"agent.id": agent_id}},
+                    {"term": {"syscheck.path": path}},
+                    {"term": {"syscheck.event": event}},
+                ]
+            }
+        }
+        result = await self._search(ALERTS_INDEX, query, size=1, sort=[{"timestamp": {"order": "desc"}}])
+        hits = result.get("hits", {}).get("hits", [])
+        return hits[0].get("_source", {}) if hits else None
 
     async def get_vulnerabilities(
         self,
@@ -486,7 +522,10 @@ class WazuhIndexerClient:
                     "severity": source.get("vulnerability", {}).get("severity"),
                     "description": source.get("vulnerability", {}).get("description"),
                     "reference": source.get("vulnerability", {}).get("reference"),
-                    "status": source.get("vulnerability", {}).get("status"),
+                    # There is no vulnerability.status in wazuh-states-vulnerabilities-* (it was
+                    # always null); CVSS base score and under_evaluation are real fields.
+                    "cvss_score": (source.get("vulnerability", {}).get("score") or {}).get("base"),
+                    "under_evaluation": source.get("vulnerability", {}).get("under_evaluation"),
                     "detected_at": source.get("vulnerability", {}).get("detected_at"),
                     "published_at": source.get("vulnerability", {}).get("published_at"),
                     "agent": {
@@ -522,20 +561,34 @@ class WazuhIndexerClient:
         """
         return await self.get_vulnerabilities(severity="Critical", limit=limit)
 
-    async def get_vulnerability_summary(self) -> Dict[str, Any]:
+    async def get_vulnerability_summary(
+        self, agent_id: Optional[str] = None, detected_since: Optional[str] = None
+    ) -> Dict[str, Any]:
         """
         Get vulnerability summary statistics.
+
+        Args:
+            agent_id: Only count vulnerabilities on this agent
+            detected_since: Only count vulnerabilities first detected at/after this date-math
+                value (e.g. "now-7d"); None covers every currently open vulnerability
 
         Returns:
             Summary with counts by severity
         """
         await self._ensure_initialized()
 
+        filters: List[Dict[str, Any]] = []
+        if agent_id:
+            filters.append({"term": {"agent.id": agent_id}})
+        if detected_since:
+            filters.append({"range": {"vulnerability.detected_at": {"gte": detected_since}}})
+        query = {"bool": {"filter": filters}} if filters else None
+
         # Use aggregation query via circuit breaker (custom body with size=0)
         if self._circuit_breaker is not None:
-            result = await self._circuit_breaker._call(self._execute_agg_search)
+            result = await self._circuit_breaker._call(self._execute_agg_search, query)
         else:
-            result = await self._execute_agg_search()
+            result = await self._execute_agg_search(query)
 
         # Parse aggregations
         aggs = result.get("aggregations", {})
@@ -557,11 +610,11 @@ class WazuhIndexerClient:
             }
         }
 
-    async def _execute_agg_search(self) -> Dict[str, Any]:
+    async def _execute_agg_search(self, query: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         """Execute vulnerability aggregation query (called within circuit breaker)."""
         await self._ensure_initialized()
         url = f"{self.base_url}/{self._qualified(VULNERABILITY_INDEX)}/_search"
-        body = {
+        body: Dict[str, Any] = {
             "size": 0,
             "aggs": {
                 "by_severity": {"terms": {"field": "vulnerability.severity", "size": 10}},
@@ -569,6 +622,8 @@ class WazuhIndexerClient:
                 "total_vulnerabilities": {"value_count": {"field": "vulnerability.id"}},
             },
         }
+        if query:
+            body["query"] = query
 
         try:
             response = await self.client.post(url, json=body, headers={"Content-Type": "application/json"})
