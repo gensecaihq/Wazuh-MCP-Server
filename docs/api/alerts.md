@@ -25,7 +25,7 @@ Returns alert documents, newest first, with optional filters. All filters are co
 
 | Name | Type | Required | Default | Constraints |
 |------|------|----------|---------|-------------|
-| `limit` | integer | no | `100` | 1 to 1000 |
+| `limit` | integer | no | `100` | 1 to 1000. The upper bound is `MAX_ALERTS_PER_QUERY` (default 1000, settable up to 10000) and is advertised as the schema maximum |
 | `rule_id` | string | no | none | 1 to 6 digits, exact match on `rule.id` |
 | `level` | string | no | none | Minimum rule level: one or two digits with optional `+` (`"10"` and `"10+"` both mean level 10 and above) |
 | `agent_id` | string | no | none | Agent ID, exact match on `agent.id` |
@@ -243,7 +243,7 @@ Searches alerts in a time window with a free-text query and optional structured 
 |------|------|----------|---------|-------------|
 | `query` | string | yes | | Free text, max 500 characters. See query syntax below |
 | `time_range` | string | no | `24h` | `1h`, `6h`, `12h`, `1d`, `24h`, `7d`, `30d` |
-| `limit` | integer | no | `100` | 1 to 1000 |
+| `limit` | integer | no | `100` | 1 to 1000. The upper bound is `MAX_ALERTS_PER_QUERY` (default 1000, settable up to 10000) and is advertised as the schema maximum |
 | `rule_id` | string | no | none | 1 to 6 digits, exact match on `rule.id` |
 | `agent_id` | string | no | none | Agent ID, exact match on `agent.id` |
 | `level` | string | no | none | Minimum rule level, e.g. `"10"` or `"12+"` |

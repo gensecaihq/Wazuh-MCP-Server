@@ -34,6 +34,8 @@ Only legacy-handshake clients (protocol `2025-11-25` and earlier) use sessions. 
 
 Sessions live in the server process and are lost on restart. Clients then receive `404` for their session ID and start a new session with `initialize`. Sessions expire after 30 minutes of inactivity.
 
+The store is bounded. At `MAX_SESSIONS` (default 1000) expired sessions are reclaimed first, then the least recently active sessions are evicted; a principal (API key, or OAuth client plus user) that reaches `MAX_SESSIONS_PER_PRINCIPAL` (default 100) loses its own least recently active session. Evicted clients get `404` and re-initialize. Stored client metadata is limited to the client's name, version and title (128 characters each) and up to 32 capability names.
+
 The startup log shows:
 
 ```
@@ -78,7 +80,7 @@ docker compose logs wazuh-main-server | grep -i sessionstore
 # RedisSessionStore configured with TTL=1800s
 ```
 
-With `REDIS_URL` set there is no fallback to in-memory storage. If Redis is unreachable, requests that need the session store fail with `503`, `Retry-After: 5` and `{"error": "Session store unavailable; retry shortly"}`, rather than a `404` that would tell clients to re-initialize.
+The session caps are not applied to Redis; keys expire after `SESSION_TTL_SECONDS`, and client metadata is bounded as above. With `REDIS_URL` set there is no fallback to in-memory storage. If Redis is unreachable, requests that need the session store fail with `503`, `Retry-After: 5` and `{"error": "Session store unavailable; retry shortly"}`, rather than a `404` that would tell clients to re-initialize.
 
 ### Running several replicas
 
@@ -132,9 +134,23 @@ WAZUH_DISABLED_TOOLS=wazuh_restart,wazuh_active_response
 
 ### Scopes
 
-Tools require `wazuh:read` (41 tools) or `wazuh:write` (14 tools). Write tools are omitted from `tools/list` for tokens without `wazuh:write`, and refused if called. Every write-tool call that passes the scope and confirmation checks is logged to the `wazuh_mcp_server.audit` logger with the principal, session and arguments.
+Tools require `wazuh:read` (41 tools) or `wazuh:write` (14 tools). Write tools are omitted from `tools/list` for tokens without `wazuh:write`, and refused if called. Every write-tool call that passes the scope, confirmation and argument checks is logged to the `wazuh_mcp_server.audit` logger with the principal, session and arguments.
 
-`WAZUH_REQUIRE_ACTION_CONFIRMATION=true` additionally requires `confirm=true` on every write tool and adds that argument to their schemas.
+### Active-response guard-rails
+
+Write tools pass through these checks before anything is sent to Wazuh. Each refusal is an `isError` tool result; see [Tool refusals](TROUBLESHOOTING.md#tool-refusals) for the exact messages.
+
+| Check | Default | Override |
+|-------|---------|----------|
+| `confirm=true` required on every write tool | On with `ENVIRONMENT=production`, off otherwise | `WAZUH_REQUIRE_ACTION_CONFIRMATION` |
+| Host-level actions and restarts against agent `000` (the Manager) refused | On | `WAZUH_ALLOW_MANAGER_AR=true` |
+| `wazuh_block_ip` with `all_agents=true` refused | On | `WAZUH_ALLOW_FLEET_AR=true` |
+| Loopback, an IP-address `WAZUH_HOST` and `WAZUH_PROTECTED_IPS` never blocked | On | Extend with `WAZUH_PROTECTED_IPS` |
+| `wazuh_active_response` refuses `firewall-drop` / `host-deny` (use the dedicated tools) | Always | None |
+| `wazuh_quarantine_file` refuses relative paths and system or agent directories | Always | Extend with `WAZUH_QUARANTINE_DENY_PREFIXES`; restrict with `WAZUH_QUARANTINE_ALLOW_PREFIXES` |
+| Positive `duration` on block tools refused | Always | None |
+
+The `confirm` argument is advertised on write tools to every token that holds `wazuh:write`, whether or not confirmation is required, and is never passed on to Wazuh.
 
 ### Tool annotations
 
@@ -154,9 +170,9 @@ Every input schema sets `additionalProperties: false`, and the server enforces i
 
 | Traffic | Limit | Key |
 |---------|-------|-----|
-| `/mcp` and `/` | 100 requests / 60 s (fixed) | Authenticated principal + client IP |
-| Failed authentication on those endpoints | Same budget | Client IP; repeated `401`s turn into `429` |
-| Other routes (`/auth/token`, `/oauth/*`, …) | `RATE_LIMIT_REQUESTS` per `RATE_LIMIT_WINDOW` seconds (default 100 / 60) | Client IP |
+| `/mcp` and `/` | `RATE_LIMIT_REQUESTS` per `RATE_LIMIT_WINDOW` seconds (default 100 / 60) | Authenticated principal + client IP |
+| Failed authentication on those endpoints | Same limit, counted separately | Client IP; repeated `401`s turn into `429` |
+| Other routes (`/auth/token`, `/oauth/*`, …) | Same limit, counted separately | Client IP |
 | `/health`, `/ready`, `/metrics` | Not limited | — |
 
 A `429` carries `Retry-After`. Client IPs are taken from `X-Forwarded-For` / `X-Real-IP` only when the direct peer is loopback or listed in `TRUSTED_PROXIES`.

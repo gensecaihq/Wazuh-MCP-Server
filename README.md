@@ -182,14 +182,14 @@ Per-tool parameters: [API documentation](docs/api/).
 |---------|-----------|
 | **Scopes (RBAC)** | Each tool requires `wazuh:read` or `wazuh:write`. A token without a scope claim is read-only. `MCP_API_KEY` is read-only unless `MCP_API_KEY_SCOPES` includes `wazuh:write`. With `AUTH_MODE=none`, write tools are disabled unless `AUTHLESS_ALLOW_WRITE=true`. |
 | **Bearer tokens** | JWTs signed with `AUTH_SECRET_KEY`, must carry `exp`, and are bound to the API key they were minted from: revoking or rotating the key invalidates its tokens. Refresh tokens are not accepted as access tokens. |
-| **OAuth** | Authorization code flow with mandatory S256 PKCE, single-use codes, refresh-token rotation with replay detection, and revocation. Users sign in with a `wazuh_` API key or at an OpenID Connect provider (ID token signature, issuer, audience, expiry and nonce verified; tenant, domain and user allow-lists; group-to-scope mapping), so scopes, rate limits and audit entries are per user. |
+| **OAuth** | Authorization code flow with mandatory S256 PKCE, single-use codes, refresh-token rotation with replay detection, and revocation. Users sign in with a `wazuh_` API key (the grant is capped at that key's scopes, and its tokens end when the key is revoked) or at an OpenID Connect provider (ID token signature, issuer, audience, expiry and nonce verified; tenant, domain and user allow-lists; group-to-scope mapping), so scopes, rate limits and audit entries are per user. |
 | **Action guardrails** | IP-blocking tools refuse loopback, the Manager's address (when `WAZUH_HOST` is an IP) and anything in `WAZUH_PROTECTED_IPS`; the generic active-response tool does not dispatch IP blocks. Actions and restarts aimed at agent `000` (the Manager) need `WAZUH_ALLOW_MANAGER_AR=true`; fleet-wide blocks need `WAZUH_ALLOW_FLEET_AR=true`; quarantine refuses system and agent directories. In production, write tools require `confirm=true` (`WAZUH_REQUIRE_ACTION_CONFIRMATION`). |
 | **Wazuh TLS** | The Manager and Indexer certificates are verified by default, against the system store or `WAZUH_CA_BUNDLE`. Disabling Manager verification (`WAZUH_ALLOW_SELF_SIGNED=true`) is logged at startup, as an error in production. |
 | **Audit log** | Every write-tool call is logged before and after execution (logger `wazuh_mcp_server.audit`) with the principal, session, arguments and outcome. |
 | **Redaction** | Credentials and tokens are redacted from tool output in every response format, and from server logs. |
 | **Input validation** | Typed validation of agent IDs, IPs, paths and command names; Indexer queries are built as Query DSL, not by string interpolation. |
-| **Rate limiting** | Sliding window per authenticated principal (default 100 requests per 60 s; `RATE_LIMIT_REQUESTS`, `RATE_LIMIT_WINDOW`). Failed authentication is rate limited by client IP. Set `TRUSTED_PROXIES` when running behind a proxy. |
-| **Resilience** | Circuit breaker on Wazuh calls: opens after 5 consecutive failures, retries after 60 s. Oversized tool results are truncated with a note (`MAX_TOOL_RESPONSE_CHARS`). |
+| **Rate limiting** | Sliding window, default 100 requests per 60 s (`RATE_LIMIT_REQUESTS`, `RATE_LIMIT_WINDOW`): per principal and client IP on `/mcp` and `/`, per client IP on other endpoints except `/health`, `/ready` and `/metrics`. Failed authentication is rate limited by client IP. Set `TRUSTED_PROXIES` when running behind a proxy. |
+| **Resource bounds** | Circuit breaker on Wazuh calls: opens after 5 consecutive failures, retries after 60 s. Oversized tool results are truncated with a note (`MAX_TOOL_RESPONSE_CHARS`). `limit` on `get_wazuh_alerts` and `search_security_events` is capped at `MAX_ALERTS_PER_QUERY` (default 1000). The in-memory session store is capped at `MAX_SESSIONS` (1000) and `MAX_SESSIONS_PER_PRINCIPAL` (100), and stored client metadata is truncated. |
 | **Container** | Runs as UID 1000; `compose.yml` sets a read-only root filesystem, `cap_drop: ALL` and `no-new-privileges`. The runtime image does not include pip. |
 
 There is no built-in TLS listener; terminate TLS at a reverse proxy or load balancer. Report vulnerabilities as described in [SECURITY.md](SECURITY.md).
@@ -204,7 +204,8 @@ All settings are environment variables (usually via `.env`). The ones most deplo
 |----------|---------|---------|
 | `WAZUH_HOST`, `WAZUH_USER`, `WAZUH_PASS` | — | Manager API connection (required) |
 | `WAZUH_PORT` | `55000` | Manager API port |
-| `WAZUH_CA_BUNDLE` | — | CA PEM for verifying the Manager/Indexer. The stock Manager certificate needs reissuing or `WAZUH_ALLOW_SELF_SIGNED=true`; see [Manager TLS](docs/configuration.md#manager-tls) |
+| `WAZUH_CA_BUNDLE` | — | CA PEM used instead of the system store to verify the Manager and Indexer; see [Manager TLS](docs/configuration.md#manager-tls) |
+| `WAZUH_ALLOW_SELF_SIGNED` | `false` | `true` connects to the Manager without certificate verification (logged at startup) |
 | `WAZUH_INDEXER_HOST`, `WAZUH_INDEXER_USER`, `WAZUH_INDEXER_PASS` | — | Indexer connection; an `http://` host prefix selects plain HTTP |
 | `WAZUH_INDEXER_PORT` | `9200` | Indexer port |
 | `ENVIRONMENT` | `development` | `production` requires a strong `AUTH_SECRET_KEY` (unless `AUTH_MODE=none`) |
@@ -212,6 +213,9 @@ All settings are environment variables (usually via `.env`). The ones most deplo
 | `AUTH_SECRET_KEY` | generated per process outside production | Token signing key; use the same value on every instance |
 | `MCP_API_KEY` / `API_KEYS` | generated per process if unset (printed only in development) | A single `wazuh_` key, or a JSON list of hashed keys with per-key scopes |
 | `MCP_API_KEY_SCOPES` | `wazuh:read` | Space-separated scopes for `MCP_API_KEY` |
+| `OAUTH_ISSUER_URL` | derived from the request | Public HTTPS URL of the server, for `AUTH_MODE=oauth` |
+| `OAUTH_IDP_ISSUER` | — | OpenID Connect provider for OAuth sign-in (with `OAUTH_IDP_CLIENT_ID`); API-key sign-in when unset |
+| `WAZUH_REQUIRE_ACTION_CONFIRMATION` | `true` in production, else `false` | Write tools require `confirm=true` |
 | `MCP_HOST`, `MCP_PORT` | `0.0.0.0`, `3000` | Bind address and port |
 | `ALLOWED_ORIGINS` | `https://claude.ai,http://localhost:3000` | CORS allow-list (exact match) |
 | `WAZUH_TOOLSETS`, `WAZUH_DISABLED_TOOLS` | all enabled | Limit the exposed tools |
@@ -247,7 +251,7 @@ Requires Python 3.11 or later.
 | `/auth/token` | POST | Exchange an API key for a bearer JWT |
 | `/.well-known/oauth-authorization-server` | GET | OAuth metadata (RFC 8414), `AUTH_MODE=oauth` only |
 | `/.well-known/oauth-protected-resource` | GET | Protected-resource metadata (RFC 9728), `AUTH_MODE=oauth` only |
-| `/oauth/authorize`, `/oauth/token`, `/oauth/revoke`, `/oauth/register` | GET/POST | OAuth endpoints, `AUTH_MODE=oauth` only (`/oauth/register` requires `OAUTH_ENABLE_DCR=true`) |
+| `/oauth/authorize`, `/oauth/token`, `/oauth/revoke`, `/oauth/register`, `/oauth/callback` | GET/POST | OAuth endpoints, `AUTH_MODE=oauth` only (`/oauth/register` requires `OAUTH_ENABLE_DCR=true`; `/oauth/callback` is the OpenID Connect redirect URI and needs `OAUTH_IDP_ISSUER`) |
 | `/docs`, `/redoc`, `/openapi.json` | GET | OpenAPI documentation |
 
 ---
@@ -260,6 +264,7 @@ src/wazuh_mcp_server/
 ├── toolsets.py        # Toolset membership, WAZUH_TOOLSETS resolution, tool annotations
 ├── auth.py            # API keys and bearer JWTs
 ├── oauth.py           # OAuth 2.0 authorization server (PKCE, API-key sign-in)
+├── oidc.py            # OpenID Connect sign-in at an external identity provider
 ├── config.py          # Environment configuration and startup validation
 ├── security.py        # Rate limiting, CORS, input validation, log redaction
 ├── clusters.py        # Multi-cluster registry and Cross-Cluster Search routing
@@ -325,7 +330,7 @@ Thanks to everyone who has contributed code, reviews, bug reports and design fee
 - [@aiunmukto](https://github.com/aiunmukto) — `.env.example`, CI workflow and Glama registry listing (#12)
 - [@Karibusan](https://github.com/Karibusan) — dependency fixes (#38)
 - [@lwsinclair](https://github.com/lwsinclair) — MseeP.ai listing (#9)
-- [@markeclaudio](https://github.com/markeclaudio) — OIDC sign-in and Manager TLS verification by default (#123, #127); active-response guard-rails and session bounds (#124–#126, in review)
+- [@markeclaudio](https://github.com/markeclaudio) — OpenID Connect sign-in (#123), active-response guard-rails (#124, #125), session-store bounds (#126), Manager TLS verification by default (#127)
 - [@MilkyWay88](https://github.com/MilkyWay88) and [@taylorwalton](https://github.com/taylorwalton) — early pull requests on configuration, logging and packaging
 
 **Bug reports and discussions**

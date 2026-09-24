@@ -62,7 +62,7 @@ Open WebUI listens on `http://127.0.0.1:8080` (`WEBUI_BIND` / `WEBUI_PORT` chang
    ```json
    {"access_token": "eyJhbGciOiJI...", "token_type": "bearer", "expires_in": 86400}
    ```
-   Use a read-only key (leave `MCP_API_KEY_SCOPES` unset) unless the team should be able to run active response from chat. Rotating or revoking the key invalidates the token.
+   Use a read-only key (leave `MCP_API_KEY_SCOPES` unset) unless the team should be able to run active response from chat. Rotating or revoking the key invalidates the token. With a write-capable key, note that `compose.yml` sets `ENVIRONMENT=production`, which turns the confirmation gate on: a write tool is refused until the model calls it again with `confirm: true`, which it should do only after the analyst approves the target in chat.
 2. In Open WebUI go to **Admin settings → Integrations → External Tool Servers → Add Connection**. Type **MCP (Streamable HTTP)**, URL `http://wazuh-main-server:3000/mcp`, authentication **Bearer**, key = the token.
 3. MCP connections are admin-managed; use the connection's access control to make it available to users or groups.
 
@@ -153,5 +153,7 @@ mcp_servers:
 
 - Every tool carries MCP annotations — write tools are `destructiveHint: true` (except the reversal tools), read tools `readOnlyHint: true`. Clients that support approval prompts use these.
 - Write tools require the `wazuh:write` scope and are hidden from read-only tokens.
-- `WAZUH_REQUIRE_ACTION_CONFIRMATION=true` makes write tools demand `confirm=true`, and advertises the flag in their schemas.
-- Agent `000` (the manager) is refused as an active-response target unless `WAZUH_ALLOW_MANAGER_AR=true`.
+- Every write tool advertises an optional `confirm` flag. With `ENVIRONMENT=production` (the `compose.yml` default) a write-tool call without `confirm=true` is refused; `WAZUH_REQUIRE_ACTION_CONFIRMATION` overrides the default either way.
+- Agent `000` (the manager), including a Manager restart, is refused as a target unless `WAZUH_ALLOW_MANAGER_AR=true`; fleet-wide IP blocks are refused unless `WAZUH_ALLOW_FLEET_AR=true`.
+- Protected IPs (loopback, the Manager, `WAZUH_PROTECTED_IPS`) are never blocked, and `wazuh_quarantine_file` refuses system and agent directories.
+- See [Active response](api/active-response.md#safety-controls) for the full list.

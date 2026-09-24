@@ -58,7 +58,7 @@ from the Wazuh API specification; use them to build a least-privilege API user (
 | `GET /cluster/nodes` | `cluster:read` | `get_wazuh_cluster_nodes` |
 | `PUT /active-response` | `active-response:command` | Active-response write tools |
 | `PUT /agents/{agent_id}/restart` | `agent:restart` | `wazuh_restart` on an agent |
-| `PUT /manager/restart` | `manager:read`, `manager:restart` | `wazuh_restart` on agent `000` |
+| `PUT /manager/restart` | `manager:read`, `manager:restart` | `wazuh_restart` with `target=manager` (or `000`); needs `WAZUH_ALLOW_MANAGER_AR=true` |
 
 `wazuh_client.py` also contains helpers for `GET /cluster/status`, `/decoders`, `/lists`,
 `/manager/configuration` and `/agents/{agent_id}/stats/{component}`; no tool calls them.
@@ -78,7 +78,12 @@ agents go in the `agents_list` query parameter. The server builds the request th
 strips a `custom` key from the body if a caller supplies one. Commands
 dispatched through the API run as `!`-prefixed scripts; the agent ignores the configured
 timeout for them, so the server refuses a positive `duration` rather than implying the block
-will expire.
+will expire. A successful response means Wazuh delivered the command to the agent, not that
+the script ran, so results report `execution_status: "dispatched"`.
+
+`!firewall-drop` and `!host-deny` are sent only by `wazuh_block_ip`, `wazuh_firewall_drop`
+and `wazuh_host_deny`, which refuse loopback, the Manager's address and `WAZUH_PROTECTED_IPS`;
+the generic `wazuh_active_response` tool refuses both commands.
 
 ## Indexer indices used
 
@@ -102,7 +107,8 @@ WAZUH_PORT=55000
 WAZUH_USER=mcp-service
 WAZUH_PASS=<password>
 WAZUH_VERIFY_SSL=true
-WAZUH_ALLOW_SELF_SIGNED=false   # default true, which disables Manager certificate verification
+WAZUH_ALLOW_SELF_SIGNED=false   # default; true skips Manager certificate verification
+WAZUH_CA_BUNDLE=/app/certs/ca.pem   # CA for the Manager and Indexer; replaces the system store
 
 # Indexer (required for alert and vulnerability tools)
 WAZUH_INDEXER_HOST=wazuh-indexer.example.com   # prefix with http:// for a plain-HTTP node
@@ -112,21 +118,28 @@ WAZUH_INDEXER_PASS=<password>
 WAZUH_INDEXER_VERIFY_SSL=true
 ```
 
+The stock Manager API certificate (`/var/ossec/api/configuration/ssl/server.crt`) is self-signed for
+`CN=wazuh.com` with no subjectAltName, so it fails verification for any `WAZUH_HOST`. Reissue it
+with a subjectAltName for the Manager's hostname or IP and point `WAZUH_CA_BUNDLE` at the signing
+CA, or set `WAZUH_ALLOW_SELF_SIGNED=true` to connect without verification. See
+[Manager TLS](docs/configuration.md#manager-tls).
+
 See [docs/configuration.md](docs/configuration.md) for every setting and
 [docs/MULTI_CLUSTER.md](docs/MULTI_CLUSTER.md) for per-cluster configuration.
 
 ## Verifying a deployment
 
 ```bash
-# Manager API reachable and credentials valid; GET / reports data.api_version
-TOKEN=$(curl -sk -u "$WAZUH_USER:$WAZUH_PASS" -X POST \
+# Manager API reachable, certificate valid for WAZUH_HOST, credentials accepted;
+# GET / reports data.api_version. Drop --cacert to test against the system store.
+TOKEN=$(curl -s --cacert "$WAZUH_CA_BUNDLE" -u "$WAZUH_USER:$WAZUH_PASS" -X POST \
   "https://$WAZUH_HOST:55000/security/user/authenticate?raw=true")
-curl -sk -H "Authorization: Bearer $TOKEN" "https://$WAZUH_HOST:55000/"
+curl -s --cacert "$WAZUH_CA_BUNDLE" -H "Authorization: Bearer $TOKEN" "https://$WAZUH_HOST:55000/"
 
 # Server liveness (does not contact Wazuh)
 curl -s http://localhost:3000/health
 
-# Readiness (calls the Wazuh Manager)
+# Readiness: Manager, Indexer and memory headroom; 503 when a check fails
 curl -s http://localhost:3000/ready
 ```
 

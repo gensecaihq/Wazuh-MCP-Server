@@ -109,7 +109,7 @@ The examples on the other pages show the text content only, with the JSON pretty
 
 ## Arguments
 
-- **Closed schemas.** Every tool schema sets `additionalProperties: false`, and the server enforces it. An argument that is not in the schema (for example a misspelling such as `agentid`) is refused rather than ignored:
+- **Closed schemas.** Every tool schema sets `additionalProperties: false`, and the server enforces it. An argument that is not in the schema (for example a misspelling such as `agentid`) is refused rather than ignored. The only arguments accepted without being listed are `duration` on `wazuh_block_ip` and `wazuh_firewall_drop`, kept for older clients (see [Active response](active-response.md#how-dispatch-works)):
 
   ```text
   Unknown argument(s) for 'get_wazuh_alerts': agentid. Valid arguments: agent_id, compact, level, limit, rule_groups, rule_id, timestamp_end, timestamp_start.
@@ -131,10 +131,10 @@ The server distinguishes protocol errors from tool errors, following the MCP too
 | Unknown tool name, missing tool name, `arguments` that is not an object, unknown `cluster_id` | JSON-RPC error (`-32602`) |
 | Tool disabled by `WAZUH_TOOLSETS` / `WAZUH_DISABLED_TOOLS` | Tool result with `isError: true` |
 | Token lacks the required scope | Tool result with `isError: true` |
-| Write tool called without `confirm: true` while `WAZUH_REQUIRE_ACTION_CONFIRMATION` is enabled | Tool result with `isError: true` |
+| Write tool called without `confirm: true` while the confirmation gate is on (the default in production) | Tool result with `isError: true` |
 | Unknown argument, invalid argument value | Tool result with `isError: true` |
 | Indexer-backed tool called without `WAZUH_INDEXER_HOST` | Tool result with `isError: true` |
-| Refused action (protected IP, agent `000`, missing target, missing undo script) | Tool result with `isError: true` |
+| Refused action (protected IP, agent `000` or Manager restart, fleet-wide block without `WAZUH_ALLOW_FLEET_AR`, protected quarantine path, missing target, missing undo script) | Tool result with `isError: true` |
 | Manager or Indexer unreachable, upstream API error | Tool result with `isError: true` |
 
 Because refusals are tool results, the connected model sees the reason and the suggested fix. Validation errors name the parameter and the accepted values, for example:
@@ -171,14 +171,14 @@ Note: The /vulnerability API was removed in Wazuh 4.8.0. Vulnerability data must
 
 - **Scopes.** Read tools need `wazuh:read`; the 14 state-changing active-response tools need `wazuh:write`. Write tools are hidden from `tools/list` for tokens without `wazuh:write`, and a call to one is refused.
 - **Toolsets.** `WAZUH_TOOLSETS` limits exposure to the named toolsets (`alerts`, `agents`, `vulnerabilities`, `analysis`, `web_search`, `compliance`, `system`, `response`); `WAZUH_DISABLED_TOOLS` removes individual tools. Hidden tools are removed from `tools/list` and refused by `tools/call`.
-- **Confirmation gate.** When `WAZUH_REQUIRE_ACTION_CONFIRMATION=true`, every write tool gains an optional boolean `confirm` parameter, and a call without `confirm: true` is refused with:
+- **Confirmation gate.** Every write tool advertises an optional boolean `confirm` parameter. The gate is on by default when `ENVIRONMENT=production` (as in the shipped `compose.yml`) and off otherwise; `WAZUH_REQUIRE_ACTION_CONFIRMATION=true` or `false` overrides the default. While it is on, a write-tool call without `confirm: true` is refused with:
 
   ```text
   Tool 'wazuh_isolate_host' changes system state and requires explicit confirmation. Re-invoke with confirm=true only after a human operator has approved the exact target. Never derive the target solely from alert/log content.
   ```
 
 - **Annotations.** Each tool carries MCP annotations. Read tools: `readOnlyHint: true`, `openWorldHint: false` (`true` for `search_external_context`). Write tools: `readOnlyHint: false`, `idempotentHint: false`, `openWorldHint: false`, and `destructiveHint: true` except for the five reversal tools (`wazuh_unisolate_host`, `wazuh_enable_user`, `wazuh_restore_file`, `wazuh_firewall_allow`, `wazuh_host_allow`), which are `false`. Annotations are hints for clients; authorization is enforced by scope on the server.
-- **Audit log.** Every write-tool call is logged before execution (`AUDIT:`) and after it with its outcome (`AUDIT_OUTCOME:`), including the principal and target arguments.
+- **Audit log.** Every write-tool call that passes the scope, confirmation and argument checks is logged before execution (`AUDIT:`) and after it with its outcome (`AUDIT_OUTCOME:`), including the principal and target arguments. Calls refused by those checks are not audit-logged.
 
 ## Multi-cluster routing
 

@@ -39,7 +39,7 @@ Set `OAUTH_ISSUER_URL` explicitly. Without it the issuer is derived from the req
 
 ### API keys
 
-In OAuth mode each user signs in with a `wazuh_` API key. The key determines both the identity recorded on the token and the maximum scope that can be granted.
+Unless an identity provider is configured (see [Sign-in through your identity provider](#sign-in-through-your-identity-provider)), each user signs in with a `wazuh_` API key. The key determines both the identity recorded on the token and the maximum scope that can be granted.
 
 - **One key:** `MCP_API_KEY`. Its scopes come from `MCP_API_KEY_SCOPES` (space-separated); unset means `wazuh:read` only.
 - **One key per user:** `API_KEYS`, a JSON array. The server stores only an HMAC-SHA256 of each key, computed with `AUTH_SECRET_KEY`:
@@ -57,7 +57,7 @@ In OAuth mode each user signs in with a `wazuh_` API key. The key determines bot
 
   `id`, `name`, `key_hash`, `created_at` are required; `scopes`, `expires_at` and `active` are optional. Changing `AUTH_SECRET_KEY` invalidates every hash.
 
-If no key is configured the server generates a temporary read-only key at startup and, in production, does not display it, so nobody can sign in. Configure a key explicitly.
+If no key is configured, the server generates a temporary key at startup. In production that key is read-only and never displayed, so nobody can sign in with it; only with `ENVIRONMENT=development` is it printed (with read and write scope). Configure a key explicitly.
 
 ## Add the connector in Claude
 
@@ -67,7 +67,7 @@ If no key is configured the server generates a temporary read-only key at startu
 2. URL: `https://mcp.example.com/mcp`.
 3. **Advanced settings → OAuth Client ID:** `claude-desktop`. Leave the client secret empty.
 4. Save, then **Connect**. A browser window opens on the server's sign-in page.
-5. Paste your `wazuh_` API key and click **Authorize**.
+5. Paste your `wazuh_` API key and click **Authorize**. With an identity provider configured, the browser goes to the provider's sign-in page instead.
 
 **Team / Enterprise:** an owner adds the connector under **Organization settings → Connectors → Add → Custom → Web** with the same URL and client ID. Members then open **Customize → Connectors**, find the connector and click **Connect**; each member signs in with their own key.
 
@@ -77,7 +77,7 @@ Custom connectors work in Claude Desktop as well as on claude.ai.
 
 1. Claude reads `/.well-known/oauth-protected-resource` (RFC 9728) and `/.well-known/oauth-authorization-server` (RFC 8414). When `OAUTH_ISSUER_URL` is set, a `401` from `/mcp` also points to the protected resource metadata in its `WWW-Authenticate` header.
 2. Claude opens `/oauth/authorize` with a PKCE S256 challenge. PKCE is mandatory; requests without it are rejected.
-3. The sign-in page asks for a `wazuh_` API key. The granted scope is the intersection of what Claude requested, what the client is registered for, and the key's scopes, so a read-only key cannot obtain `wazuh:write`.
+3. The sign-in page asks for a `wazuh_` API key. The granted scope is the intersection of what Claude requested, what the client is registered for, and the key's scopes, so a read-only key cannot obtain `wazuh:write`. (With an identity provider, this step happens at the provider; see below.)
 4. Claude exchanges the code at `/oauth/token` for an access token and a refresh token.
 
 Token response from a local test: no scope requested (the server then assumes `wazuh:read wazuh:write`) and a read-only `MCP_API_KEY`:
@@ -86,7 +86,7 @@ Token response from a local test: no scope requested (the server then assumes `w
 {"access_token": "...", "token_type": "Bearer", "expires_in": 3600, "refresh_token": "...", "scope": "wazuh:read"}
 ```
 
-Tokens carry the key's identity, so RBAC checks, rate limiting and the audit log (`client=oauth:claude-desktop:<key id>`) are per user.
+Tokens carry the key's identity, so RBAC checks, rate limiting and the audit log (`client=oauth:claude-desktop:<key id>`) are per user. They stay bound to the key: removing or deactivating it in `API_KEYS` ends the user's access on the next request, before the token expires.
 
 ### The pre-registered client
 
@@ -127,7 +127,9 @@ OAUTH_IDP_CLIENT_ID=<application id>
 OAUTH_IDP_GROUP_SCOPE_MAP={"soc-admins": "wazuh:read wazuh:write", "soc-analysts": "wazuh:read"}
 ```
 
-The connector setup in Claude is unchanged (client ID `claude-desktop`). When a user connects, the browser goes to the provider; after sign-in the server checks the ID token and allow-lists and grants the scope mapped from the user's groups. Tokens carry the user's identity, so the audit log records `oauth:claude-desktop:<user>`. All settings: [Configuration](configuration.md#sign-in-through-an-openid-connect-identity-provider).
+The connector setup in Claude is unchanged (client ID `claude-desktop`). When a user connects, the browser goes to the provider; the API-key sign-in page is disabled. After sign-in the server verifies the ID token (RS256 signature against the provider's JWKS, issuer, audience, expiry and nonce), applies the allow-lists (`OAUTH_IDP_ALLOWED_TENANTS`, `OAUTH_IDP_ALLOWED_DOMAINS`, `OAUTH_IDP_ALLOWED_USERS`) and grants the scope mapped from the user's groups by `OAUTH_IDP_GROUP_SCOPE_MAP`, or `OAUTH_IDP_DEFAULT_SCOPE` (default `wazuh:read`) when no group matches. Tokens carry the user's identity, so the audit log records `oauth:claude-desktop:<user>`.
+
+The server refuses to start with a Google issuer and no `OAUTH_IDP_ALLOWED_DOMAINS` or `OAUTH_IDP_ALLOWED_USERS`, or with a multi-tenant Entra issuer (`/common/`, `/organizations/`) and no `OAUTH_IDP_ALLOWED_TENANTS`, because either would admit any account. Users disabled at the provider keep access until their tokens expire or are revoked. All settings: [Configuration](configuration.md#sign-in-through-an-openid-connect-identity-provider); security details: [Security guide](security/README.md#oauth-mode-auth_modeoauth).
 
 ### Token lifetimes and revocation
 
@@ -139,7 +141,7 @@ The connector setup in Claude is unchanged (client ID `claude-desktop`). When a 
 
 - Refresh tokens rotate on every use. Presenting an already-used refresh token revokes that grant only; other users of the shared `claude-desktop` client are unaffected.
 - `POST /oauth/revoke` (RFC 7009) revokes a token.
-- Access tokens are signed JWTs and remain valid across restarts and replicas that share `AUTH_SECRET_KEY`. Authorization codes, refresh tokens and the revocation list are held in process memory: after a restart, users sign in again once their access token expires, and with several replicas the OAuth endpoints need sticky routing.
+- Access tokens are signed JWTs and remain valid across restarts and replicas that share `AUTH_SECRET_KEY`. Authorization codes, pending identity-provider logins, refresh tokens and the revocation list are held in process memory: after a restart, users sign in again once their access token expires, and with several replicas the OAuth endpoints need sticky routing.
 
 ### Endpoints
 
@@ -147,10 +149,15 @@ The connector setup in Claude is unchanged (client ID `claude-desktop`). When a 
 |----------|---------|
 | `/.well-known/oauth-authorization-server` | Authorization server metadata (RFC 8414) |
 | `/.well-known/oauth-protected-resource` | Protected resource metadata (RFC 9728) |
-| `/oauth/authorize` | Sign-in page (GET) and form submission (POST) |
+| `/oauth/authorize` | Sign-in page (GET) and API-key form submission (POST); redirects to the identity provider when one is configured |
+| `/oauth/callback` | Return from the identity provider (only with `OAUTH_IDP_ISSUER`) |
 | `/oauth/token` | Code exchange and refresh |
 | `/oauth/revoke` | Token revocation (RFC 7009) |
 | `/oauth/register` | Dynamic client registration, only with `OAUTH_ENABLE_DCR=true` |
+
+## Write tools and confirmation
+
+Keys or identity-provider groups that grant `wazuh:write` expose the 14 active-response tools. With `ENVIRONMENT=production` (the `compose.yml` default) the confirmation gate is on: a write-tool call without `confirm: true` is refused with a message asking for human approval, and Claude has to call the tool again with `confirm: true`. Approve that second call only after checking the target. Fleet-wide blocks (`WAZUH_ALLOW_FLEET_AR`) and actions against the Manager (`WAZUH_ALLOW_MANAGER_AR`) stay refused unless the operator enables them. See [Active response](api/active-response.md#safety-controls).
 
 ## Other authentication modes
 

@@ -2,54 +2,76 @@
 
 ## Upgrading to the next release (after 4.3.0)
 
-These changes are on `main` and listed under "Unreleased" in [CHANGELOG.md](CHANGELOG.md). Most are fixes; the ones below need action or change what clients see.
+These changes are on `main` and listed under "Unreleased" in [CHANGELOG.md](CHANGELOG.md). Most are fixes; the sections below cover the ones that need action or change what clients see. Sections 1 to 3 can stop an existing deployment from working until you act.
 
 ### 1. The Manager certificate is verified by default
 
-`WAZUH_ALLOW_SELF_SIGNED` now defaults to `false`. Earlier versions connected to the Manager without verifying its certificate, even with `WAZUH_VERIFY_SSL=true`. A stock Wazuh Manager API certificate is self-signed for `CN=wazuh.com` with no subjectAltName and cannot be verified, so a stock deployment stops connecting with `TLS certificate verification failed` until you choose one of:
+`WAZUH_ALLOW_SELF_SIGNED` now defaults to `false`. Earlier versions connected to the Manager without verifying its certificate, even with `WAZUH_VERIFY_SSL=true`. The stock Wazuh Manager API certificate is self-signed for `CN=wazuh.com` with no subjectAltName and cannot be verified, so a stock deployment stops connecting with `TLS certificate verification failed` until you choose one of:
 
-- **Verify (recommended):** reissue the Manager API certificate with a subjectAltName matching `WAZUH_HOST`, mount its CA and set `WAZUH_CA_BUNDLE` (compose: uncomment the `./certs` volume). The bundle replaces the system store for the Manager and Indexer, so include the Indexer's CA too if it differs.
-- **Keep the previous behaviour:** set `WAZUH_ALLOW_SELF_SIGNED=true`. The API password is then sent over an unverified connection; the server logs this at startup.
+- **Verify (recommended):** reissue the Manager API certificate with a subjectAltName matching `WAZUH_HOST`, mount its CA and set `WAZUH_CA_BUNDLE` (in `compose.yml`, uncomment the `./certs` volume and set `WAZUH_CA_BUNDLE=/app/certs/ca.pem`). The bundle replaces the system trust store for both the Manager and the Indexer, so include the Indexer's CA if it differs.
+- **Keep the previous behaviour:** set `WAZUH_ALLOW_SELF_SIGNED=true`. The API password is then sent over an unverified connection; the server logs this at startup (as an error when `ENVIRONMENT=production`).
 
-Clusters in `clusters.json` use `verify_ssl` / `ca_bundle` per cluster. See [Manager TLS](docs/configuration.md#manager-tls).
+Clusters in `clusters.json` use `verify_ssl` and `ca_bundle` per cluster; `ca_bundle` falls back to `WAZUH_CA_BUNDLE`. See [Manager TLS](docs/configuration.md#manager-tls).
 
-### 2. Write tools ask for confirmation in production
+### 2. OAuth users must sign in
 
-With `ENVIRONMENT=production` (set by the Dockerfile and `compose.yml`), every write tool now requires `confirm=true` unless `WAZUH_REQUIRE_ACTION_CONFIRMATION=false` is set. LLM clients see the refusal and re-invoke after asking a person; scripted clients must pass `confirm: true`. Also opt-in now: fleet-wide blocks (`WAZUH_ALLOW_FLEET_AR=true`) and restarting the Manager (`WAZUH_ALLOW_MANAGER_AR=true`). `wazuh_quarantine_file` refuses system and agent directories.
+`/oauth/authorize` used to approve every request. It now requires the user to sign in, in one of two ways:
 
-### 3. OAuth users sign in with an API key
+- **API key (default):** the user pastes a `wazuh_` API key on the server's sign-in page; the grant is capped at that key's scopes, and its tokens end when the key is revoked. Configure keys before upgrading an OAuth deployment, or nobody can sign in:
 
-`/oauth/authorize` now shows a sign-in page instead of approving every request. Each user pastes a `wazuh_` API key once; their token gets that key's scopes. Configure keys before upgrading an OAuth deployment, or nobody can sign in:
+  ```env
+  MCP_API_KEY=wazuh_...                 # or API_KEYS=[...] for one key per user
+  MCP_API_KEY_SCOPES=wazuh:read         # add wazuh:write for users who may run active response
+  ```
 
-```env
-MCP_API_KEY=wazuh_...                 # or API_KEYS=[...] for one key per user
-MCP_API_KEY_SCOPES=wazuh:read         # add wazuh:write for users who may run active response
-```
+- **OpenID Connect:** set `OAUTH_IDP_ISSUER` and `OAUTH_IDP_CLIENT_ID` (plus `OAUTH_IDP_CLIENT_SECRET` for a confidential client) and register `<OAUTH_ISSUER_URL>/oauth/callback` as the redirect URI at the provider. Users sign in at Entra ID, Google Workspace, Okta or another OIDC provider, and `OAUTH_IDP_GROUP_SCOPE_MAP` / `OAUTH_IDP_DEFAULT_SCOPE` decide their scopes. See [Sign-in through an OpenID Connect identity provider](docs/configuration.md#sign-in-through-an-openid-connect-identity-provider).
 
-### 4. Re-mint bearer tokens once
+### 3. Re-mint bearer tokens once
 
-Bearer JWTs are now bound to the API key they came from, and `MCP_API_KEY` got a stable id. Tokens minted before the upgrade reference the old id and are refused: exchange the key at `POST /auth/token` again. From then on tokens survive restarts and work across replicas.
+Bearer JWTs are now bound to the API key they came from, and `MCP_API_KEY` got a stable id derived from the key. Tokens minted before the upgrade reference the old id and are refused: exchange the key at `POST /auth/token` again. From then on tokens survive restarts and work across replicas, and revoking or rotating a key ends its tokens.
 
-### 5. Point legacy clients at `/mcp`
+### 4. Active-response guard-rails
 
-`/sse` returns `410 Gone`. It never completed a session (no `endpoint` event, no message route), so any client configured with it wasn't working anyway.
+- **Confirmation in production.** With `ENVIRONMENT=production` (set by the Dockerfile and `compose.yml`), every write tool requires `confirm=true` unless `WAZUH_REQUIRE_ACTION_CONFIRMATION=false`. LLM clients see the refusal and re-invoke after asking a person; scripted clients must pass `confirm: true`.
+- **Fleet-wide blocks** (`all_agents=true` on `wazuh_block_ip`) need `WAZUH_ALLOW_FLEET_AR=true`.
+- **The Manager as a target.** Active response against agent `000` and `wazuh_restart` with `target=manager` need `WAZUH_ALLOW_MANAGER_AR=true`.
+- **Quarantine paths.** `wazuh_quarantine_file` refuses system and agent directories. `WAZUH_QUARANTINE_DENY_PREFIXES` adds to that list; `WAZUH_QUARANTINE_ALLOW_PREFIXES` restricts quarantine to the listed directories.
+- **IP blocks go through the dedicated tools.** `wazuh_active_response` refuses `!firewall-drop` and `!host-deny`; use `wazuh_firewall_drop` or `wazuh_host_deny`. Those tools, like `wazuh_block_ip`, now refuse loopback, the Manager's address and `WAZUH_PROTECTED_IPS`.
 
-### 6. Startup is stricter
+Invalid values for `WAZUH_REQUIRE_ACTION_CONFIRMATION`, `WAZUH_ALLOW_FLEET_AR` and `WAZUH_ALLOW_MANAGER_AR` stop the server at startup.
 
-Values that used to be misread now stop the server with a message: `ENVIRONMENT` other than `development`/`dev`/`production`/`prod`, an unknown `AUTH_MODE`, non-positive `RATE_LIMIT_REQUESTS`/`RATE_LIMIT_WINDOW`/`SESSION_TTL_SECONDS`, `MAX_MEMORY_MB` below 64, and invalid `clusters.json` fields (booleans must be true/false, ports 1-65535). With `REDIS_URL` set, a bad TTL no longer falls back to the in-memory store.
-
-### 7. Tool calls
+### 5. Tool calls
 
 - `duration` on `wazuh_block_ip` / `wazuh_firewall_drop` is refused when positive: Wazuh can't expire an API-triggered block. Blocks are permanent until removed.
+- Active-response results include `execution_status: "dispatched"`: Wazuh confirmed delivery, not execution. Confirm effects with the `wazuh_check_*` tools.
 - Arguments a tool doesn't declare are refused instead of ignored.
 - Scope, confirmation and disabled-tool refusals are `isError` tool results (not JSON-RPC errors), so the model sees them.
-- Active-response results include `execution_status: "dispatched"`; confirm effects with the `wazuh_check_*` tools.
+- `limit` on `get_wazuh_alerts` and `search_security_events` is capped at `MAX_ALERTS_PER_QUERY` (default 1000, unchanged), which was previously not applied.
 - Manager log tools accept `limit` up to 500 (Wazuh's own maximum).
 - Vulnerability results drop the always-null `status` and add `cvss_score` and `under_evaluation`.
 
-### 8. Legacy sessions
+### 6. Startup is stricter
 
-A request without `Mcp-Session-Id` that isn't `initialize` is served without creating a session and gets no session header. Clients that skipped `initialize` and reused that header must initialize first (as the MCP spec requires).
+Settings that used to be misread or only failed on the first tool call now stop the server with a message:
+
+- missing `WAZUH_HOST`, `WAZUH_USER` or `WAZUH_PASS`;
+- `ENVIRONMENT` other than `development`/`dev`/`production`/`prod`, or an unknown `AUTH_MODE`;
+- non-positive `RATE_LIMIT_REQUESTS`/`RATE_LIMIT_WINDOW`/`SESSION_TTL_SECONDS`, or `MAX_MEMORY_MB` below 64;
+- a `WAZUH_CA_BUNDLE` or per-cluster `ca_bundle` that does not exist;
+- an incomplete OpenID Connect configuration (for example `OAUTH_IDP_ISSUER` without `OAUTH_IDP_CLIENT_ID`);
+- invalid `clusters.json` fields (booleans must be true/false, ports 1-65535).
+
+With `REDIS_URL` set, a bad TTL no longer falls back to the in-memory store.
+
+### 7. Sessions and rate limits
+
+- A request without `Mcp-Session-Id` that isn't `initialize` is served without creating a session and gets no session header. Clients that skipped `initialize` and reused that header must initialize first, as the MCP specification requires.
+- The in-memory session store is capped at `MAX_SESSIONS` (default 1000) and `MAX_SESSIONS_PER_PRINCIPAL` (default 100). When a cap is reached, the least recently active sessions are evicted; a client whose session was evicted gets `404` and must initialize again. The caps do not apply to the Redis store, which expires sessions itself. Stored client metadata is truncated in both stores.
+- `RATE_LIMIT_REQUESTS` and `RATE_LIMIT_WINDOW` now apply to `/mcp` and `/`, which previously used the built-in 100 requests per 60 s regardless of the settings.
+
+### 8. Point legacy clients at `/mcp`
+
+`/sse` returns `410 Gone`. It never completed a session (no `endpoint` event, no message route), so a client configured with it was not working anyway.
 
 ## Upgrading to 4.3.0
 
@@ -103,8 +125,8 @@ address. Stock Wazuh cannot remove a firewall-drop / hosts.deny block through th
 API, so these tools now require an operator-deployed undo script named via
 `WAZUH_AR_FIREWALL_UNDO_COMMAND` / `WAZUH_AR_HOSTDENY_UNDO_COMMAND`, or they refuse
 with an actionable error. (The 4.3.0 notes also suggested an `<active-response><timeout>`
-in the manager so blocks expire; that does not work for API-dispatched commands, see
-"Tool calls" above.)
+in the manager so blocks expire; that does not work for API-dispatched commands; see
+"Tool calls" in the next-release section above.)
 
 ### MCP protocol
 

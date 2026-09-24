@@ -8,13 +8,14 @@ Every environment variable the server reads, with its default, validation and ef
 - **Docker Compose** passes `.env` to the container through `env_file`. `compose.yml` then overrides three values: `MCP_HOST=0.0.0.0`, `MCP_PORT=3000` and `ENVIRONMENT=production`. `compose.dev.yml` sets `ENVIRONMENT=development` and `LOG_LEVEL=DEBUG` instead.
 - **The Docker image** defaults to `ENVIRONMENT=production`, `MCP_HOST=0.0.0.0`, `MCP_PORT=3000` and `LOG_LEVEL=INFO`. This also applies to `docker run`.
 - **Running from source** (`python -m wazuh_mcp_server`): export the variables yourself, for example `set -a; . ./.env; set +a`.
+- In `.env`, quote values that contain spaces or JSON (`MCP_API_KEY_SCOPES="wazuh:read wazuh:write"`, `API_KEYS='[...]'`) so that both Compose and the shell read them intact, and do not put a trailing comment after an empty value (`VAR=  # note` sets `VAR` to the comment text under Compose).
 - Settings are read once, at startup. After changing `.env`, recreate the container with `docker compose up -d`. `docker compose restart` keeps the environment the container was created with.
 
 ### Startup validation
 
-Invalid values stop the server at startup: it logs the error and exits with status 1. The checks cover port ranges, positive integers, `ENVIRONMENT`, `AUTH_MODE`, boolean spelling, toolset names, the clusters file and, in production, `AUTH_SECRET_KEY`. Each table below lists the checks that apply to that variable.
+Invalid values stop the server at startup: it logs the error and exits with a non-zero status. The checks cover port ranges, positive integers, `ENVIRONMENT`, `AUTH_MODE`, boolean spelling, toolset names, `MAX_MEMORY_MB`, `WAZUH_CA_BUNDLE`, the active-response undo command names, the `OAUTH_IDP_*` settings, the clusters file and, in production, `AUTH_SECRET_KEY`. Each table below lists the checks that apply to that variable.
 
-The Wazuh connection settings (`WAZUH_HOST`, `WAZUH_USER`, `WAZUH_PASS`) are **not** checked at startup. If they are missing or wrong, the server still starts, and tool calls fail (see [Troubleshooting](TROUBLESHOOTING.md#tool-calls-fail-with-connection-errors)).
+`WAZUH_HOST`, `WAZUH_USER` and `WAZUH_PASS` must be non-empty: if any is missing, startup fails with `Required Wazuh Manager settings are not set: <names>`. Whether the Manager is reachable and the credentials are valid is not checked at startup; a wrong host or password shows up on the first tool call (see [Troubleshooting](TROUBLESHOOTING.md#tool-calls-fail-with-connection-errors)).
 
 ### Boolean values
 
@@ -27,15 +28,15 @@ There are two kinds of boolean variable:
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `WAZUH_HOST` | *(none)* | Manager hostname or IP. Any `http://`/`https://` prefix and trailing `/` are removed. The Manager API is always called over HTTPS |
-| `WAZUH_USER` | *(none)* | Manager API user |
-| `WAZUH_PASS` | *(none)* | Manager API password |
+| `WAZUH_HOST` | *(none)* | **Required.** Manager hostname or IP. Any `http://`/`https://` prefix and trailing `/` are removed. The Manager API is always called over HTTPS |
+| `WAZUH_USER` | *(none)* | **Required.** Manager API user |
+| `WAZUH_PASS` | *(none)* | **Required.** Manager API password |
 | `WAZUH_PORT` | `55000` | Manager API port (1–65535) |
 | `WAZUH_VERIFY_SSL` | `true` | *Strict.* Verify the Manager's TLS certificate |
-| `WAZUH_ALLOW_SELF_SIGNED` | `false` | *Strict.* `true` disables Manager certificate verification (needed for the stock self-signed certificate unless you reissue it; see [Manager TLS](#manager-tls)) |
-| `WAZUH_CA_BUNDLE` | *(none)* | PEM file of the CA(s) to trust for the Manager and Indexer instead of the system store. Must exist at startup. Ignored, with a warning, when verification is disabled |
-| `REQUEST_TIMEOUT_SECONDS` | `30` | Timeout for Manager and Indexer requests (1–300) |
-| `MAX_CONNECTIONS` | `10` | Maximum concurrent Manager requests, and the Manager connection pool size (1–100) |
+| `WAZUH_ALLOW_SELF_SIGNED` | `false` | *Strict.* `true` disables Manager certificate verification (needed for the stock self-signed certificate unless you reissue it; see [Manager TLS](#manager-tls)). Applies only to the Manager configured here, not to the Indexer or to `clusters.json` entries |
+| `WAZUH_CA_BUNDLE` | *(none)* | PEM file of the CA(s) to trust for the Manager and Indexer instead of the system store. Startup fails if the file does not exist. Not used for a connection whose verification is off; a warning is logged when that is the Manager. Also the default `ca_bundle` for [clusters.json](MULTI_CLUSTER.md#tls) entries |
+| `REQUEST_TIMEOUT_SECONDS` | `30` | Timeout for Manager and Indexer requests (1–300). `clusters.json` entries use their own `request_timeout_seconds` |
+| `MAX_CONNECTIONS` | `10` | Maximum concurrent Manager requests, and the Manager connection pool size (1–100). `clusters.json` entries always use 10 |
 | `MAX_ALERTS_PER_QUERY` | `1000` | Largest `limit` accepted by `get_wazuh_alerts` and `search_security_events` (1–10000); also advertised as the schema maximum. Other tools keep their own caps |
 
 Manager certificate verification is on unless `WAZUH_VERIFY_SSL=false` or `WAZUH_ALLOW_SELF_SIGNED=true`.
@@ -52,7 +53,9 @@ The Manager certificate is verified by default. How to satisfy that depends on t
 
 The container runs Python 3.13, which applies strict X.509 checks: a CA certificate needs a `keyUsage` extension with `keyCertSign`, and server certificates need a subjectAltName. A CA made without `keyUsage` fails with `CA cert does not include key usage extension`.
 
-When verification fails, the first request reports `TLS certificate verification failed for <host>` with these options. The server logs a startup warning (an error in production) whenever Manager verification is disabled.
+When verification fails, the first tool call that reaches the Manager returns `Connection failed: TLS certificate verification failed for <host>.` followed by these options. The server logs a startup warning (an error in production) whenever Manager verification is disabled.
+
+Entries in `clusters.json` have their own `verify_ssl`, `indexer_verify_ssl` and `ca_bundle` fields; see [Multi-Cluster TLS](MULTI_CLUSTER.md#tls).
 
 ## Wazuh Indexer
 
@@ -65,7 +68,7 @@ The Indexer is required for alert search, alert aggregation, vulnerability tools
 | `WAZUH_INDEXER_USER` | *(none)* | Indexer user |
 | `WAZUH_INDEXER_PASS` | *(none)* | Indexer password |
 | `WAZUH_INDEXER_SSL` | `true` | *Strict.* Use HTTPS. When unset, the scheme comes from the host prefix: HTTPS unless the host starts with `http://` |
-| `WAZUH_INDEXER_VERIFY_SSL` | `true` | *Strict.* Verify the Indexer's TLS certificate. Stock Wazuh Indexer certificates are self-signed, so this needs `false` unless the Indexer presents a certificate the server trusts |
+| `WAZUH_INDEXER_VERIFY_SSL` | `true` | *Strict.* Verify the Indexer's TLS certificate. Stock Indexer certificates are signed by the `root-ca.pem` that `wazuh-certs-tool` generates, which is not in the system store: add it to `WAZUH_CA_BUNDLE`, or set this to `false` to skip verification. `WAZUH_ALLOW_SELF_SIGNED` does not affect the Indexer |
 
 ## Server
 
@@ -116,7 +119,7 @@ HASH=$(python -c "import hmac,hashlib,sys; print(hmac.new(sys.argv[1].encode(), 
 ```
 
 ```env
-API_KEYS=[{"id":"alice","name":"Alice","key_hash":"<HASH>","created_at":"2026-09-01T00:00:00Z","scopes":["wazuh:read"]}]
+API_KEYS='[{"id":"alice","name":"Alice","key_hash":"<HASH>","created_at":"2026-09-01T00:00:00Z","scopes":["wazuh:read"]}]'
 ```
 
 Because the hash depends on `AUTH_SECRET_KEY`, changing the secret invalidates every `API_KEYS` entry.
@@ -158,6 +161,8 @@ Set `OAUTH_IDP_ISSUER` to have users authenticate at Entra ID, Google Workspace,
 
 The granted scope is the user's mapped scope intersected with the client's registered scope. With an IdP configured, the API-key sign-in form is disabled. Parked logins live in process memory, so run one instance or route `/oauth/authorize` and `/oauth/callback` to the same one.
 
+The `OAUTH_IDP_*` settings are validated at startup whenever `OAUTH_IDP_ISSUER` is set, even if `AUTH_MODE` is not `oauth` (a warning is then logged and the provider is not used). Startup fails when the issuer is not `https://`, `OAUTH_IDP_CLIENT_ID` is empty, a multi-tenant Entra issuer has no `OAUTH_IDP_ALLOWED_TENANTS`, a Google issuer has neither `OAUTH_IDP_ALLOWED_DOMAINS` nor `OAUTH_IDP_ALLOWED_USERS`, `OAUTH_IDP_GROUP_SCOPE_MAP` is not a JSON object of strings or maps a group to no known scope, or `OAUTH_IDP_DEFAULT_SCOPE` contains an unknown scope. The provider's discovery document is fetched on the first sign-in, not at startup; if it cannot be fetched, the client is redirected back with `error=temporarily_unavailable`.
+
 ## Network, CORS and rate limiting
 
 | Variable | Default | Description |
@@ -176,7 +181,7 @@ The granted scope is the user's mapped scope intersected with the client's regis
 | `REDIS_URL` | *(none)* | Redis URL for sessions shared between instances, for example `redis://redis:6379/0`. Without it, sessions are kept in memory and are lost on restart |
 | `SESSION_TTL_SECONDS` | `1800` | Redis key TTL for a session (positive integer). Read only when `REDIS_URL` is set |
 | `MAX_SESSIONS` | `1000` | In-memory store: most sessions held at once (1–100000). At the limit, expired sessions are reclaimed, then the least recently active are evicted |
-| `MAX_SESSIONS_PER_PRINCIPAL` | `100` | In-memory store: most sessions per API key or OAuth principal (1–100000); the principal's oldest session is evicted first. Not applied to the shared `authless` principal |
+| `MAX_SESSIONS_PER_PRINCIPAL` | `100` | In-memory store: most sessions per principal (1–100000). The principal is the API key, or for OAuth the client plus the signed-in API key or IdP user; the principal's least recently active session is evicted first. Not applied to shared identities (`authless`, and OAuth tokens that carry neither a client nor a subject), which only `MAX_SESSIONS` bounds |
 
 Only legacy (`initialize`-based) MCP clients create sessions; requests using the 2026-07-28 stateless protocol do not. Stored client metadata is truncated (client name, version and title; capability names only).
 
@@ -205,13 +210,15 @@ How tool exposure works:
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `WAZUH_PROTECTED_IPS` | *(none)* | Comma-separated IPs or CIDRs that `wazuh_block_ip`, `wazuh_firewall_drop` and `wazuh_host_deny` refuse to block. Loopback is always protected, and so is `WAZUH_HOST` when it is an IP address. Invalid entries are skipped, with a warning |
-| `WAZUH_REQUIRE_ACTION_CONFIRMATION` | `true` when `ENVIRONMENT=production`, otherwise `false` | *Strict.* Every `wazuh:write` tool must be called with `confirm=true`. Write tools always advertise the optional `confirm` flag. An explicit value wins over the environment default |
+| `WAZUH_REQUIRE_ACTION_CONFIRMATION` | `true` when `ENVIRONMENT=production`, otherwise `false` | *Strict.* Every `wazuh:write` tool must be called with `confirm=true`. Write tools always advertise the optional `confirm` flag. An explicit value wins over the environment default; an empty value counts as unset |
 | `WAZUH_ALLOW_MANAGER_AR` | `false` | *Strict.* Allows host-level actions against agent `000` (the Manager itself): isolate, kill, disable user, quarantine, generic active response, the IP-block tools with that agent, and `wazuh_restart` with `target=manager` |
 | `WAZUH_ALLOW_FLEET_AR` | `false` | *Strict.* Allows `wazuh_block_ip` with `all_agents=true` (a block on every agent at once) |
-| `WAZUH_QUARANTINE_DENY_PREFIXES` | *(none)* | Comma-separated directories `wazuh_quarantine_file` refuses, in addition to the built-in list (system directories such as `/etc`, `/boot`, `/bin`, and the Wazuh agent's own directories) |
-| `WAZUH_QUARANTINE_ALLOW_PREFIXES` | *(none)* | When set, `wazuh_quarantine_file` only accepts absolute paths under these directories (the deny list still applies) |
+| `WAZUH_QUARANTINE_DENY_PREFIXES` | *(none)* | Comma-separated directories `wazuh_quarantine_file` refuses, in addition to the built-in list, which cannot be removed: `/etc`, `/boot`, `/bin`, `/sbin`, `/lib`, `/lib32`, `/lib64`, `/usr`, `/proc`, `/sys`, `/dev`, `/var/ossec`, `/var/lib`, their `/private/...` forms on macOS, `/Library`, `/System`, `/Applications`, `C:\Windows`, `C:\Program Files` and `C:\Program Files (x86)`. Matching is case-insensitive and treats `/` and `\` alike |
+| `WAZUH_QUARANTINE_ALLOW_PREFIXES` | *(none)* | When set, `wazuh_quarantine_file` only accepts paths under these directories (the deny list still applies). Paths must always be absolute |
 | `WAZUH_AR_FIREWALL_UNDO_COMMAND` | *(none)* | Name of an active-response command you have deployed that removes a `firewall-drop` block. `wazuh_firewall_allow` refuses to run without it, because stock Wazuh cannot remove a block through the API. The name must match `[A-Za-z0-9_-]{1,64}`; a leading `!` is added if missing. An invalid name fails startup |
 | `WAZUH_AR_HOSTDENY_UNDO_COMMAND` | *(none)* | Same, for removing a `host-deny` block with `wazuh_host_allow` |
+
+The block tools also refuse `127.0.0.0/8`, `::1` and an IP-address `WAZUH_HOST` without any setting. `wazuh_active_response` refuses the `firewall-drop` and `host-deny` commands and points to `wazuh_firewall_drop` / `wazuh_host_deny`, so every IP block goes through the protected-target check. The active-response switches are read on each call, but an invalid spelling fails startup.
 
 Active-response results report `execution_status: "dispatched"`: Wazuh confirms the command was delivered to the agent, not that the script ran. Check the effect with the matching `wazuh_check_*` tool. Blocks stay in place until removed. A positive `duration` is refused, because Wazuh ignores the timeout for API-triggered active response.
 
@@ -219,7 +226,7 @@ Active-response results report `execution_status: "dispatched"`: Wazuh confirms 
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `WAZUH_CLUSTERS_FILE` | `./config/clusters.json` | Multi-cluster file. If the file does not exist, the server runs single-cluster from the variables above. If it exists but is invalid, startup fails. See the [Multi-Cluster Guide](MULTI_CLUSTER.md). `compose.yml` mounts `./config` read-only at `/app/config` |
+| `WAZUH_CLUSTERS_FILE` | `./config/clusters.json` | Multi-cluster file, relative to the working directory (`/app` in the container). If the file does not exist, the server runs single-cluster from the variables above. If it exists but is invalid, startup fails. See the [Multi-Cluster Guide](MULTI_CLUSTER.md). `compose.yml` mounts `./config` read-only at `/app/config` |
 | `YDC_API_KEY` | *(none)* | You.com API key for `search_external_context`. Without it, the tool stays listed and returns `enabled: false` and a message |
 | `YDC_BASE_URL` | `https://ydc-index.io` | You.com Search API base URL |
 | `YDC_VERIFY_SSL` | `true` | *Strict.* Verify the You.com TLS certificate |
@@ -238,7 +245,7 @@ These are read by Docker Compose when it expands `compose.yml`, from the shell o
 
 The local LLM stack (`compose.local-llm.yml`) has its own variables (`VLLM_*`, `WEBUI_SECRET_KEY`, `HF_TOKEN`, and others); see [Local LLMs](LOCAL_LLM.md).
 
-Variables not listed on this page are not read by the server. In particular, `VERIFY_SSL` and `MCP_TRANSPORT` have no effect.
+Variables not listed on this page are not read by the server. In particular, `VERIFY_SSL` and `MCP_TRANSPORT` from older releases have no effect; use `WAZUH_VERIFY_SSL`.
 
 ## RBAC
 
@@ -256,7 +263,7 @@ Variables not listed on this page are not read by the server. In particular, `VE
 | Mode | `AUTH_MODE` | How clients authenticate |
 |------|-------------|--------------------------|
 | Bearer | `bearer` | Exchange an API key for a JWT at `POST /auth/token`, then send `Authorization: Bearer <jwt>` |
-| OAuth 2.0 | `oauth` | Authorization code with PKCE. Users sign in with an API key on `/oauth/authorize` |
+| OAuth 2.0 | `oauth` | Authorization code with PKCE. Users sign in on `/oauth/authorize` with an API key, or at an OpenID Connect provider when `OAUTH_IDP_ISSUER` is set |
 | Authless | `none` | No authentication. Read-only unless `AUTHLESS_ALLOW_WRITE=true`. Use only on a trusted network |
 
 ```bash
@@ -268,7 +275,7 @@ curl -s -X POST http://localhost:3000/auth/token \
 
 The JWT carries the API key's own scopes.
 
-OAuth endpoints: `/.well-known/oauth-authorization-server` (RFC 8414), `/.well-known/oauth-protected-resource` (RFC 9728), `GET`/`POST /oauth/authorize`, `POST /oauth/token`, `POST /oauth/revoke` and `POST /oauth/register`. The register endpoint returns `400` unless `OAUTH_ENABLE_DCR=true`. The two `/.well-known` endpoints return `404` when OAuth is not enabled.
+OAuth endpoints: `/.well-known/oauth-authorization-server` (RFC 8414), `/.well-known/oauth-protected-resource` (RFC 9728), `GET`/`POST /oauth/authorize`, `GET /oauth/callback` (identity-provider return; `404` without `OAUTH_IDP_ISSUER`), `POST /oauth/token`, `POST /oauth/revoke` and `POST /oauth/register`. The register endpoint returns `400` unless `OAUTH_ENABLE_DCR=true`. The two `/.well-known` endpoints return `404` when OAuth is not enabled.
 
 ## Production requirements
 
@@ -278,6 +285,8 @@ With `ENVIRONMENT=production`, which is the Docker image and `compose.yml` defau
 - A generated API key is read-only and never shown, so set `MCP_API_KEY` or `API_KEYS`.
 - `ALLOWED_ORIGINS=*` is not honoured.
 - A warning is logged if `AUTH_MODE=oauth` and `OAUTH_ISSUER_URL` is unset.
+- `WAZUH_REQUIRE_ACTION_CONFIRMATION` defaults to `true`, so write tools need `confirm=true`.
+- Disabled Manager certificate verification is logged as an error rather than a warning.
 
 Example:
 
