@@ -175,8 +175,12 @@ The granted scope is the user's mapped scope intersected with the client's regis
 |----------|---------|-------------|
 | `REDIS_URL` | *(none)* | Redis URL for sessions shared between instances, for example `redis://redis:6379/0`. Without it, sessions are kept in memory and are lost on restart |
 | `SESSION_TTL_SECONDS` | `1800` | Redis key TTL for a session (positive integer). Read only when `REDIS_URL` is set |
+| `MAX_SESSIONS` | `1000` | In-memory store: most sessions held at once (1–100000). At the limit, expired sessions are reclaimed, then the least recently active are evicted |
+| `MAX_SESSIONS_PER_PRINCIPAL` | `100` | In-memory store: most sessions per API key or OAuth principal (1–100000); the principal's oldest session is evicted first. Not applied to the shared `authless` principal |
 
-Only legacy (`initialize`-based) MCP clients create sessions; requests using the 2026-07-28 stateless protocol do not. Sessions also expire after 30 minutes without activity whatever the storage, so a `SESSION_TTL_SECONDS` above `1800` does not make them last longer.
+Only legacy (`initialize`-based) MCP clients create sessions; requests using the 2026-07-28 stateless protocol do not. Stored client metadata is truncated (client name, version and title; capability names only).
+
+The session caps apply to the in-memory store; Redis expires keys itself and holds them outside the process. Eviction trades a memory outage for a re-initialize: a client holding several principals' credentials (or any caller in `AUTH_MODE=none`) can push other sessions out, and those clients then initialize again. Sessions also expire after 30 minutes without activity whatever the storage, so a `SESSION_TTL_SECONDS` above `1800` does not make them last longer.
 
 With `REDIS_URL` set, the server starts even if Redis is unreachable. While Redis is down, session requests get `503 {"error": "Session store unavailable; retry shortly"}` with `Retry-After: 5`, and `/ready` returns `503`.
 

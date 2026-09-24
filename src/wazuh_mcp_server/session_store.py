@@ -58,6 +58,10 @@ class SessionStore(ABC):
         """Remove expired sessions and return count."""
         pass
 
+    async def count(self) -> int:
+        """Number of stored sessions. Backends override with something cheaper than get_all()."""
+        return len(await self.get_all())
+
 
 class InMemorySessionStore(SessionStore):
     """
@@ -101,6 +105,10 @@ class InMemorySessionStore(SessionStore):
     async def get_all(self) -> Dict[str, Dict[str, Any]]:
         """Get all sessions."""
         return dict(self._sessions)
+
+    async def count(self) -> int:
+        """Number of stored sessions, including expired ones not reclaimed yet."""
+        return len(self._sessions)
 
     async def clear(self) -> bool:
         """Clear all sessions."""
@@ -297,6 +305,15 @@ class RedisSessionStore(SessionStore):
         """
         # Redis automatically removes expired keys
         return 0
+
+    async def count(self) -> int:
+        """Key count via SCAN (no payload fetch), so the bounds check stays cheap."""
+        await self._ensure_initialized()
+        try:
+            return len(await self._scan_keys(self._session_key("*")))
+        except Exception as e:
+            logger.error(f"Failed to count sessions in Redis: {e}")
+            return 0
 
     async def close(self):
         """Close Redis connection."""
