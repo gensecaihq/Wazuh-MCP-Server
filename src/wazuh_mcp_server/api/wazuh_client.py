@@ -2476,6 +2476,10 @@ class WazuhClient:
             return False
         return any(addr in net for net in self._protected_networks)
 
+    # Active-response commands that block a source IP; only the dedicated tools (which run
+    # the protected-target guard on a validated IP) may dispatch them.
+    IP_BLOCKING_AR_COMMANDS = frozenset({"!firewall-drop", "!host-deny"})
+
     def _refuse_protected_target(self, ip_address: str) -> None:
         if self._is_protected_target(ip_address):
             raise ValueError(
@@ -2574,7 +2578,15 @@ class WazuhClient:
                 f"Unknown active response command: {command}. "
                 f"Allowed commands: {', '.join(sorted(self.ALLOWED_AR_COMMANDS))}"
             )
+        if command in self.IP_BLOCKING_AR_COMMANDS:
+            # Blocking goes through the dedicated tools, which validate a single canonical IP
+            # and apply the protected-target guard. Checking free-form parameters here could
+            # be sidestepped (CIDR ranges, 127.1, ip:port, integer IPs, key=value strings).
+            dedicated = "wazuh_firewall_drop" if command == "!firewall-drop" else "wazuh_host_deny"
+            raise ValueError(f"Use {dedicated} to run {command}; the generic tool does not dispatch IP blocks.")
         args = []
+        if parameters is not None and not isinstance(parameters, dict):
+            raise ValueError("parameters must be an object of key/value pairs")
         if parameters:
             args = [self._sanitize_ar_argument(f"{k}={v}", f"parameter:{k}") for k, v in parameters.items()]
         data = {"command": command, "agent_list": [agent_id], "arguments": args}
@@ -2595,7 +2607,7 @@ class WazuhClient:
         return await self.execute_active_response(data)
 
     async def host_deny(self, agent_id: str, src_ip: str) -> Dict[str, Any]:
-        """Add hosts.deny entry via active response."""
+        """Add hosts.deny entry via active response (same guard as block_ip)."""
         src_ip = self._validate_ip(src_ip, "src_ip")
         self._refuse_protected_target(src_ip)
         src_ip = self._sanitize_ar_argument(src_ip, "src_ip")
