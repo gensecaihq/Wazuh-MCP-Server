@@ -82,7 +82,7 @@ curl -s -X POST http://localhost:3000/auth/token -H 'Content-Type: application/j
   -d "{\"api_key\": \"$(grep ^MCP_API_KEY= .env | cut -d= -f2)\"}"
 ```
 
-The key is read-only. To allow active-response tools, add `MCP_API_KEY_SCOPES=wazuh:read wazuh:write` to `.env`, restart, and mint a new token.
+The key is read-only. To allow active-response tools, add `MCP_API_KEY_SCOPES="wazuh:read wazuh:write"` to `.env`, recreate the container with `docker compose up -d` (`restart` keeps the old environment), and mint a new token.
 
 Compose publishes the port on `127.0.0.1` only. The server speaks plain HTTP; put a TLS-terminating reverse proxy in front before exposing it (set `MCP_BIND` to change the host bind address).
 
@@ -100,11 +100,11 @@ docker pull ghcr.io/gensecaihq/wazuh-mcp-server:4.3.0    # latest tagged release
 `latest` is built from `main` and includes the changes listed under *Unreleased* in the [changelog](CHANGELOG.md); `4.3.0` does not. Release tags are published without a `v` prefix (`4.3.0`, `4.3`); releases after 4.3.0 also get a `v`-prefixed alias.
 
 ```bash
-docker run -d --name wazuh-mcp-server --env-file .env -e MCP_HOST=0.0.0.0 \
+docker run -d --name wazuh-mcp-server --env-file .env -e MCP_HOST=0.0.0.0 -e ENVIRONMENT=production \
   -p 127.0.0.1:3000:3000 ghcr.io/gensecaihq/wazuh-mcp-server:latest
 ```
 
-`MCP_HOST=0.0.0.0` is required inside a container because `.env.example` sets `MCP_HOST=127.0.0.1` for bare-metal installs.
+`MCP_HOST=0.0.0.0` is required inside a container because `.env.example` sets `MCP_HOST=127.0.0.1` for bare-metal installs. `-e` wins over `--env-file`, so `ENVIRONMENT=production` holds even if your `.env` sets another value.
 
 ---
 
@@ -216,7 +216,7 @@ All settings are environment variables (usually via `.env`). The ones most deplo
 | `OAUTH_ISSUER_URL` | derived from the request | Public HTTPS URL of the server, for `AUTH_MODE=oauth` |
 | `OAUTH_IDP_ISSUER` | — | OpenID Connect provider for OAuth sign-in (with `OAUTH_IDP_CLIENT_ID`); API-key sign-in when unset |
 | `WAZUH_REQUIRE_ACTION_CONFIRMATION` | `true` in production, else `false` | Write tools require `confirm=true` |
-| `MCP_HOST`, `MCP_PORT` | `0.0.0.0`, `3000` | Bind address and port |
+| `MCP_HOST`, `MCP_PORT` | `127.0.0.1` (`0.0.0.0` in the Docker image), `3000` | Bind address and port |
 | `ALLOWED_ORIGINS` | `https://claude.ai,http://localhost:3000` | CORS allow-list (exact match) |
 | `WAZUH_TOOLSETS`, `WAZUH_DISABLED_TOOLS` | all enabled | Limit the exposed tools |
 | `REDIS_URL` | — | Shared session store for multi-instance deployments |
@@ -231,6 +231,7 @@ Complete reference, including OAuth TTLs, rate limits, sessions and active-respo
 ```bash
 python -m venv .venv && source .venv/bin/activate
 pip install -e ".[redis,gcf]"      # extras are optional
+set -a; . ./.env; set +a           # the server reads the environment, not .env
 python -m wazuh_mcp_server
 ```
 

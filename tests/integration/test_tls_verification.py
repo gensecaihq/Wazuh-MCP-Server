@@ -7,9 +7,13 @@ documented WAZUH_VERIFY_SSL=true was set, so the API credentials (HTTP Basic on
 every re-authentication) travelled over an unauthenticated channel.
 """
 
+import certifi
 import pytest
 
 from wazuh_mcp_server.config import ConfigurationError, ServerConfig
+
+# Startup loads the bundle, so it has to be real PEM
+REAL_PEM = open(certifi.where(), encoding="utf-8").read()
 
 
 @pytest.fixture
@@ -61,12 +65,20 @@ class TestCABundle:
     def test_ca_bundle_is_used_for_manager_and_indexer(self, base_env, tmp_path):
         """CA bundle is used for manager and indexer."""
         ca = tmp_path / "wazuh-ca.pem"
-        ca.write_text("-----BEGIN CERTIFICATE-----\nMIIB\n-----END CERTIFICATE-----\n")
+        ca.write_text(REAL_PEM)
         base_env.setenv("WAZUH_CA_BUNDLE", str(ca))
         cfg = ServerConfig.from_env()
         assert cfg.wazuh_tls_verify == str(ca)
         assert cfg.wazuh_indexer_tls_verify == str(ca)
         assert cfg.wazuh_tls_verification_disabled is False
+
+    def test_unparseable_ca_bundle_fails_fast(self, base_env, tmp_path):
+        """A file that isn't PEM used to pass startup and then fail every call."""
+        ca = tmp_path / "ca.pem"
+        ca.write_text("not a certificate")
+        base_env.setenv("WAZUH_CA_BUNDLE", str(ca))
+        with pytest.raises(ConfigurationError, match="PEM"):
+            ServerConfig.from_env()
 
     def test_missing_ca_bundle_fails_fast(self, base_env, tmp_path):
         """Missing CA bundle fails fast."""
@@ -78,7 +90,7 @@ class TestCABundle:
         """Allow self signed wins over CA bundle."""
         # Explicitly opting out of verification must not be silently upgraded.
         ca = tmp_path / "ca.pem"
-        ca.write_text("x")
+        ca.write_text(REAL_PEM)
         base_env.setenv("WAZUH_CA_BUNDLE", str(ca))
         base_env.setenv("WAZUH_ALLOW_SELF_SIGNED", "true")
         assert ServerConfig.from_env().wazuh_tls_verify is False
@@ -93,7 +105,7 @@ class TestClientsAcceptCAPath:
         from wazuh_mcp_server.config import WazuhConfig
 
         ca = tmp_path / "ca.pem"
-        ca.write_text("x")
+        ca.write_text(REAL_PEM)
         client = WazuhClient(WazuhConfig(wazuh_host="localhost", wazuh_user="u", wazuh_pass="p", verify_ssl=str(ca)))
         assert client.config.verify_ssl == str(ca)
 
@@ -102,7 +114,7 @@ class TestClientsAcceptCAPath:
         from wazuh_mcp_server.api.wazuh_indexer import WazuhIndexerClient
 
         ca = tmp_path / "ca.pem"
-        ca.write_text("x")
+        ca.write_text(REAL_PEM)
         client = WazuhIndexerClient(host="localhost", verify_ssl=str(ca))
         assert client.verify_ssl == str(ca)
 
@@ -121,7 +133,7 @@ class TestMultiClusterCABundle:
         from wazuh_mcp_server.clusters import _cluster_config
 
         ca = tmp_path / "ca.pem"
-        ca.write_text("x")
+        ca.write_text(REAL_PEM)
         monkeypatch.setenv("WAZUH_CA_BUNDLE", str(ca))
         cfg = _cluster_config(self._entry())
         assert cfg.verify_ssl == str(ca) and cfg.wazuh_indexer_verify_ssl == str(ca)
@@ -132,7 +144,7 @@ class TestMultiClusterCABundle:
 
         monkeypatch.delenv("WAZUH_CA_BUNDLE", raising=False)
         ca = tmp_path / "eu-ca.pem"
-        ca.write_text("x")
+        ca.write_text(REAL_PEM)
         cfg = _cluster_config(self._entry(ca_bundle=str(ca)))
         assert cfg.verify_ssl == str(ca)
         cfg = _cluster_config(self._entry(ca_bundle=str(ca), verify_ssl=False))
@@ -155,12 +167,12 @@ class TestIgnoredBundleWarning:
         import logging
 
         ca = tmp_path / "ca.pem"
-        ca.write_text("x")
+        ca.write_text(REAL_PEM)
         base_env.setenv("WAZUH_CA_BUNDLE", str(ca))
         base_env.setenv("WAZUH_ALLOW_SELF_SIGNED", "true")
         with caplog.at_level(logging.WARNING, logger="wazuh_mcp_server.config"):
             assert ServerConfig.from_env().wazuh_tls_verify is False
-        assert any("bundle is ignored" in r.getMessage() for r in caplog.records)
+        assert any("only applies to the Indexer" in r.getMessage() for r in caplog.records)
 
 
 class TestCaBundleReachesHttpx:

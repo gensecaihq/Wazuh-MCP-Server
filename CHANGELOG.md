@@ -20,6 +20,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `RATE_LIMIT_REQUESTS`/`RATE_LIMIT_WINDOW` now apply to `/mcp` and `/`, which used hard-coded constants.
 - Chunked request bodies are size-capped while streaming (they were buffered in full first); failed authentication on the MCP endpoints is rate limited; `DELETE /mcp` checks Origin; `resources/read` no longer returns raw backend exception text; the Trivy filesystem scan in CI actually gates.
 
+- **OAuth follow-ups (second audit)**: an expired API key now ends the OAuth tokens and refresh grants issued from it, and narrowing a key's scopes narrows tokens already issued (bearer and OAuth). A user-editable `preferred_username` can no longer satisfy `OAUTH_IDP_ALLOWED_USERS` or pose as a vouched e-mail. `OAUTH_ENABLE_DCR` together with `OAUTH_IDP_ISSUER` is refused at startup, because IdP sign-in has no consent step and a self-registered client could collect other users' codes. IdP refresh chains end one `OAUTH_REFRESH_TOKEN_TTL` after sign-in instead of rotating indefinitely. The sign-in page's CSP allowed only `'self'` in `form-action`, which blocked the redirect back to Claude in Chrome. A full dynamic-registration table now evicts idle clients instead of refusing every registration.
+- **Active response (second audit)**: `wazuh_active_response` also refuses `quarantine`, `kill-process` and `disable-account`, which skipped the dedicated tools' path, PID and username checks. `wazuh_quarantine_file` refuses Windows spellings that reached system directories (trailing dots or spaces, `::$INDEX_ALLOCATION` and other streams, 8.3 short names). An IPv6 Manager address is protected exactly (it was unprotected when bracketed and a whole /32 when not). Audit lines record the cluster an action ran on.
+
 ### Added
 - **Local LLM stack** (`compose.local-llm.yml`, [Local LLM Guide](docs/LOCAL_LLM.md)): vLLM v0.30.0 (Qwen3.6-35B-A3B FP8 by default, tool calling + reasoning parsers, text-only, not published on a host port) and Open WebUI next to the server. The guide covers Ollama for single analysts and LiteLLM as an optional gateway, with its identity and approval caveats. Replaces the mcphost quick start (mcphost is unmaintained).
 - **Toolsets**: `WAZUH_TOOLSETS` and `WAZUH_DISABLED_TOOLS` limit which tools are exposed. Hidden tools are removed from `tools/list` and refused by `tools/call`; unknown names fail at startup. The full catalogue is ~6.6k tokens; on qwen3.5:9b (Ollama, Apple M5) trimming to 38 tools cut median response time from 15.8s to 10.9s with no change in tool-selection accuracy.
@@ -37,6 +40,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Resilience**: `/ready` could starve tool calls (unauthenticated, not rate limited, one Manager call each) and ignored memory pressure; a Redis outage looked like "session not found"; an open SSE stream blocked SIGTERM forever; legacy requests stored a session per call.
 - **Config**: `ENVIRONMENT=prod`, `AUTH_MODE` typos, `RATE_LIMIT_REQUESTS=0`, bad `SESSION_TTL_SECONDS`, `YDC_VERIFY_SSL=1` and malformed `clusters.json` values were silently misread; they now fail at startup.
 - **MCP conformance**: `Mcp-Method`/`Mcp-Name` blocked by CORS preflight; business refusals (scope, confirmation, disabled tool) now reach the model as `isError` results; `resources/templates/list` entries are readable; resource-not-found is `-32002`; JSON-RPC envelope and batch validation; SSE event ids unique per session.
+- **Second audit**:
+  - Credential redaction truncated tool results: `Authorization: .+` removed everything after the first match on one-line JSON, including later alerts and totals, and other patterns ate closing quotes.
+  - Server:
+    - `WEB_CONCURRENCY` (set by Heroku and others) stopped the server from starting.
+    - `SESSION_TTL_SECONDS` above 1800 had no effect.
+    - `/ready` fetched every Redis session.
+    - `/` blocked tool arguments containing attack strings and diverged from `/mcp` (it is now an alias of it).
+    - An unhashable notification `method` returned 500, `"id": true` was answered as `1`, and `/mcp` dropped the request id on validation errors.
+  - Tools:
+    - An explicit `null` agent, rule or data field failed `get_top_security_threats`, `analyze_alert_patterns` and `get_iso27001_alerts`.
+    - `wazuh_check_blocked_ip` did not canonicalise the IP.
+    - `search_security_events` accepted levels such as `-1`.
+    - `limit` defaults could exceed a lowered `MAX_ALERTS_PER_QUERY`.
+  - Startup:
+    - A host with a port or path (`WAZUH_HOST=https://host:55000/`), or a CA bundle that isn't PEM, now fails at startup instead of on every call.
+    - Quoted values from `docker run --env-file` (`MCP_API_KEY_SCOPES="wazuh:read wazuh:write"`) are unquoted.
+  - Deploy:
+    - `.env.example` no longer sets `ENVIRONMENT=development`, which switched `docker run --env-file` into development mode.
+    - Source runs bind `127.0.0.1` by default.
+    - `compose.dev.yml` publishes on loopback.
+    - `compose.yml` allows 30 s for shutdown.
+    - Images are only published from commits whose tests pass.
+    - `python -m wazuh_mcp_server --help` prints usage.
 - Many smaller fixes: `process_id: true` meant PID 1, Windows paths couldn't be quarantined, `rule.groups` counts depended on order, rules summary stopped at 500, manager-log limits above 500 errored, HTTP-date `Retry-After` crashed, unknown tool arguments were silently ignored, oversized results are truncated with a note.
 
 ### Changed

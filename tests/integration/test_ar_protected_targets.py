@@ -88,15 +88,15 @@ class TestLegitimateTargetsStillDispatch:
     async def test_generic_non_blocking_command_ignores_ip_guard(self, monkeypatch):
         """Generic non blocking command ignores IP guard."""
         client = _client(monkeypatch)
-        await client.run_active_response("001", "!kill-process", {"pid": "4242"})
-        assert client.sent[-1]["command"] == "!kill-process"
+        await client.run_active_response("001", "!enable-account", {"user": "bob"})
+        assert client.sent[-1]["command"] == "!enable-account"
 
     @pytest.mark.asyncio
     async def test_generic_parameters_must_be_an_object(self, monkeypatch):
         """Generic parameters must be an object."""
         client = _client(monkeypatch)
         with pytest.raises(ValueError, match="parameters must be an object"):
-            await client.run_active_response("001", "!kill-process", ["pid=1"])
+            await client.run_active_response("001", "!enable-account", ["user=bob"])
 
 
 class TestGuardCannotBeSidestepped:

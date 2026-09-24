@@ -444,8 +444,15 @@ class TestAdmissionPolicy:
     def test_subject_fallback_and_normalisation(self, idp):
         """Subject fallback and normalisation."""
         p = self._provider(idp)
-        assert p.authorize({"sub": "raw-sub", "preferred_username": "Bob@Corp.Example"}).subject == "bob@corp.example"
+        assert p.authorize({"sub": "raw-sub", "preferred_username": "bob"}).subject == "bob"
+        # An e-mail-shaped fallback username is skipped: it would pass for a vouched e-mail identity
+        assert p.authorize({"sub": "raw-sub", "preferred_username": "Bob@Corp.Example"}).subject == "raw-sub"
         assert p.authorize({"sub": "raw-sub"}).subject == "raw-sub"
+        # When the operator picks the claim, e-mail-shaped values are used and lower-cased
+        p_upn = self._provider(idp, OAUTH_IDP_SUBJECT_CLAIM="preferred_username")
+        assert (
+            p_upn.authorize({"sub": "raw-sub", "preferred_username": "Bob@Corp.Example"}).subject == "bob@corp.example"
+        )
         with pytest.raises(IdentityDenied):
             p.authorize({"sub": ""})
         with pytest.raises(IdentityDenied):

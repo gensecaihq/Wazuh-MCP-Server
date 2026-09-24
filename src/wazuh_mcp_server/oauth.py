@@ -8,6 +8,7 @@ import hashlib
 import html
 import logging
 import os
+import re
 import secrets
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
@@ -237,7 +238,7 @@ class OAuthManager:
         }
         # RFC 8414: omit registration_endpoint entirely when DCR is disabled, rather than
         # advertising it as null (a null endpoint is not a valid metadata value).
-        if self.config.OAUTH_ENABLE_DCR:
+        if self.config.OAUTH_ENABLE_DCR and not self.requires_idp:
             metadata["registration_endpoint"] = f"{issuer}/oauth/register"
         return metadata
 
@@ -260,7 +261,8 @@ class OAuthManager:
 
     def register_client(self, request_data: Dict[str, Any]) -> OAuthClient:
         """Dynamic Client Registration (RFC 7591)."""
-        if not self.config.OAUTH_ENABLE_DCR:
+        if not self.config.OAUTH_ENABLE_DCR or self.requires_idp:
+            # Startup refuses DCR with an IdP; this keeps a hand-built config from reopening it.
             raise ValueError("Dynamic client registration is disabled")
 
         client_name = request_data.get("client_name", "Unknown Client")
@@ -297,13 +299,32 @@ class OAuthManager:
             token_endpoint_auth_method=auth_method,
         )
 
-        # Bound number of registered clients
+        # Bound number of registered clients. Registration is unauthenticated, so a full table
+        # must not lock out new clients forever: make room by dropping dynamically registered
+        # clients that hold no live code or token, oldest first.
+        if len(self.clients) > 1000:
+            self._evict_idle_clients()
         if len(self.clients) > 1000:
             raise ValueError("Maximum number of registered clients reached")
         self.clients[client_id] = client
         logger.info(f"Registered new OAuth client: {client_name} ({client_id})")
 
         return client
+
+    def _evict_idle_clients(self) -> None:
+        """Drop dynamically registered clients with no live authorization code or token."""
+        in_use = {
+            obj.client_id
+            for store in (self.authorization_codes, self.access_tokens, self.refresh_tokens)
+            for obj in store.values()
+            if not obj.is_expired()
+        }
+        idle = sorted(
+            (c for cid, c in self.clients.items() if cid.startswith("client_") and cid not in in_use),
+            key=lambda c: c.created_at,
+        )
+        for client in idle[: max(len(self.clients) - 900, 0)]:
+            del self.clients[client.client_id]
 
     def validate_client(self, client_id: str, client_secret: Optional[str] = None) -> Optional[OAuthClient]:
         """Resolve a client, rejecting a *wrong* secret if one is presented.
@@ -556,6 +577,21 @@ class OAuthManager:
         if consumed_payload is not None and consumed_payload.get("jti"):
             self.revoked_jtis[consumed_payload["jti"]] = token_obj.expires_at
 
+        scope = token_obj.scope
+        if token_obj.subject_kind == "api_key":
+            # A refresh must not outlive the API key the user signed in with: a removed,
+            # deactivated or expired key ends the grant, and narrowed key scopes narrow it.
+            from wazuh_mcp_server.auth import current_key_scopes, usable_api_key
+
+            key_obj = usable_api_key(token_obj.subject)
+            if key_obj is None:
+                if token_obj.family:
+                    self._revoke_family(token_obj.family)
+                raise ValueError("invalid_grant")
+            scope = " ".join(current_key_scopes(scope.split(), key_obj))
+            if not scope:
+                raise ValueError("invalid_grant")
+
         # Bound access_tokens to prevent unbounded memory growth
         if len(self.access_tokens) > 5000:
             expired = [k for k, v in self.access_tokens.items() if v.is_expired()]
@@ -567,16 +603,23 @@ class OAuthManager:
                 for k in oldest_keys[: len(oldest_keys) - 2500]:
                     del self.access_tokens[k]
 
+        refresh_expires_at = datetime.now(timezone.utc) + timedelta(seconds=self.config.OAUTH_REFRESH_TOKEN_TTL)
+        if token_obj.subject_kind == "idp_user":
+            # Nothing on this side learns that the IdP disabled the user, so rotation must not
+            # extend the grant: it ends one refresh TTL after the IdP sign-in, then the user
+            # goes back through the provider.
+            refresh_expires_at = min(refresh_expires_at, token_obj.expires_at)
+
         # Generate new access token AND a new refresh token (rotation), same grant family.
         subject, family, kind = token_obj.subject, token_obj.family, token_obj.subject_kind
-        access_token = self._create_jwt_token(client_id, token_obj.scope, "access", subject, family, kind)
-        new_refresh_token = self._create_jwt_token(client_id, token_obj.scope, "refresh", subject, family, kind)
+        access_token = self._create_jwt_token(client_id, scope, "access", subject, family, kind)
+        new_refresh_token = self._create_jwt_token(client_id, scope, "refresh", subject, family, kind)
 
         self.access_tokens[access_token] = OAuthToken(
             token=access_token,
             token_type="access",
             client_id=client_id,
-            scope=token_obj.scope,
+            scope=scope,
             created_at=datetime.now(timezone.utc),
             expires_at=datetime.now(timezone.utc) + timedelta(seconds=self.config.OAUTH_ACCESS_TOKEN_TTL),
             subject=subject,
@@ -587,9 +630,9 @@ class OAuthManager:
             token=new_refresh_token,
             token_type="refresh",
             client_id=client_id,
-            scope=token_obj.scope,
+            scope=scope,
             created_at=datetime.now(timezone.utc),
-            expires_at=datetime.now(timezone.utc) + timedelta(seconds=self.config.OAUTH_REFRESH_TOKEN_TTL),
+            expires_at=refresh_expires_at,
             subject=subject,
             subject_kind=kind,
             family=family,
@@ -600,7 +643,7 @@ class OAuthManager:
             "token_type": "Bearer",
             "expires_in": self.config.OAUTH_ACCESS_TOKEN_TTL,
             "refresh_token": new_refresh_token,
-            "scope": token_obj.scope,
+            "scope": scope,
         }
 
     def _safe_decode(self, token: str) -> Optional[Dict[str, Any]]:
@@ -782,14 +825,18 @@ button{{margin-top:1rem;padding:.55rem 1.1rem;font:inherit}}.err{{color:#b00020}
 <label for="api_key">Your Wazuh MCP API key</label>
 <input id="api_key" name="api_key" type="password" autocomplete="current-password" required placeholder="wazuh_…">
 <button type="submit">Authorize</button></form></body></html>"""
+        # Chrome applies form-action to the redirect that follows the POST, so the client's
+        # (already validated) redirect origin must be allowed or the 303 back is blocked.
+        redirect = urlparse(redirect_uri)
+        redirect_origin = f"{redirect.scheme}://" + re.sub(r"[^A-Za-z0-9.:\[\]-]", "", redirect.netloc)
         return HTMLResponse(
             body,
             status_code=status,
             headers={
                 "Cache-Control": "no-store",
                 "X-Frame-Options": "DENY",
-                "Content-Security-Policy": "default-src 'none'; style-src 'unsafe-inline'; form-action 'self'; "
-                "frame-ancestors 'none'",
+                "Content-Security-Policy": "default-src 'none'; style-src 'unsafe-inline'; "
+                f"form-action 'self' {redirect_origin}; frame-ancestors 'none'",
                 "Referrer-Policy": "no-referrer",
             },
         )

@@ -40,12 +40,14 @@ import json
 import logging
 import os
 import re
+import ssl
 from typing import Any, Dict, List, Optional
 
 from wazuh_mcp_server.config import (
     ConfigurationError,
     WazuhConfig,
     normalize_host,
+    tls_verify,
     validate_port,
     validate_positive_int,
 )
@@ -141,11 +143,16 @@ def _cluster_config(entry: Dict[str, Any]) -> WazuhConfig:
     ca_bundle = str(resolved.get("ca_bundle") or os.getenv("WAZUH_CA_BUNDLE", "")).strip()
     if ca_bundle and not os.path.isfile(ca_bundle):
         raise ValueError(f"cluster '{cid}': ca_bundle file does not exist: {ca_bundle}")
+    if ca_bundle:
+        try:
+            tls_verify(ca_bundle)
+        except (ssl.SSLError, OSError) as exc:
+            raise ValueError(f"cluster '{cid}': ca_bundle could not be loaded as PEM certificates: {exc}") from exc
     verify_manager = field("verify_ssl", lambda: _as_bool(resolved.get("verify_ssl"), True))
     verify_indexer = field("indexer_verify_ssl", lambda: _as_bool(resolved.get("indexer_verify_ssl"), True))
 
     return WazuhConfig(
-        wazuh_host=normalize_host(str(resolved["wazuh_host"])),
+        wazuh_host=field("wazuh_host", lambda: normalize_host(str(resolved["wazuh_host"]))),
         wazuh_user=resolved["wazuh_user"],
         wazuh_pass=resolved["wazuh_pass"],
         wazuh_port=field("wazuh_port", lambda: validate_port(str(resolved.get("wazuh_port", 55000)), "wazuh_port")),

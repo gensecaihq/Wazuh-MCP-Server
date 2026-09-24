@@ -124,7 +124,7 @@ AUTH_MODE=oauth
 OAUTH_ISSUER_URL=https://mcp.example.com
 OAUTH_IDP_ISSUER=https://login.microsoftonline.com/<tenant-id>/v2.0
 OAUTH_IDP_CLIENT_ID=<application id>
-OAUTH_IDP_GROUP_SCOPE_MAP={"soc-admins": "wazuh:read wazuh:write", "soc-analysts": "wazuh:read"}
+OAUTH_IDP_GROUP_SCOPE_MAP='{"soc-admins": "wazuh:read wazuh:write", "soc-analysts": "wazuh:read"}'
 ```
 
 The connector setup in Claude is unchanged (client ID `claude-desktop`). When a user connects, the browser goes to the provider; the API-key sign-in page is disabled. After sign-in the server verifies the ID token (RS256 signature against the provider's JWKS, issuer, audience, expiry and nonce), applies the allow-lists (`OAUTH_IDP_ALLOWED_TENANTS`, `OAUTH_IDP_ALLOWED_DOMAINS`, `OAUTH_IDP_ALLOWED_USERS`) and grants the scope mapped from the user's groups by `OAUTH_IDP_GROUP_SCOPE_MAP`, or `OAUTH_IDP_DEFAULT_SCOPE` (default `wazuh:read`) when no group matches. Tokens carry the user's identity, so the audit log records `oauth:claude-desktop:<user>`.
@@ -140,6 +140,7 @@ The server refuses to start with a Google issuer and no `OAUTH_IDP_ALLOWED_DOMAI
 | `OAUTH_AUTHORIZATION_CODE_TTL` | 600 s |
 
 - Refresh tokens rotate on every use. Presenting an already-used refresh token revokes that grant only; other users of the shared `claude-desktop` client are unaffected.
+- API-key sign-ins last as long as the key: removing, deactivating or expiring it ends the grant at the next request or refresh, and narrowing its scopes narrows tokens already issued. Identity-provider sign-ins end `OAUTH_REFRESH_TOKEN_TTL` after the user signed in at the provider (rotation does not extend them), so a user disabled at the provider loses access within that time.
 - `POST /oauth/revoke` (RFC 7009) revokes a token.
 - Access tokens are signed JWTs and remain valid across restarts and replicas that share `AUTH_SECRET_KEY`. Authorization codes, pending identity-provider logins, refresh tokens and the revocation list are held in process memory: after a restart, users sign in again once their access token expires, and with several replicas the OAuth endpoints need sticky routing.
 

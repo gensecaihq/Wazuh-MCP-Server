@@ -847,7 +847,7 @@ class WazuhClient:
         alerts, total_alerts, truncated = self._alerts_and_total(result)
         rule_counts: Dict[str, Dict[str, Any]] = {}
         for alert in alerts:
-            rule = alert.get("rule", {})
+            rule = alert.get("rule") or {}
             rule_id = rule.get("id", "unknown")
             if rule_id not in rule_counts:
                 rule_counts[rule_id] = {
@@ -1054,7 +1054,7 @@ class WazuhClient:
         alerts, occurrences, truncated = self._alerts_and_total(result)
         max_level = 0
         for alert in alerts:
-            level = alert.get("rule", {}).get("level", 0)
+            level = (alert.get("rule") or {}).get("level", 0)
             if isinstance(level, int) and level > max_level:
                 max_level = level
         risk = "high" if max_level >= 10 else "medium" if max_level >= 5 else "low"
@@ -1257,7 +1257,7 @@ class WazuhClient:
 
         rule_data: Dict[str, Dict[str, Any]] = {}
         for alert in alerts:
-            rule = alert.get("rule", {})
+            rule = alert.get("rule") or {}
             rule_id = rule.get("id", "unknown")
             if rule_id not in rule_data:
                 rule_data[rule_id] = {
@@ -1275,12 +1275,12 @@ class WazuhClient:
             entry = rule_data[rule_id]
             entry["count"] += 1
             # Extract source IPs
-            src_ip = alert.get("data", {}).get("srcip")
+            src_ip = (alert.get("data") or {}).get("srcip")
             if src_ip:
                 entry["source_ips"].add(src_ip)
             # Extract affected agents
-            agent_id = alert.get("agent", {}).get("id")
-            agent_name = alert.get("agent", {}).get("name", "")
+            agent_id = (alert.get("agent") or {}).get("id")
+            agent_name = (alert.get("agent") or {}).get("name", "")
             if agent_id:
                 entry["affected_agents"].add(f"{agent_id}:{agent_name}")
             # Track timeline
@@ -1389,7 +1389,7 @@ class WazuhClient:
                 alerts, total_alerts, truncated = self._alerts_and_total(alerts_result)
                 level_dist: Dict[str, int] = {}
                 for a in alerts:
-                    lvl = a.get("rule", {}).get("level", 0)
+                    lvl = (a.get("rule") or {}).get("level", 0)
                     bucket = "critical" if lvl >= 12 else "high" if lvl >= 10 else "medium" if lvl >= 7 else "low"
                     level_dist[bucket] = level_dist.get(bucket, 0) + 1
                 report["sections"]["alerts"] = {
@@ -1745,7 +1745,7 @@ class WazuhClient:
         # Build per-control evidence
         alert_groups: Dict[str, int] = {}
         for a in alerts:
-            for g in a.get("rule", {}).get("groups") or []:
+            for g in (a.get("rule") or {}).get("groups") or []:
                 alert_groups[g] = alert_groups.get(g, 0) + 1
 
         # --- Confidence thresholds ---
@@ -2075,10 +2075,10 @@ class WazuhClient:
                             {
                                 "id": a.get("id"),
                                 "timestamp": a.get("timestamp"),
-                                "rule_id": a.get("rule", {}).get("id"),
-                                "rule_description": a.get("rule", {}).get("description"),
-                                "level": a.get("rule", {}).get("level"),
-                                "agent": a.get("agent", {}).get("name"),
+                                "rule_id": (a.get("rule") or {}).get("id"),
+                                "rule_description": (a.get("rule") or {}).get("description"),
+                                "level": (a.get("rule") or {}).get("level"),
+                                "agent": (a.get("agent") or {}).get("name"),
                             }
                             for a in alert_items[:20]
                         ],
@@ -2257,7 +2257,7 @@ class WazuhClient:
         # Build group → alert count index
         alert_group_counts: Dict[str, int] = {}
         for a in alerts:
-            for g in a.get("rule", {}).get("groups") or []:
+            for g in (a.get("rule") or {}).get("groups") or []:
                 alert_group_counts[g] = alert_group_counts.get(g, 0) + 1
 
         # Map alerts to ISO 27001 controls
@@ -2273,7 +2273,9 @@ class WazuhClient:
 
             # Collect sample alerts for this control
             if groups:
-                samples = [a for a in alerts if any(g in (a.get("rule", {}).get("groups") or []) for g in groups)][:10]
+                samples = [a for a in alerts if any(g in ((a.get("rule") or {}).get("groups") or []) for g in groups)][
+                    :10
+                ]
             else:
                 samples = alerts[:10]
 
@@ -2285,10 +2287,10 @@ class WazuhClient:
                 "sample_alerts": [
                     {
                         "timestamp": a.get("timestamp"),
-                        "rule_id": a.get("rule", {}).get("id"),
-                        "description": a.get("rule", {}).get("description"),
-                        "level": a.get("rule", {}).get("level"),
-                        "agent": a.get("agent", {}).get("name"),
+                        "rule_id": (a.get("rule") or {}).get("id"),
+                        "description": (a.get("rule") or {}).get("description"),
+                        "level": (a.get("rule") or {}).get("level"),
+                        "agent": (a.get("agent") or {}).get("name"),
                     }
                     for a in samples
                 ],
@@ -2454,8 +2456,11 @@ class WazuhClient:
             ipaddress.ip_network("::1/128"),
         ]
         # Protect the Wazuh manager's own address so the SOC can't cut itself off.
+        # An IPv6 host is configured bracketed ("[2001:db8::1]"); pin the single address, not a
+        # /32 (which for IPv6 is a whole provider-sized network, or refused when bracketed).
         try:
-            networks.append(ipaddress.ip_network(f"{self.config.wazuh_host}/32", strict=False))
+            manager = ipaddress.ip_address(str(self.config.wazuh_host).strip().strip("[]"))
+            networks.append(ipaddress.ip_network(manager))
         except ValueError:
             pass  # hostname, not an IP — can't pin it here
         for token in extra.split(","):
@@ -2554,6 +2559,13 @@ class WazuhClient:
         return await self.execute_active_response(data)
 
     # Known Wazuh active response commands (with ! prefix for stateful execution)
+    # Commands whose target only the dedicated tool validates; the generic tool refuses them.
+    VALIDATED_AR_COMMANDS = {
+        "!quarantine": "wazuh_quarantine_file",
+        "!kill-process": "wazuh_kill_process",
+        "!disable-account": "wazuh_disable_user",
+    }
+
     ALLOWED_AR_COMMANDS = frozenset(
         [
             "!firewall-drop",
@@ -2584,6 +2596,11 @@ class WazuhClient:
             # be sidestepped (CIDR ranges, 127.1, ip:port, integer IPs, key=value strings).
             dedicated = "wazuh_firewall_drop" if command == "!firewall-drop" else "wazuh_host_deny"
             raise ValueError(f"Use {dedicated} to run {command}; the generic tool does not dispatch IP blocks.")
+        if command in self.VALIDATED_AR_COMMANDS:
+            # Same reasoning: the dedicated tool validates the target (protected paths, PID
+            # range, username), which free-form key=value parameters would skip.
+            dedicated = self.VALIDATED_AR_COMMANDS[command]
+            raise ValueError(f"Use {dedicated} to run {command}; its target is validated there.")
         args = []
         if parameters is not None and not isinstance(parameters, dict):
             raise ValueError("parameters must be an object of key/value pairs")
@@ -2641,6 +2658,8 @@ class WazuhClient:
         """
         if not self._indexer_client:
             raise IndexerNotConfiguredError()
+        # Same canonical form the block tools send (::ffff:1.2.3.4 is blocked as 1.2.3.4)
+        ip_address = self._validate_ip(ip_address)
         result = await self._indexer_client.get_alerts(
             limit=50,
             srcip=ip_address,
@@ -2740,7 +2759,7 @@ class WazuhClient:
                 )
                 items = result.get("data", {}).get("affected_items", [])
                 for alert in items:
-                    blob = str(alert.get("rule", {}).get("description", "")).lower()
+                    blob = str((alert.get("rule") or {}).get("description", "")).lower()
                     if "disable" in blob:
                         disable_evidence = True
                     if "enable" in blob:

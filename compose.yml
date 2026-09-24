@@ -21,6 +21,9 @@ services:
     hostname: wazuh-main-server
     
     restart: unless-stopped
+    # Longer than the server's 20 s graceful-shutdown bound, so open SSE streams close and
+    # shutdown cleanup runs before Docker's SIGKILL (the default is 10 s)
+    stop_grace_period: 30s
     # No `init: true`: the image's ENTRYPOINT is already tini
     
     env_file: 

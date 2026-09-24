@@ -93,7 +93,10 @@ Implemented in `oauth.py`:
   `OAUTH_IDP_ALLOWED_DOMAINS` (Google `hd` or the e-mail domain) and `OAUTH_IDP_ALLOWED_USERS`.
   An e-mail address counts as identity only when it is vouched for: `email_verified: true`, a
   Google `hd` equal to the e-mail domain, or an allow-listed Entra tenant. Otherwise the subject
-  falls back to `preferred_username`, then `sub`, and a domain allow-list denies the user. The
+  falls back to `preferred_username` (skipped when it looks like an e-mail address), then `sub`,
+  and a domain allow-list denies the user. `OAUTH_IDP_ALLOWED_USERS` matches only `sub`, the
+  configured subject claim or a vouched e-mail, never a fallback `preferred_username`, which many
+  providers let users edit. The
   scope comes from `OAUTH_IDP_GROUP_SCOPE_MAP` applied to the `OAUTH_IDP_GROUP_CLAIM` claim, or
   `OAUTH_IDP_DEFAULT_SCOPE` (default `wazuh:read`) when no group matches, and is intersected with
   the client's registered scope; an empty result is denied. At startup the server refuses a
