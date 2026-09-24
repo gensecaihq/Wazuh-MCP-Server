@@ -72,11 +72,12 @@ Stock Wazuh scripts cannot remove a block through the API, so `wazuh_firewall_al
 | Control | Applies to | Behaviour |
 |---------|------------|-----------|
 | `wazuh:write` scope | all action and rollback tools | Hidden from `tools/list` and refused for tokens without the scope |
-| Explicit target | all dispatching tools | A request is never sent without an explicit numeric agent ID, except `wazuh_block_ip` with `all_agents: true`. `wazuh_block_ip` refuses a call that has neither |
+| Explicit target | all dispatching tools | A request is never sent without an explicit numeric agent ID, except `wazuh_block_ip` with `all_agents: true`, which also requires `WAZUH_ALLOW_FLEET_AR=true`. `wazuh_block_ip` refuses a call that has neither |
 | Protected IPs | `wazuh_block_ip`, `wazuh_firewall_drop`, `wazuh_host_deny` | Refuses loopback (`127.0.0.0/8`, `::1`), the Manager's own address (when `WAZUH_HOST` is an IP), and any IP or CIDR in `WAZUH_PROTECTED_IPS`. IPs are canonicalized first, so IPv4-mapped IPv6 forms are caught |
-| Agent `000` guard | `wazuh_isolate_host`, `wazuh_kill_process`, `wazuh_disable_user`, `wazuh_quarantine_file`, `wazuh_active_response`, `wazuh_firewall_drop`, `wazuh_host_deny`, and `wazuh_block_ip` with an `agent_id` | Refuses agent `000` (the Manager itself) unless `WAZUH_ALLOW_MANAGER_AR=true` |
+| Agent `000` guard | `wazuh_isolate_host`, `wazuh_kill_process`, `wazuh_disable_user`, `wazuh_quarantine_file`, `wazuh_active_response`, `wazuh_firewall_drop`, `wazuh_host_deny`, `wazuh_block_ip` with an `agent_id`, and `wazuh_restart` with `target=manager` | Refuses the Manager itself unless `WAZUH_ALLOW_MANAGER_AR=true` |
+| Quarantine paths | `wazuh_quarantine_file` | Absolute paths only; system and agent directories are refused (extend with `WAZUH_QUARANTINE_DENY_PREFIXES`, restrict with `WAZUH_QUARANTINE_ALLOW_PREFIXES`) |
 | Argument sanitization | usernames, file paths, IPs, `parameters` | Rejects shell metacharacters (`; & \| \` $ ( ) { } [ ] < > ! ' "`, newline, carriage return, tab). Usernames, file paths and IPs may not start with `-`. Backslash is allowed only in file paths |
-| Confirmation gate | all action and rollback tools | With `WAZUH_REQUIRE_ACTION_CONFIRMATION=true`, the tool gains a `confirm` parameter and is refused unless `confirm: true` |
+| Confirmation gate | all action and rollback tools | Every write tool advertises an optional `confirm` parameter. When `WAZUH_REQUIRE_ACTION_CONFIRMATION` is on (the default in production), a call is refused unless `confirm: true` |
 | Audit log | all action and rollback tools | `AUDIT:` line before the call and `AUDIT_OUTCOME:` line after it, with principal and target arguments |
 
 Refusals are returned as `isError` tool results, for example:

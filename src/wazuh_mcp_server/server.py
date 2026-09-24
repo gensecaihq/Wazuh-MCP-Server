@@ -55,6 +55,7 @@ from wazuh_mcp_server.security import (
     validate_iso27001_control,
     validate_limit,
     validate_policy_id,
+    validate_quarantine_path,
     validate_query,
     validate_report_type,
     validate_rule_groups,
@@ -1946,8 +1947,35 @@ def _reject_block_duration(arguments: Dict[str, Any]) -> None:
 
 
 def _require_action_confirmation() -> bool:
-    """Whether state-changing tools require an explicit confirm=true (env-gated, default off)."""
-    return os.getenv("WAZUH_REQUIRE_ACTION_CONFIRMATION", "false").strip().lower() in ("true", "1", "yes")
+    """Whether state-changing tools require an explicit confirm=true.
+
+    Defaults to ON in production and OFF otherwise; an explicit
+    WAZUH_REQUIRE_ACTION_CONFIRMATION always wins. The gate is a defence-in-depth control
+    against a prompt-injected model firing a destructive action off attacker-controlled
+    alert text: the model has to come back with confirm=true, which is its cue to ask a
+    human operator first.
+    """
+    from wazuh_mcp_server.config import env_bool, normalize_environment
+
+    if os.getenv("WAZUH_REQUIRE_ACTION_CONFIRMATION", "").strip():
+        # Same spellings as every other boolean (on/off, yes/no, 1/0); garbage is rejected at startup
+        return env_bool("WAZUH_REQUIRE_ACTION_CONFIRMATION", False)
+    environment = os.getenv("ENVIRONMENT")
+    return (normalize_environment(environment) if environment else config.ENVIRONMENT) == "production"
+
+
+def _fleet_wide_ar_allowed() -> bool:
+    """Fleet-wide active response (all_agents=true) is opt-in via WAZUH_ALLOW_FLEET_AR=true."""
+    from wazuh_mcp_server.config import env_bool
+
+    return env_bool("WAZUH_ALLOW_FLEET_AR", False)
+
+
+def _manager_ar_allowed() -> bool:
+    """True when the operator opted in to active response against the Manager (WAZUH_ALLOW_MANAGER_AR)."""
+    from wazuh_mcp_server.config import env_bool
+
+    return env_bool("WAZUH_ALLOW_MANAGER_AR", False)
 
 
 def _guard_manager_agent(agent_id: str, tool_name: str) -> None:
@@ -1959,7 +1987,7 @@ def _guard_manager_agent(agent_id: str, tool_name: str) -> None:
     opts in via WAZUH_ALLOW_MANAGER_AR=true.
     """
     if str(agent_id).lstrip("0") == "" and str(agent_id) != "":  # "0", "00", "000" all normalize to the manager
-        if os.getenv("WAZUH_ALLOW_MANAGER_AR", "false").strip().lower() not in ("true", "1", "yes"):
+        if not _manager_ar_allowed():
             raise ValueError(
                 f"Refusing to run '{tool_name}' against agent 000 (the Wazuh manager itself) — "
                 "this would disrupt the SOC control plane. Set WAZUH_ALLOW_MANAGER_AR=true to override."
@@ -2780,6 +2808,21 @@ async def handle_tools_list(params: Dict[str, Any], session: MCPSession) -> Dict
     auth_token = getattr(session, "_auth_token", None)
     if not auth_token or not auth_token.has_scope("wazuh:write"):
         tools = [t for t in tools if t["name"] not in WRITE_SCOPE_TOOLS]
+    else:
+        # Advertise the confirmation flag so schema-validating clients can send it.
+        for tool in tools:
+            if tool["name"] in WRITE_SCOPE_TOOLS:
+                props = tool.setdefault("inputSchema", {}).setdefault("properties", {})
+                props.setdefault(
+                    "confirm",
+                    {
+                        "type": "boolean",
+                        "description": (
+                            "Set to true only after a human operator approved this exact target. "
+                            "Required when WAZUH_REQUIRE_ACTION_CONFIRMATION is on (default in production)."
+                        ),
+                    },
+                )
 
     require_confirm = _require_action_confirmation()
     for t in tools:
@@ -3310,9 +3353,14 @@ async def handle_tools_call(params: Dict[str, Any], session: MCPSession) -> Dict
             # fleet-wide block. validate_boolean maps "false"/"0"/"no"/"off" → False.
             all_agents = validate_boolean(arguments.get("all_agents"), default=False, param_name="all_agents")
             # Blocking traffic on the manager's own agent can cut agents and analysts off from it.
-            # Fleet-wide blocks are a separate decision (all_agents), not an agent-000 target.
+            # Fleet-wide blocks are a separate decision with their own opt-in.
             if agent_id:
                 _guard_manager_agent(agent_id, tool_name)
+            if all_agents and not _fleet_wide_ar_allowed():
+                raise ValueError(
+                    "Refusing fleet-wide block (all_agents=true): blocking an IP on every agent at once is "
+                    "opt-in. Target a specific agent_id, or set WAZUH_ALLOW_FLEET_AR=true to enable it."
+                )
             result = await wazuh_client.block_ip(ip_address, agent_id=agent_id, all_agents=all_agents)
             _success = True
             return _tool_result(f"Block IP Result:\n{json.dumps(result, indent=2, default=str)}")
@@ -3346,7 +3394,7 @@ async def handle_tools_call(params: Dict[str, Any], session: MCPSession) -> Dict
         elif tool_name == "wazuh_quarantine_file":
             agent_id = validate_agent_id(arguments.get("agent_id"), required=True)
             _guard_manager_agent(agent_id, tool_name)
-            file_path = validate_file_path(arguments.get("file_path"), required=True)
+            file_path = validate_quarantine_path(arguments.get("file_path"))
             result = await wazuh_client.quarantine_file(agent_id, file_path)
             _success = True
             return _tool_result(f"Quarantine File Result:\n{json.dumps(result, indent=2, default=str)}")
@@ -3393,6 +3441,13 @@ async def handle_tools_call(params: Dict[str, Any], session: MCPSession) -> Dict
                 target = validate_agent_id(target, required=True, param_name="target")
                 if target == "000":
                     target = "manager"
+            if target == "manager" and not _manager_ar_allowed():
+                # Restarting the manager interrupts every agent connection, alert ingestion and
+                # the API itself — the same SOC control-plane outage _guard_manager_agent prevents.
+                raise ValueError(
+                    "Refusing to restart the Wazuh manager: this interrupts the whole SOC control plane. "
+                    "Restart a specific agent instead, or set WAZUH_ALLOW_MANAGER_AR=true to allow it."
+                )
             result = await wazuh_client.restart_service(target)
             _success = True
             return _tool_result(f"Restart Result:\n{json.dumps(result, indent=2, default=str)}")

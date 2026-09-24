@@ -132,6 +132,10 @@ class TestAnnotationsAndSchemas:
         assert "confirm" not in listed["get_wazuh_alerts"]["inputSchema"]["properties"]
 
     @pytest.mark.asyncio
-    async def test_confirm_not_declared_by_default(self, monkeypatch):
+    async def test_confirm_declared_on_write_tools_only(self, monkeypatch):
+        # Always advertised (optional) on write tools, so strict clients can send it whenever
+        # the gate is on; never on read tools
         monkeypatch.delenv("WAZUH_REQUIRE_ACTION_CONFIRMATION", raising=False)
-        assert "confirm" not in (await _listed())["wazuh_block_ip"]["inputSchema"]["properties"]
+        listed = await _listed()
+        assert "confirm" in listed["wazuh_block_ip"]["inputSchema"]["properties"]
+        assert "confirm" not in listed["get_wazuh_alerts"]["inputSchema"]["properties"]

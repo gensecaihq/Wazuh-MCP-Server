@@ -7,6 +7,7 @@ Implements comprehensive security measures and error handling
 import ipaddress
 import logging
 import os
+import posixpath
 import re
 import time
 from collections import defaultdict, deque
@@ -495,6 +496,93 @@ def validate_file_path(value: Any, required: bool = False, param_name: str = "fi
             param_name, f"too long ({len(file_path)} chars)", "Path must be 500 characters or less"
         )
 
+    return file_path
+
+
+# Locations where "quarantining" a file means breaking the host or the agent itself.
+# Extended (not replaced) by WAZUH_QUARANTINE_DENY_PREFIXES; an optional WAZUH_QUARANTINE_ALLOW_PREFIXES
+# turns the policy into an allow-list (only paths under one of the prefixes are accepted).
+DEFAULT_QUARANTINE_DENY_PREFIXES = (
+    "/etc",
+    "/boot",
+    "/bin",
+    "/sbin",
+    "/lib",
+    "/lib32",
+    "/lib64",
+    "/usr",
+    "/proc",
+    "/sys",
+    "/dev",
+    "/var/ossec",
+    "/var/lib",
+    "/private/etc",
+    "/private/var/ossec",
+    "/Library",
+    "/System",
+    "/Applications",
+    "C:\\Windows",
+    "C:\\Program Files",
+    "C:\\Program Files (x86)",
+)
+
+
+def _path_prefixes(env_name: str, default: tuple) -> tuple:
+    """Comma-separated path prefixes read from the environment variable, or the default when it is unset."""
+    raw = os.getenv(env_name)
+    if raw is None:
+        return default
+    return tuple(p.strip() for p in raw.split(",") if p.strip())
+
+
+def _canonical_path(path: str) -> str:
+    """Normalise for prefix comparison: backslashes → '/', collapse '.' segments and
+    repeated slashes (so //etc/passwd and /./etc/passwd equal /etc/passwd), lower-case."""
+    p = posixpath.normpath(path.replace("\\", "/"))
+    if p.startswith("//"):  # normpath preserves a leading double slash (POSIX allows it)
+        p = "/" + p.lstrip("/")
+    return p.rstrip("/").lower() or "/"
+
+
+def _is_under(path: str, prefix: str) -> bool:
+    """True when `path` is `prefix` or inside it (case-insensitive, / and \\ agnostic)."""
+    norm = _canonical_path(path)
+    pre = _canonical_path(prefix)
+    return norm == pre or norm.startswith(pre + "/")
+
+
+def validate_quarantine_path(value: Any, param_name: str = "file_path") -> str:
+    """Validate a path for wazuh_quarantine_file: absolute, and outside system locations.
+
+    A quarantine active response moves the file away, so pointing it at /etc/passwd,
+    /boot/vmlinuz or the agent's own /var/ossec tree is a self-inflicted outage — exactly
+    what a prompt-injected model steering the tool from alert text would try.
+    """
+    file_path = validate_file_path(value, required=True, param_name=param_name)
+    is_posix_abs = file_path.startswith("/")
+    is_windows_abs = len(file_path) > 2 and file_path[1] == ":" and file_path[2] in ("\\", "/")
+    if not (is_posix_abs or is_windows_abs):
+        raise ToolValidationError(param_name, "must be an absolute path", "Provide the full path of the file")
+    if "\n" in file_path or "\r" in file_path:
+        raise ToolValidationError(param_name, "contains a line break", "Provide a single-line path")
+
+    allow = _path_prefixes("WAZUH_QUARANTINE_ALLOW_PREFIXES", ())
+    if allow and not any(_is_under(file_path, p) for p in allow):
+        raise ToolValidationError(
+            param_name,
+            "is outside WAZUH_QUARANTINE_ALLOW_PREFIXES",
+            "Only files under the configured allow-listed directories can be quarantined",
+        )
+    # Configured prefixes add to the defaults: replacing them meant adding /srv/critical
+    # silently re-allowed /etc/passwd
+    deny = DEFAULT_QUARANTINE_DENY_PREFIXES + tuple(_path_prefixes("WAZUH_QUARANTINE_DENY_PREFIXES", ()))
+    for prefix in deny:
+        if _is_under(file_path, prefix):
+            raise ToolValidationError(
+                param_name,
+                f"is inside protected location {prefix}",
+                "System and agent directories cannot be quarantined (see WAZUH_QUARANTINE_DENY_PREFIXES)",
+            )
     return file_path
 
 

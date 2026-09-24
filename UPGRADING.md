@@ -13,7 +13,11 @@ These changes are on `main` and listed under "Unreleased" in [CHANGELOG.md](CHAN
 
 Clusters in `clusters.json` use `verify_ssl` / `ca_bundle` per cluster. See [Manager TLS](docs/configuration.md#manager-tls).
 
-### 2. OAuth users sign in with an API key
+### 2. Write tools ask for confirmation in production
+
+With `ENVIRONMENT=production` (set by the Dockerfile and `compose.yml`), every write tool now requires `confirm=true` unless `WAZUH_REQUIRE_ACTION_CONFIRMATION=false` is set. LLM clients see the refusal and re-invoke after asking a person; scripted clients must pass `confirm: true`. Also opt-in now: fleet-wide blocks (`WAZUH_ALLOW_FLEET_AR=true`) and restarting the Manager (`WAZUH_ALLOW_MANAGER_AR=true`). `wazuh_quarantine_file` refuses system and agent directories.
+
+### 3. OAuth users sign in with an API key
 
 `/oauth/authorize` now shows a sign-in page instead of approving every request. Each user pastes a `wazuh_` API key once; their token gets that key's scopes. Configure keys before upgrading an OAuth deployment, or nobody can sign in:
 
@@ -22,19 +26,19 @@ MCP_API_KEY=wazuh_...                 # or API_KEYS=[...] for one key per user
 MCP_API_KEY_SCOPES=wazuh:read         # add wazuh:write for users who may run active response
 ```
 
-### 3. Re-mint bearer tokens once
+### 4. Re-mint bearer tokens once
 
 Bearer JWTs are now bound to the API key they came from, and `MCP_API_KEY` got a stable id. Tokens minted before the upgrade reference the old id and are refused: exchange the key at `POST /auth/token` again. From then on tokens survive restarts and work across replicas.
 
-### 4. Point legacy clients at `/mcp`
+### 5. Point legacy clients at `/mcp`
 
 `/sse` returns `410 Gone`. It never completed a session (no `endpoint` event, no message route), so any client configured with it wasn't working anyway.
 
-### 5. Startup is stricter
+### 6. Startup is stricter
 
 Values that used to be misread now stop the server with a message: `ENVIRONMENT` other than `development`/`dev`/`production`/`prod`, an unknown `AUTH_MODE`, non-positive `RATE_LIMIT_REQUESTS`/`RATE_LIMIT_WINDOW`/`SESSION_TTL_SECONDS`, `MAX_MEMORY_MB` below 64, and invalid `clusters.json` fields (booleans must be true/false, ports 1-65535). With `REDIS_URL` set, a bad TTL no longer falls back to the in-memory store.
 
-### 6. Tool calls
+### 7. Tool calls
 
 - `duration` on `wazuh_block_ip` / `wazuh_firewall_drop` is refused when positive: Wazuh can't expire an API-triggered block. Blocks are permanent until removed.
 - Arguments a tool doesn't declare are refused instead of ignored.
@@ -43,7 +47,7 @@ Values that used to be misread now stop the server with a message: `ENVIRONMENT`
 - Manager log tools accept `limit` up to 500 (Wazuh's own maximum).
 - Vulnerability results drop the always-null `status` and add `cvss_score` and `under_evaluation`.
 
-### 7. Legacy sessions
+### 8. Legacy sessions
 
 A request without `Mcp-Session-Id` that isn't `initialize` is served without creating a session and gets no session header. Clients that skipped `initialize` and reused that header must initialize first (as the MCP spec requires).
 
