@@ -55,6 +55,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     - `limit` defaults could exceed a lowered `MAX_ALERTS_PER_QUERY`.
   - Startup:
     - A host with a port or path (`WAZUH_HOST=https://host:55000/`), or a CA bundle that isn't PEM, now fails at startup instead of on every call.
+    - A malformed `MCP_API_KEY` or unparseable `API_KEYS` stops startup instead of falling back to an unknown generated key; `/ready` reports why the Manager check failed (`wazuh_manager_reason`) and logs the cause.
     - Quoted values from `docker run --env-file` (`MCP_API_KEY_SCOPES="wazuh:read wazuh:write"`) are unquoted.
   - Deploy:
     - `.env.example` no longer sets `ENVIRONMENT=development`, which switched `docker run --env-file` into development mode.

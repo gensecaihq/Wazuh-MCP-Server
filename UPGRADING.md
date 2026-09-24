@@ -59,6 +59,7 @@ Settings that used to be misread or only failed on the first tool call now stop 
 - non-positive `RATE_LIMIT_REQUESTS`/`RATE_LIMIT_WINDOW`/`SESSION_TTL_SECONDS`, or `MAX_MEMORY_MB` below 64;
 - a `WAZUH_CA_BUNDLE` or per-cluster `ca_bundle` that does not exist or cannot be loaded;
 - an incomplete OpenID Connect configuration (for example `OAUTH_IDP_ISSUER` without `OAUTH_IDP_CLIENT_ID`), or `OAUTH_ENABLE_DCR=true` together with `OAUTH_IDP_ISSUER`;
+- a malformed `MCP_API_KEY` or unparseable `API_KEYS` (previously a warning, and the server ran with a generated key no client knew);
 - a host setting that includes a port or path (`WAZUH_HOST=https://wazuh:55000/`; use `WAZUH_PORT`), or a CA bundle that is not PEM;
 - invalid `clusters.json` fields (booleans must be true/false, ports 1-65535).
 

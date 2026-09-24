@@ -351,3 +351,41 @@ class TestReadyWithRedis:
         async with _http() as client:
             body = (await client.get("/ready")).json()
         assert body.get("metrics", {}).get("total_sessions") == 3, body
+
+
+class TestDeployVerdictGaps:
+    @pytest.mark.parametrize("key", ["wazuh_short", "not-a-wazuh-key", "wazuh_" + "a" * 44])
+    def test_malformed_mcp_api_key_stops_startup(self, monkeypatch, key):
+        from wazuh_mcp_server.config import ServerConfig
+
+        monkeypatch.setenv("MCP_API_KEY", key)
+        # used to log a warning and run with a generated key nobody knew
+        with pytest.raises(ConfigurationError, match="MCP_API_KEY"):
+            ServerConfig.from_env()
+
+    @pytest.mark.parametrize("raw", ["[{bad json", '{"id": "k"}'])
+    def test_unusable_api_keys_stops_startup(self, monkeypatch, raw):
+        from wazuh_mcp_server.config import ServerConfig
+
+        monkeypatch.delenv("MCP_API_KEY", raising=False)
+        monkeypatch.setenv("API_KEYS", raw)
+        with pytest.raises(ConfigurationError, match="API_KEYS"):
+            ServerConfig.from_env()
+
+    @pytest.mark.asyncio
+    async def test_ready_names_the_manager_failure(self, monkeypatch, caplog):
+        class Client:
+            _indexer_client = None
+
+            async def ping_manager(self):
+                raise ConnectionError("TLS certificate verification failed for wazuh.internal. The stock ...")
+
+        monkeypatch.setattr(mcp_server, "wazuh_client", Client())
+        monkeypatch.setattr(mcp_server, "_ready_cache", None)
+        monkeypatch.setattr(mcp_server, "_last_manager_failure", None)
+        with caplog.at_level(logging.ERROR):
+            async with _http() as client:
+                body = (await client.get("/ready")).json()
+        assert body["services"]["wazuh_manager_reason"] == "tls_verification_failed"
+        assert "wazuh.internal" not in json.dumps(body)  # unauthenticated endpoint: category only
+        assert any("wazuh.internal" in r.getMessage() for r in caplog.records)

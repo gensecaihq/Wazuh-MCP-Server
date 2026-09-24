@@ -21,6 +21,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Literal, Optional, Tuple, Union
 from urllib.parse import urlparse
 
+import httpx
 from fastapi import FastAPI, Header, HTTPException, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, StreamingResponse
@@ -4350,15 +4351,40 @@ async def readiness_check():
     return JSONResponse(content=json.loads(response.body), status_code=response.status_code)
 
 
+_last_manager_failure: Optional[str] = None
+
+
+def _manager_failure_reason(exc: Exception) -> str:
+    """Coarse category for /ready, which is unauthenticated: no host names or messages."""
+    text = str(exc).lower()
+    if "certificate" in text or "ssl" in text or "tls" in text:
+        return "tls_verification_failed"
+    if "401" in text or "403" in text or "authenticat" in text or "credential" in text:
+        return "authentication_failed"
+    if isinstance(exc, (httpx.TimeoutException, httpx.ConnectError)) or "timeout" in text or "connect" in text:
+        return "unreachable"
+    return "error"
+
+
 async def _evaluate_readiness() -> JSONResponse:
+    global _last_manager_failure
     try:
         # Test Wazuh connectivity with an UNCACHED probe so a fresh Manager outage
         # isn't masked by the 5-minute cache on get_manager_info().
         wazuh_status = "healthy"
+        manager_reason = None
         try:
             await wazuh_client.ping_manager()
-        except Exception:
+            if _last_manager_failure is not None:
+                logger.info("Wazuh Manager is reachable again")
+            _last_manager_failure = None
+        except Exception as e:
             wazuh_status = "unhealthy"
+            manager_reason = _manager_failure_reason(e)
+            # Log the full cause once per change, not on every probe; /ready only says why in brief
+            if str(e) != _last_manager_failure:
+                logger.error(f"Readiness: Wazuh Manager check failed: {e}")
+            _last_manager_failure = str(e)
 
         # Test Wazuh Indexer connectivity (if configured)
         indexer_status = "not_configured"
@@ -4436,6 +4462,7 @@ async def _evaluate_readiness() -> JSONResponse:
                 "authentication": auth_info,
                 "services": {
                     "wazuh_manager": wazuh_status,
+                    **({"wazuh_manager_reason": manager_reason} if manager_reason else {}),
                     "wazuh_indexer": indexer_status,
                     "memory": memory_status,
                     "mcp": "healthy",
