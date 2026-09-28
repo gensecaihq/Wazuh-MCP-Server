@@ -190,6 +190,7 @@ Per-tool parameters: [API documentation](docs/api/).
 | **Input validation** | Typed validation of agent IDs, IPs, paths and command names; Indexer queries are built as Query DSL, not by string interpolation. |
 | **Rate limiting** | Sliding window, default 100 requests per 60 s (`RATE_LIMIT_REQUESTS`, `RATE_LIMIT_WINDOW`): per principal and client IP on `/mcp` and `/`, per client IP on other endpoints except the probe endpoints (`/health`, `/ready`, `/metrics` and their `/healthz`, `/readyz`, `/live`, `/livez` aliases). Failed authentication is rate limited by client IP. Set `TRUSTED_PROXIES` when running behind a proxy. |
 | **Resource bounds** | Circuit breaker on Wazuh calls: opens after 5 consecutive failures, retries after 60 s. Oversized tool results are truncated with a note (`MAX_TOOL_RESPONSE_CHARS`). `limit` on `get_wazuh_alerts` and `search_security_events` is capped at `MAX_ALERTS_PER_QUERY` (default 1000). The in-memory session store is capped at `MAX_SESSIONS` (1000) and `MAX_SESSIONS_PER_PRINCIPAL` (100), and stored client metadata is truncated. |
+| **Operational endpoints** | `/health`, `/ready`, `/metrics` and the API docs can be limited to monitoring hosts (`OPS_ALLOWED_IPS`, checked against the connection address, not forwarded headers); the API docs are off in production unless `API_DOCS_ENABLED=true`. |
 | **Container** | Runs as UID 1000; `compose.yml` sets a read-only root filesystem, `cap_drop: ALL` and `no-new-privileges`. The runtime image does not include pip. |
 
 There is no built-in TLS listener; terminate TLS at a reverse proxy or load balancer. Report vulnerabilities as described in [SECURITY.md](SECURITY.md).
@@ -220,6 +221,8 @@ All settings are environment variables (usually via `.env`). The ones most deplo
 | `ALLOWED_ORIGINS` | `https://claude.ai,http://localhost:3000` | CORS allow-list (exact match) |
 | `WAZUH_TOOLSETS`, `WAZUH_DISABLED_TOOLS` | all enabled | Limit the exposed tools |
 | `REDIS_URL` | — | Shared session store for multi-instance deployments |
+| `OPS_ALLOWED_IPS` | — | IPs/CIDRs allowed to call `/health`, `/ready`, `/metrics` and the API docs; unset means any client |
+| `API_DOCS_ENABLED` | off in production | Serve `/docs`, `/redoc`, `/openapi.json` |
 | `WAZUH_CLUSTERS_FILE` | `./config/clusters.json` | Multi-cluster topology; single-cluster mode when absent |
 | `RESPONSE_FORMAT` | `json` | `gcf` encodes alert, event and vulnerability collections in the compact GCF format (lossless; falls back to JSON if the encoder is unavailable) |
 | `YDC_API_KEY` | — | Enables `search_external_context` |
@@ -253,7 +256,7 @@ Requires Python 3.11 or later.
 | `/.well-known/oauth-authorization-server` | GET | OAuth metadata (RFC 8414), `AUTH_MODE=oauth` only |
 | `/.well-known/oauth-protected-resource` | GET | Protected-resource metadata (RFC 9728), `AUTH_MODE=oauth` only |
 | `/oauth/authorize`, `/oauth/token`, `/oauth/revoke`, `/oauth/register`, `/oauth/callback` | GET/POST | OAuth endpoints, `AUTH_MODE=oauth` only (`/oauth/register` requires `OAUTH_ENABLE_DCR=true` and no `OAUTH_IDP_ISSUER`; `/oauth/callback` is the OpenID Connect redirect URI and needs `OAUTH_IDP_ISSUER`) |
-| `/docs`, `/redoc`, `/openapi.json` | GET | OpenAPI documentation |
+| `/docs`, `/redoc`, `/openapi.json` | GET | OpenAPI documentation; off in production unless `API_DOCS_ENABLED=true` |
 
 ---
 

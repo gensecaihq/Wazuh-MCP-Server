@@ -234,8 +234,10 @@ class OAuthManager:
             "scopes_supported": ["wazuh:read", "wazuh:write"],
             "code_challenge_methods_supported": ["S256"],
             "authorization_response_iss_parameter_supported": True,
-            "service_documentation": f"{issuer}/docs",
         }
+        # Optional (RFC 8414): only advertise the docs when they are served
+        if getattr(self.config, "API_DOCS_ENABLED", True):
+            metadata["service_documentation"] = f"{issuer}/docs"
         # RFC 8414: omit registration_endpoint entirely when DCR is disabled, rather than
         # advertising it as null (a null endpoint is not a valid metadata value).
         if self.config.OAUTH_ENABLE_DCR and not self.requires_idp:

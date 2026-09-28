@@ -396,6 +396,8 @@ HIGH/CRITICAL fail the job) and only then pushes the multi-arch image to GHCR.
 - [ ] `ALLOWED_ORIGINS` lists only the origins your clients use.
 - [ ] TLS terminated at a reverse proxy; the server port not exposed directly; the proxy in
       `TRUSTED_PROXIES` if it is not on loopback.
+- [ ] `OPS_ALLOWED_IPS` set to the monitoring hosts, so `/ready` and `/metrics` are not open to
+      anything that reaches the port, and `API_DOCS_ENABLED` left off.
 - [ ] Manager certificate verified (`WAZUH_ALLOW_SELF_SIGNED` left `false`), using a reissued certificate and `WAZUH_CA_BUNDLE` where needed;
       `WAZUH_INDEXER_VERIFY_SSL=true`.
 - [ ] Dedicated least-privilege Wazuh API and Indexer accounts.

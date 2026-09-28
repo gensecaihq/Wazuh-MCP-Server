@@ -305,7 +305,7 @@ def show_deployment_info(api_key: str):
     print(f"  • MCP Server: http://localhost:{port}")
     print(f"  • Health Check: http://localhost:{port}/health")
     print(f"  • Metrics: http://localhost:{port}/metrics")
-    print(f"  • API Docs: http://localhost:{port}/docs")
+    print(f"  • API Docs: http://localhost:{port}/docs (API_DOCS_ENABLED=true; off by default in production)")
     print()
 
     print(f"{Colors.CYAN}🔑 Authentication:{Colors.NC}")

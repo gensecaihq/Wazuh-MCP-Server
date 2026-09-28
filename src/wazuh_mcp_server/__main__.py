@@ -67,7 +67,10 @@ def main() -> None:
         logger.info(f"Server: http://{host}:{port}")
         logger.info(f"Health: http://{host}:{port}/health")
         logger.info(f"Metrics: http://{host}:{port}/metrics")
-        logger.info(f"Docs: http://{host}:{port}/docs")
+        from wazuh_mcp_server.config import get_config
+
+        if get_config().API_DOCS_ENABLED:
+            logger.info(f"Docs: http://{host}:{port}/docs")
 
         # Run the server
         # Bound shutdown: without a timeout an open SSE stream keeps uvicorn "waiting for
