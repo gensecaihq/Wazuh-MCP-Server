@@ -451,7 +451,15 @@ class ServerConfig:
             if os.getenv(switch, "").strip():
                 env_bool(switch, False)
 
-        ops_allowed_ips = parse_ip_allowlist(os.getenv("OPS_ALLOWED_IPS"), "OPS_ALLOWED_IPS")
+        ops_allowed_raw = os.getenv("OPS_ALLOWED_IPS", "")
+        ops_allowed_ips = parse_ip_allowlist(ops_allowed_raw, "OPS_ALLOWED_IPS")
+        # Empty means unset (any client), as for the other settings. A value that is present but
+        # yields no address (",", " , ") is a mistake that would silently leave the endpoints open.
+        if ops_allowed_raw.strip() and not ops_allowed_ips:
+            raise ConfigurationError(
+                "OPS_ALLOWED_IPS is set but lists no IP address or network. "
+                "List at least one, or leave it empty to allow any client."
+            )
         # API docs default to off in production; an explicit setting always wins, and an empty
         # value means "use the default" (a blank line in .env must not switch them on)
         if os.getenv("API_DOCS_ENABLED", "").strip():

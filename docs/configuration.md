@@ -180,7 +180,7 @@ The `OAUTH_IDP_*` settings are validated at startup whenever `OAUTH_IDP_ISSUER` 
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `OPS_ALLOWED_IPS` | *(none)* | Comma-separated IPs or CIDR networks allowed to call these endpoints, for example `192.168.130.10,10.0.0.0/8`. Unset, any client can. Set, other clients get the same `404` as an unknown path. `/health` also always answers loopback, so the container healthcheck keeps working. An entry that is not an address or network fails startup |
+| `OPS_ALLOWED_IPS` | *(none)* | Comma-separated IPs or CIDR networks allowed to call these endpoints, for example `192.168.130.10,10.0.0.0/8`. Unset or empty, any client can. Set, other clients get the same `404` as an unknown path. `/health` also always answers loopback, so the container healthcheck keeps working. An entry that is not an address or network, or a value with no entries at all (such as `,`), fails startup |
 | `API_DOCS_ENABLED` | `false` when `ENVIRONMENT=production`, `true` otherwise | *Strict.* Serve `/docs`, `/docs/oauth2-redirect`, `/redoc` and `/openapi.json`. When off they return `404` for every client. An empty value means "use the default" |
 
 The check uses the address of the TCP connection, never `X-Forwarded-For` or `X-Real-IP`, because a client can set those headers itself. uvicorn replaces the connection address with the forwarded one only for connections from its `FORWARDED_ALLOW_IPS` (loopback by default), that is, from a proxy on the same host. What this means for your setup:

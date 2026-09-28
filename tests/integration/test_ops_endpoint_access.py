@@ -226,6 +226,19 @@ class TestConfigParsing:
         env.setenv("OPS_ALLOWED_IPS", " 192.168.130.10, ,10.0.0.0/8,fd00::1 ")
         assert ServerConfig.from_env().OPS_ALLOWED_IPS == ("192.168.130.10/32", "10.0.0.0/8", "fd00::1/128")
 
+    @pytest.mark.parametrize("value", [",", " , ", ",,,", " ,\t, "])
+    def test_separators_only_fails_startup(self, env, value):
+        """A value that lists nothing is refused, not treated as "unset" (which would allow any client)."""
+        env.setenv("OPS_ALLOWED_IPS", value)
+        with pytest.raises(ConfigurationError, match="lists no IP address"):
+            ServerConfig.from_env()
+
+    @pytest.mark.parametrize("value", ["", "   "])
+    def test_empty_value_means_unset(self, env, value):
+        """An empty value (e.g. OPS_ALLOWED_IPS= in .env) is the same as not setting it."""
+        env.setenv("OPS_ALLOWED_IPS", value)
+        assert ServerConfig.from_env().OPS_ALLOWED_IPS == ()
+
     @pytest.mark.parametrize("bad", ["prometheus.local", "10.0.0.300", "10.0.0.0/33", "192.168.1.1:9090"])
     def test_invalid_entry_fails_startup(self, env, bad):
         """A typo stops the server instead of leaving the endpoints open or closed by accident."""
