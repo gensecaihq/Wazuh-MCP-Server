@@ -319,24 +319,22 @@ Thanks to everyone who has contributed code, reviews, bug reports and design fee
 
 **Code and pull requests**
 
-- [@alokemajumder](https://github.com/alokemajumder) — maintainer; architecture, MCP transport, security hardening, releases
-- [@gensecai-dev](https://github.com/gensecai-dev) — the 19 action, verification and rollback tools, broken-endpoint fixes, production hardening
-- [@andrzej-piotrowski-pl](https://github.com/andrzej-piotrowski-pl) — ISO 27001:2022 compliance tools: Annex A control mapping, domain scoring, gap analysis (#74)
-- [@blackwell-systems](https://github.com/blackwell-systems) — opt-in GCF response encoding for record tools (#102, #104)
-- [@lucascruzb](https://github.com/lucascruzb) — period-wide alert aggregation via scroll, the basis of `get_alerts_aggregated` (#79)
-- [@kanylbullen](https://github.com/kanylbullen) — compact output mode for token-efficient responses (#65)
-- [@mouse-value-add](https://github.com/mouse-value-add) — optional You.com web-search context (#85)
-- [@DrRSatzteil](https://github.com/DrRSatzteil) — `tools/list` pagination fix (#70)
-- [@SiM22](https://github.com/SiM22) — MCP 2025-06-18 support for Windsurf compatibility (#66)
-- [@aiunmukto](https://github.com/aiunmukto) — `.env.example` (#12), an early CI workflow and the Glama registry listing
-- [@Karibusan](https://github.com/Karibusan) — dependency fixes (#38)
-- [@lwsinclair](https://github.com/lwsinclair) — MseeP.ai listing (#9)
-- [@markeclaudio](https://github.com/markeclaudio) — OpenID Connect sign-in (#123), active-response guard-rails (#124, #125), session-store bounds (#126), Manager TLS verification by default (#127)
-- [@MilkyWay88](https://github.com/MilkyWay88) and [@taylorwalton](https://github.com/taylorwalton) — early pull requests on configuration, logging and packaging
+- <img src="https://github.com/andrzej-piotrowski-pl.png?size=48" width="24" height="24" alt=""> [@andrzej-piotrowski-pl](https://github.com/andrzej-piotrowski-pl) — ISO 27001:2022 compliance tools: Annex A control mapping, domain scoring, gap analysis (#74)
+- <img src="https://github.com/blackwell-systems.png?size=48" width="24" height="24" alt=""> [@blackwell-systems](https://github.com/blackwell-systems) — opt-in GCF response encoding for record tools (#102, #104)
+- <img src="https://github.com/lucascruzb.png?size=48" width="24" height="24" alt=""> [@lucascruzb](https://github.com/lucascruzb) — period-wide alert aggregation via scroll, the basis of `get_alerts_aggregated` (#79)
+- <img src="https://github.com/kanylbullen.png?size=48" width="24" height="24" alt=""> [@kanylbullen](https://github.com/kanylbullen) — compact output mode for token-efficient responses (#65)
+- <img src="https://github.com/mouse-value-add.png?size=48" width="24" height="24" alt=""> [@mouse-value-add](https://github.com/mouse-value-add) — optional You.com web-search context (#85)
+- <img src="https://github.com/DrRSatzteil.png?size=48" width="24" height="24" alt=""> [@DrRSatzteil](https://github.com/DrRSatzteil) — `tools/list` pagination fix (#70)
+- <img src="https://github.com/SiM22.png?size=48" width="24" height="24" alt=""> [@SiM22](https://github.com/SiM22) — MCP 2025-06-18 support for Windsurf compatibility (#66)
+- <img src="https://github.com/aiunmukto.png?size=48" width="24" height="24" alt=""> [@aiunmukto](https://github.com/aiunmukto) — `.env.example` (#12), an early CI workflow and the Glama registry listing
+- <img src="https://github.com/Karibusan.png?size=48" width="24" height="24" alt=""> [@Karibusan](https://github.com/Karibusan) — dependency fixes (#38)
+- <img src="https://github.com/lwsinclair.png?size=48" width="24" height="24" alt=""> [@lwsinclair](https://github.com/lwsinclair) — MseeP.ai listing (#9)
+- <img src="https://github.com/markeclaudio.png?size=48" width="24" height="24" alt=""> [@markeclaudio](https://github.com/markeclaudio) — OpenID Connect sign-in (#123), active-response guard-rails (#124, #125), session-store bounds (#126), Manager TLS verification by default (#127)
+- <img src="https://github.com/MilkyWay88.png?size=48" width="24" height="24" alt=""> [@MilkyWay88](https://github.com/MilkyWay88) and <img src="https://github.com/taylorwalton.png?size=48" width="24" height="24" alt=""> [@taylorwalton](https://github.com/taylorwalton) — early pull requests on configuration, logging and packaging
 
 **Bug reports and discussions**
 
-[@cbassonbgroup](https://github.com/cbassonbgroup), [@cybersentinel-06](https://github.com/cybersentinel-06), [@daod-arshad](https://github.com/daod-arshad), [@mamema](https://github.com/mamema), [@marcolinux46](https://github.com/marcolinux46), [@matveevandrey](https://github.com/matveevandrey), [@punkpeye](https://github.com/punkpeye), [@tonyliu9189](https://github.com/tonyliu9189), [@Uberkarhu](https://github.com/Uberkarhu), [@bl4ck5w4n07](https://github.com/bl4ck5w4n07), [@gnix45](https://github.com/gnix45), [@hackdefendr](https://github.com/hackdefendr), [@melmasry1987](https://github.com/melmasry1987), [@Vasanth120v](https://github.com/Vasanth120v), [@wqfh](https://github.com/wqfh)
+<img src="https://github.com/cbassonbgroup.png?size=48" width="24" height="24" alt=""> [@cbassonbgroup](https://github.com/cbassonbgroup), <img src="https://github.com/cybersentinel-06.png?size=48" width="24" height="24" alt=""> [@cybersentinel-06](https://github.com/cybersentinel-06), <img src="https://github.com/daod-arshad.png?size=48" width="24" height="24" alt=""> [@daod-arshad](https://github.com/daod-arshad), <img src="https://github.com/mamema.png?size=48" width="24" height="24" alt=""> [@mamema](https://github.com/mamema), <img src="https://github.com/marcolinux46.png?size=48" width="24" height="24" alt=""> [@marcolinux46](https://github.com/marcolinux46), <img src="https://github.com/matveevandrey.png?size=48" width="24" height="24" alt=""> [@matveevandrey](https://github.com/matveevandrey), <img src="https://github.com/punkpeye.png?size=48" width="24" height="24" alt=""> [@punkpeye](https://github.com/punkpeye), <img src="https://github.com/tonyliu9189.png?size=48" width="24" height="24" alt=""> [@tonyliu9189](https://github.com/tonyliu9189), <img src="https://github.com/Uberkarhu.png?size=48" width="24" height="24" alt=""> [@Uberkarhu](https://github.com/Uberkarhu), <img src="https://github.com/bl4ck5w4n07.png?size=48" width="24" height="24" alt=""> [@bl4ck5w4n07](https://github.com/bl4ck5w4n07), <img src="https://github.com/gnix45.png?size=48" width="24" height="24" alt=""> [@gnix45](https://github.com/gnix45), <img src="https://github.com/hackdefendr.png?size=48" width="24" height="24" alt=""> [@hackdefendr](https://github.com/hackdefendr), <img src="https://github.com/melmasry1987.png?size=48" width="24" height="24" alt=""> [@melmasry1987](https://github.com/melmasry1987), <img src="https://github.com/Vasanth120v.png?size=48" width="24" height="24" alt=""> [@Vasanth120v](https://github.com/Vasanth120v), <img src="https://github.com/wqfh.png?size=48" width="24" height="24" alt=""> [@wqfh](https://github.com/wqfh)
 
 **Built on and works with**
 
