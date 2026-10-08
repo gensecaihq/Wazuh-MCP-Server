@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Security
+- **Operational endpoints can be limited to monitoring hosts.** `/health`, `/ready`, `/metrics` and the API docs are unauthenticated, and `/ready` and `/metrics` disclose the authentication mode, cluster IDs, session counts, Manager errors and per-tool usage to anything that reaches the port, including hosts that bypass the reverse proxy. New `OPS_ALLOWED_IPS` (IPs/CIDRs, validated at startup; a value that lists nothing is refused rather than treated as unset) limits them to the listed clients by connection address, never by forwarded headers; refused requests get the same `404` as an unknown path, and `/health` always answers loopback so the container healthcheck keeps working. Unset, nothing changes, and the server logs a warning in production.
+
+### Changed
+- **API docs are off by default in production.** `/docs`, `/docs/oauth2-redirect`, `/redoc` and `/openapi.json` return `404` when `ENVIRONMENT=production` unless `API_DOCS_ENABLED=true` (a strict boolean; an empty value means the default), and the OAuth metadata then omits `service_documentation` and `resource_documentation`. Development is unchanged.
+
 ## [5.0.0] - 2026-09-24
 
 Security and correctness release. Several defaults change and can stop an existing 4.x deployment from working until you act: the Manager certificate is verified, OAuth requires sign-in, write tools need `confirm=true` in production, bearer tokens must be re-minted once, and startup refuses invalid settings. Read [UPGRADING.md](https://github.com/gensecaihq/Wazuh-MCP-Server/blob/main/UPGRADING.md#upgrading-to-500) before upgrading.

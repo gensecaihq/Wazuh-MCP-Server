@@ -101,7 +101,7 @@ Use `/health` for container liveness and `/ready` for load-balancer or orchestra
 docker inspect wazuh-main-server --format '{{.State.Health.Status}}'
 ```
 
-`/health`, `/ready` and `/metrics` need no authentication, are not rate limited, and keep answering when memory is over the limit.
+`/health`, `/ready` and `/metrics` need no authentication, are not rate limited, and keep answering when memory is over the limit. To limit who can call them, set `OPS_ALLOWED_IPS` to your monitoring hosts (see [Operational endpoints](configuration.md#operational-endpoints)); `/health` always answers the container's own healthcheck.
 
 ## Metrics
 
@@ -205,10 +205,10 @@ trivy image wazuh-main-server:${VERSION:-5.0.0}
 | `/mcp` | `POST`, `GET`, `DELETE` | yes | Streamable HTTP MCP endpoint. Serves MCP 2026-07-28 statelessly, and 2024-11-05 through 2025-11-25 with `initialize` and `MCP-Session-Id`. `DELETE` ends a session (`204`, or `404` if unknown) |
 | `/` | `POST`, `GET` | yes | Same JSON-RPC handling as `/mcp`, kept for older clients |
 | `/auth/token` | `POST` | API key in body | Exchanges `{"api_key": "wazuh_..."}` for a JWT (bearer mode) |
-| `/health` | `GET` | no | Liveness |
-| `/ready` | `GET` | no | Readiness (cached 5 s) |
-| `/metrics` | `GET` | no | Prometheus metrics |
-| `/docs`, `/redoc`, `/openapi.json` | `GET` | no | OpenAPI documentation |
+| `/health` | `GET` | no | Liveness. Limited by `OPS_ALLOWED_IPS` when set (loopback always allowed) |
+| `/ready` | `GET` | no | Readiness (cached 5 s). Limited by `OPS_ALLOWED_IPS` when set |
+| `/metrics` | `GET` | no | Prometheus metrics. Limited by `OPS_ALLOWED_IPS` when set |
+| `/docs`, `/redoc`, `/openapi.json` | `GET` | no | OpenAPI documentation. Off by default in production (`API_DOCS_ENABLED`); limited by `OPS_ALLOWED_IPS` when set |
 | `/sse` | `GET`, `POST` | no | Always `410 Gone`. The legacy HTTP+SSE transport was removed; use `/mcp` |
 | `/.well-known/oauth-authorization-server` | `GET` | no | RFC 8414 metadata (`404` unless `AUTH_MODE=oauth`) |
 | `/.well-known/oauth-protected-resource` | `GET` | no | RFC 9728 metadata (`404` unless `AUTH_MODE=oauth`) |

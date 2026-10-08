@@ -6,6 +6,7 @@ Production-ready with Streamable HTTP and legacy SSE transport, authentication, 
 """
 
 import asyncio
+import ipaddress
 import json
 import logging
 import math
@@ -18,6 +19,7 @@ import uuid
 from collections import OrderedDict
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone
+from functools import lru_cache
 from typing import Any, Dict, List, Literal, Optional, Tuple, Union
 from urllib.parse import urlparse
 
@@ -744,6 +746,16 @@ async def lifespan(app: FastAPI):
             "Deploy a single worker (or a shared store) so revocation and rate limits stay consistent."
         )
 
+    # Operational endpoints are unauthenticated by design; say who can reach them
+    if cfg.OPS_ALLOWED_IPS:
+        logger.info(f"🔒 /health, /ready, /metrics and API docs limited to: {', '.join(cfg.OPS_ALLOWED_IPS)}")
+    elif cfg.ENVIRONMENT == "production":
+        logger.warning(
+            "⚠️  OPS_ALLOWED_IPS is not set: /ready and /metrics answer any client that reaches the server "
+            "(component status, tool usage counts). Set it to your monitoring hosts, or block these paths "
+            "at the reverse proxy."
+        )
+
     # Initialize Wazuh client (will be available after yield)
     logger.info("✅ Server startup complete with high availability features enabled")
 
@@ -984,11 +996,84 @@ def validate_origin_header(origin: Optional[str], allowed_origins_config: str) -
     raise HTTPException(status_code=403, detail=f"Origin not allowed: {origin}")
 
 
+# Operational endpoints: unauthenticated by design (liveness/readiness probes, Prometheus,
+# API docs), so the only control is who can reach them. OPS_ALLOWED_IPS limits them to the
+# listed clients; API_DOCS_ENABLED switches the docs off entirely.
+OPS_PATHS = frozenset({"/health", "/ready", "/metrics"})
+API_DOCS_PATHS = frozenset({"/docs", "/docs/oauth2-redirect", "/redoc", "/openapi.json"})
+
+
+@lru_cache(maxsize=8)
+def _ops_networks(entries: Tuple[str, ...]) -> Tuple[Any, ...]:
+    """Parsed networks for an OPS_ALLOWED_IPS tuple (validated in ServerConfig.from_env)."""
+    return tuple(ipaddress.ip_network(entry, strict=False) for entry in entries)
+
+
+def _request_client_address(request: Request) -> Optional[Any]:
+    """The client address the ASGI server reports, as an ip_address (None if unknown).
+
+    This is the TCP peer. Headers such as X-Forwarded-For are not read here: uvicorn only
+    substitutes them for the peer when the connection comes from one of its
+    FORWARDED_ALLOW_IPS (loopback by default), i.e. from a proxy on the same host.
+    """
+    client = request.scope.get("client")
+    if not client or not client[0]:
+        return None
+    try:
+        address = ipaddress.ip_address(str(client[0]).split("%", 1)[0])
+    except ValueError:
+        return None
+    return getattr(address, "ipv4_mapped", None) or address
+
+
+def _ops_route_path(request: Request) -> str:
+    """The path the router matches: root_path removed, trailing slashes ignored.
+
+    Matching the raw scope path would let "/api/metrics" (root_path "/api") or "/metrics/"
+    (redirected to /metrics) slip past the checks below.
+    """
+    path = request.scope.get("path", "") or ""
+    root_path = request.scope.get("root_path", "") or ""
+    if root_path and path.startswith(root_path):
+        path = path[len(root_path) :]
+    return path.rstrip("/") or "/"
+
+
+def _ops_access_allowed(path: str, request: Request, cfg: Any) -> bool:
+    """Whether this request may reach an operational endpoint (see OPS_PATHS / API_DOCS_PATHS)."""
+    if path in API_DOCS_PATHS and not cfg.API_DOCS_ENABLED:
+        return False
+    if not cfg.OPS_ALLOWED_IPS:
+        return True  # not configured: unchanged behaviour, any client
+    address = _request_client_address(request)
+    if address is None:
+        return False
+    if path == "/health" and address.is_loopback:
+        return True  # the container healthcheck probes localhost; never lock it out
+    return any(address in network for network in _ops_networks(cfg.OPS_ALLOWED_IPS))
+
+
+async def ops_endpoint_guard(request: Request, call_next):
+    """Answer a refused operational request exactly like an unknown path (404, no hint).
+
+    Registered as the innermost middleware, so a refused request still passes the security
+    and monitoring middleware and carries the same headers as any other 404.
+    """
+    path = _ops_route_path(request)
+    if (path in OPS_PATHS or path in API_DOCS_PATHS) and not _ops_access_allowed(path, request, config):
+        return JSONResponse({"detail": "Not Found"}, status_code=404)
+    return await call_next(request)
+
+
+# Innermost middleware first: Starlette runs the last registered one outermost
+app.middleware("http")(ops_endpoint_guard)
+
 # Register monitoring middleware for request tracking and correlation IDs
 app.middleware("http")(setup_monitoring_middleware())
 
 # Register security middleware for security headers and request validation
 app.middleware("http")(security_middleware)
+
 
 allowed_origins = validate_cors_origins(config.ALLOWED_ORIGINS)
 
@@ -4530,15 +4615,16 @@ async def oauth_protected_resource_metadata(request: Request):
         raise HTTPException(status_code=404, detail="OAuth not enabled. Set AUTH_MODE=oauth to enable.")
 
     issuer = _oauth_manager.get_issuer_url(request)
-    return JSONResponse(
-        {
-            "resource": f"{issuer}/mcp",
-            "authorization_servers": [issuer],
-            "bearer_methods_supported": ["header"],
-            "scopes_supported": ["wazuh:read", "wazuh:write"],
-            "resource_documentation": f"{issuer}/docs",
-        }
-    )
+    metadata = {
+        "resource": f"{issuer}/mcp",
+        "authorization_servers": [issuer],
+        "bearer_methods_supported": ["header"],
+        "scopes_supported": ["wazuh:read", "wazuh:write"],
+    }
+    # Only point clients at /docs while it answers (API_DOCS_ENABLED), like service_documentation.
+    if config.API_DOCS_ENABLED:
+        metadata["resource_documentation"] = f"{issuer}/docs"
+    return JSONResponse(metadata)
 
 
 # Authentication endpoint for API key validation

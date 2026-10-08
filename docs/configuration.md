@@ -174,6 +174,22 @@ The `OAUTH_IDP_*` settings are validated at startup whenever `OAUTH_IDP_ISSUER` 
 
 `/mcp` and `/` apply `RATE_LIMIT_REQUESTS` per `RATE_LIMIT_WINDOW` to each authenticated principal and client IP; other routes apply it per client IP. Failed authentication attempts count against a per-IP bucket of the same size. Over-limit requests get `429 Rate limit exceeded` with a `Retry-After` header. `/health`, `/ready` and `/metrics` are never rate limited.
 
+### Operational endpoints
+
+`/health`, `/ready`, `/metrics` and the API docs (`/docs`, `/docs/oauth2-redirect`, `/redoc`, `/openapi.json`) need no authentication, so that probes and scrapers work. `/ready` reports the authentication mode, cluster IDs, session counts and why the Manager is unreachable; `/metrics` reports per-tool usage; `/health` reports the exact version.
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `OPS_ALLOWED_IPS` | *(none)* | Comma-separated IPs or CIDR networks allowed to call these endpoints, for example `192.168.130.10,10.0.0.0/8`. Unset or empty, any client can. Set, other clients get the same `404` as an unknown path. `/health` also always answers loopback, so the container healthcheck keeps working. An entry that is not an address or network, or a value with no entries at all (such as `,`), fails startup |
+| `API_DOCS_ENABLED` | `false` when `ENVIRONMENT=production`, `true` otherwise | *Strict.* Serve `/docs`, `/docs/oauth2-redirect`, `/redoc` and `/openapi.json`. When off they return `404` for every client. An empty value means "use the default" |
+
+The check uses the address of the TCP connection, never `X-Forwarded-For` or `X-Real-IP`, because a client can set those headers itself. uvicorn replaces the connection address with the forwarded one only for connections from its `FORWARDED_ALLOW_IPS` (loopback by default), that is, from a proxy on the same host. What this means for your setup:
+
+- **Behind a reverse proxy,** requests arrive from the proxy's address, or, when the server runs in Docker and the proxy on the same host, from the Docker network gateway (for example `172.18.0.1`). Listing that address lets every client of the proxy through, so filter these paths at the proxy by client address, and use `OPS_ALLOWED_IPS` to stop anything that bypasses the proxy (other hosts reaching the container port directly).
+- **A proxy that connects over loopback** (server outside Docker, or in the host network namespace) is the one case where uvicorn uses `X-Forwarded-For`, taking the right-most address its proxy did not add. That proxy must set the header itself (nginx: `proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;` or `$remote_addr`). A proxy that passes the client's own header through unchanged lets any client claim a listed address, and one that sends no header makes every request look like loopback, which `/health` always accepts.
+- **Prometheus or a load balancer** that calls the server directly: list its address.
+- **Checks run on the Docker host** (`curl http://localhost:3000/ready`, `deploy.py`, `deploy-production.sh`) reach the container from the Docker network gateway, not from loopback. List the gateway, or run them inside the container: `docker compose exec wazuh-main-server curl -s http://localhost:3000/ready`.
+
 ## Sessions
 
 | Variable | Default | Description |

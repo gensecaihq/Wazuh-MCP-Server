@@ -6,7 +6,7 @@ import logging
 import os
 import ssl
 from dataclasses import dataclass
-from typing import FrozenSet, Optional, Union
+from typing import FrozenSet, Optional, Tuple, Union
 
 from wazuh_mcp_server.toolsets import ALL_TOOLS, resolve_enabled_tools
 
@@ -91,6 +91,25 @@ def validate_positive_int(value: str, name: str, max_val: Optional[int] = None) 
         return num
     except ValueError:
         raise ConfigurationError(f"{name} must be a valid integer, got '{value}'")
+
+
+def parse_ip_allowlist(raw: Optional[str], name: str) -> Tuple[str, ...]:
+    """Parse a comma-separated list of IP addresses and CIDR networks.
+
+    Returns the networks in normalised form ("10.0.0.5" -> "10.0.0.5/32"); empty entries are
+    skipped. An entry that is neither an address nor a network raises ConfigurationError, so
+    a typo fails at startup instead of silently leaving an endpoint open or closed.
+    """
+    networks = []
+    for token in (raw or "").split(","):
+        token = token.strip()
+        if not token:
+            continue
+        try:
+            networks.append(str(ipaddress.ip_network(token, strict=False)))
+        except ValueError:
+            raise ConfigurationError(f"{name}: '{token}' is not an IP address or CIDR network") from None
+    return tuple(networks)
 
 
 _ENVIRONMENTS = {"development": "development", "dev": "development", "production": "production", "prod": "production"}
@@ -322,6 +341,11 @@ class ServerConfig:
     # Deployment environment: "development" | "production"
     ENVIRONMENT: str = "development"
 
+    # Operational endpoints (/health, /ready, /metrics, API docs): who may call them, and
+    # whether the API docs are served at all. Empty OPS_ALLOWED_IPS = any client.
+    OPS_ALLOWED_IPS: Tuple[str, ...] = ()
+    API_DOCS_ENABLED: bool = True
+
     @classmethod
     def from_env(cls) -> "ServerConfig":
         """Create configuration from environment variables with validation."""
@@ -427,6 +451,22 @@ class ServerConfig:
             if os.getenv(switch, "").strip():
                 env_bool(switch, False)
 
+        ops_allowed_raw = os.getenv("OPS_ALLOWED_IPS", "")
+        ops_allowed_ips = parse_ip_allowlist(ops_allowed_raw, "OPS_ALLOWED_IPS")
+        # Empty means unset (any client), as for the other settings. A value that is present but
+        # yields no address (",", " , ") is a mistake that would silently leave the endpoints open.
+        if ops_allowed_raw.strip() and not ops_allowed_ips:
+            raise ConfigurationError(
+                "OPS_ALLOWED_IPS is set but lists no IP address or network. "
+                "List at least one, or leave it empty to allow any client."
+            )
+        # API docs default to off in production; an explicit setting always wins, and an empty
+        # value means "use the default" (a blank line in .env must not switch them on)
+        if os.getenv("API_DOCS_ENABLED", "").strip():
+            api_docs_enabled = env_bool("API_DOCS_ENABLED", False)
+        else:
+            api_docs_enabled = environment != "production"
+
         try:
             enabled_tools = resolve_enabled_tools(os.getenv("WAZUH_TOOLSETS"), os.getenv("WAZUH_DISABLED_TOOLS"))
         except ValueError as e:
@@ -494,6 +534,8 @@ class ServerConfig:
             ENABLED_TOOLS=enabled_tools,
             LOG_LEVEL=log_level,
             ENVIRONMENT=environment,
+            OPS_ALLOWED_IPS=ops_allowed_ips,
+            API_DOCS_ENABLED=api_docs_enabled,
         )
 
         # External identity provider (AUTH_MODE=oauth): fail fast on an unusable setup

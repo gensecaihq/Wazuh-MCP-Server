@@ -1,5 +1,15 @@
 # Upgrading
 
+## Upgrading to the next release
+
+### API docs are off in production
+
+With `ENVIRONMENT=production` (the Docker image and `compose.yml` default), `/docs`, `/docs/oauth2-redirect`, `/redoc` and `/openapi.json` now return `404`, and the OAuth metadata no longer lists `service_documentation`. Nothing that talks MCP uses them. If you rely on them, set `API_DOCS_ENABLED=true`, ideally together with `OPS_ALLOWED_IPS`.
+
+### Optional: limit the operational endpoints
+
+`OPS_ALLOWED_IPS` is new and unset by default, so `/health`, `/ready` and `/metrics` behave as before; in production the server logs a warning at startup. Set it to the addresses of your Prometheus server and load balancer. `/health` keeps answering the container's own healthcheck. See [Operational endpoints](docs/configuration.md#operational-endpoints) for how it interacts with a reverse proxy.
+
 ## Upgrading to 5.0.0
 
 These changes are listed under 5.0.0 in [CHANGELOG.md](CHANGELOG.md). Most are fixes; the sections below cover the ones that need action or change what clients see. Sections 1 to 3 can stop an existing deployment from working until you act.
