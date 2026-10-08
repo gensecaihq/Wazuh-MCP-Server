@@ -4615,15 +4615,16 @@ async def oauth_protected_resource_metadata(request: Request):
         raise HTTPException(status_code=404, detail="OAuth not enabled. Set AUTH_MODE=oauth to enable.")
 
     issuer = _oauth_manager.get_issuer_url(request)
-    return JSONResponse(
-        {
-            "resource": f"{issuer}/mcp",
-            "authorization_servers": [issuer],
-            "bearer_methods_supported": ["header"],
-            "scopes_supported": ["wazuh:read", "wazuh:write"],
-            "resource_documentation": f"{issuer}/docs",
-        }
-    )
+    metadata = {
+        "resource": f"{issuer}/mcp",
+        "authorization_servers": [issuer],
+        "bearer_methods_supported": ["header"],
+        "scopes_supported": ["wazuh:read", "wazuh:write"],
+    }
+    # Only point clients at /docs while it answers (API_DOCS_ENABLED), like service_documentation.
+    if config.API_DOCS_ENABLED:
+        metadata["resource_documentation"] = f"{issuer}/docs"
+    return JSONResponse(metadata)
 
 
 # Authentication endpoint for API key validation

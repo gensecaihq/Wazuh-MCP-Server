@@ -202,6 +202,23 @@ class TestApiDocsSwitch:
         assert ("service_documentation" in manager.get_metadata(request)) is docs
 
     @pytest.mark.asyncio
+    @pytest.mark.parametrize("docs", [True, False])
+    async def test_protected_resource_metadata_links_docs_only_when_served(self, monkeypatch, docs):
+        """RFC 9728 resource_documentation is advertised only when /docs answers."""
+        from types import SimpleNamespace
+
+        _configure(monkeypatch, docs=docs)
+        monkeypatch.setattr(mcp_server, "config", dataclasses.replace(mcp_server.config, AUTH_MODE="oauth"))
+        monkeypatch.setattr(
+            mcp_server, "_oauth_manager", SimpleNamespace(get_issuer_url=lambda request: "https://mcp.example")
+        )
+        response = await _get("/.well-known/oauth-protected-resource", OUTSIDER)
+        assert response.status_code == 200
+        body = response.json()
+        assert body["resource"] == "https://mcp.example/mcp"
+        assert body.get("resource_documentation") == ("https://mcp.example/docs" if docs else None)
+
+    @pytest.mark.asyncio
     async def test_docs_off_leaves_probes_alone(self, monkeypatch):
         """Switching docs off does not touch /health or /metrics."""
         _configure(monkeypatch, docs=False)
